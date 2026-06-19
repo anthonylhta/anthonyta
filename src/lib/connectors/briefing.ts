@@ -1,4 +1,4 @@
-import { JWT } from "google-auth-library";
+import { driveToken } from "@/lib/google";
 import type { Briefing } from "@/lib/sampleBriefing";
 
 /**
@@ -14,36 +14,11 @@ import type { Briefing } from "@/lib/sampleBriefing";
 
 const START = "<<<BRIEFING_JSON>>>";
 const END = "<<<END_BRIEFING_JSON>>>";
-const SCOPES = ["https://www.googleapis.com/auth/drive.readonly"];
-
-function serviceAccount() {
-  const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_B64;
-  if (!b64) return null;
-  try {
-    const j = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
-    if (!j.client_email || !j.private_key) return null;
-    return j as { client_email: string; private_key: string };
-  } catch {
-    return null;
-  }
-}
-
-let jwt: JWT | null = null;
-function auth(): JWT | null {
-  if (jwt) return jwt;
-  const c = serviceAccount();
-  if (!c) return null;
-  jwt = new JWT({ email: c.client_email, key: c.private_key, scopes: SCOPES });
-  return jwt;
-}
 
 async function fetchNewestDoc(): Promise<string | null> {
-  const client = auth();
+  const token = await driveToken();
   const folderId = process.env.BRIEFING_FOLDER_ID;
-  if (!client || !folderId) return null;
-
-  const { token } = await client.getAccessToken();
-  if (!token) return null;
+  if (!token || !folderId) return null;
   const headers = { Authorization: `Bearer ${token}` };
 
   const q = encodeURIComponent(
