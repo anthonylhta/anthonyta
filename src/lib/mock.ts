@@ -9,9 +9,8 @@ export const me = {
   tagline: "builder · languages · markets",
 } as const;
 
-/** TODO(connector: translator) — JP immersion streak from tone-translator usage */
+/** `build` is still placeholder; the JP streak is now live (connector: translator). */
 export const now = {
-  jpStreakDays: 41,
   build: { value: 83, max: 100 }, // placeholder "site build" progress
 };
 
