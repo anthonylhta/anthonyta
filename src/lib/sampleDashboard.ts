@@ -2,28 +2,7 @@
 // DEMO values (not real) — the real figures come from the CMC CSV parser at
 // runtime, server-side, and are never committed. Replaced by real connectors.
 
-export interface Holding {
-  code: string;
-  units: number;
-  last: number;
-  value: number; // Market Value AUD
-  cost: number; // Cost AUD
-  dayGain: number; // Day Gain AUD
-  pnl: number; // P&L AUD
-  pnlPct: number; // P&L %
-}
-
-export interface Portfolio {
-  asOf: string;
-  holdings: Holding[]; // value desc
-  totals: {
-    value: number;
-    cost: number;
-    dayGain: number;
-    pnl: number;
-    pnlPct: number;
-  };
-}
+import type { Portfolio } from "@/lib/portfolio";
 
 export const samplePortfolio: Portfolio = {
   asOf: "demo",
