@@ -82,7 +82,18 @@ export async function CommandCenter({ userName }: { userName: string }) {
             </p>
           </Module>
 
-          <Module label="languages" className="border-0">
+          <Module
+            label="languages"
+            className="border-0"
+            action={
+              <Link
+                href="/translator"
+                className="text-xs text-amber hover:underline"
+              >
+                [open]
+              </Link>
+            }
+          >
             <p className="text-fg">
               {lang.total} translations{" "}
               <span className="text-muted">· {lang.streakDays}d streak</span>
