@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 
-function jstNow(): string {
+function sydneyNow(): string {
   return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Tokyo",
+    timeZone: "Australia/Sydney",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -12,7 +12,7 @@ function jstNow(): string {
 }
 
 /**
- * Top bar of the terminal shell: name, live JST clock, and a session indicator.
+ * Top bar of the terminal shell: name, live Sydney clock, and a session indicator.
  * `user` is "guest" on the public lobby; the private command center passes the
  * signed-in handle (ADR 0004).
  */
@@ -20,7 +20,7 @@ export function StatusBar({ user = "guest" }: { user?: string }) {
   const [time, setTime] = useState("--:--");
 
   useEffect(() => {
-    const tick = () => setTime(jstNow());
+    const tick = () => setTime(sydneyNow());
     tick();
     const id = setInterval(tick, 15_000);
     return () => clearInterval(id);
@@ -41,7 +41,7 @@ export function StatusBar({ user = "guest" }: { user?: string }) {
         </span>
         <span className="text-hairline">·</span>
         <span>
-          <span className="text-muted/70">tokyo</span> {time}
+          <span className="text-muted/70">sydney</span> {time}
         </span>
       </span>
     </div>
