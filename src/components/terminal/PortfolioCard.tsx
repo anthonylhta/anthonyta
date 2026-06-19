@@ -1,5 +1,5 @@
 import { Bar } from "@/components/terminal/Bar";
-import type { Portfolio } from "@/lib/sampleDashboard";
+import type { Portfolio } from "@/lib/portfolio";
 
 const aud = (n: number) =>
   n.toLocaleString("en-AU", { style: "currency", currency: "AUD" });

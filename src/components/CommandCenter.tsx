@@ -3,11 +3,14 @@ import { SignOut } from "@/components/auth-buttons";
 import { Module } from "@/components/terminal/Module";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { getPortfolio } from "@/lib/connectors/portfolio";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
 
 /** Your private daily driver — what `/` becomes when you're logged in (ADR 0004). */
-export function CommandCenter({ userName }: { userName: string }) {
+export async function CommandCenter({ userName }: { userName: string }) {
+  const portfolio = (await getPortfolio()) ?? samplePortfolio;
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
@@ -21,7 +24,7 @@ export function CommandCenter({ userName }: { userName: string }) {
         </div>
 
         {/* portfolio — the centerpiece */}
-        <PortfolioCard p={samplePortfolio} />
+        <PortfolioCard p={portfolio} />
 
         {/* briefing's take on your portfolio (the unlocked private block) */}
         <div className="border-b border-hairline px-4 py-4">
