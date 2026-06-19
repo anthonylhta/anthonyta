@@ -3,13 +3,19 @@ import { SignOut } from "@/components/auth-buttons";
 import { Module } from "@/components/terminal/Module";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { getBriefing } from "@/lib/connectors/briefing";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
 
 /** Your private daily driver — what `/` becomes when you're logged in (ADR 0004). */
 export async function CommandCenter({ userName }: { userName: string }) {
-  const portfolio = (await getPortfolio()) ?? samplePortfolio;
+  const [portfolioData, briefing] = await Promise.all([
+    getPortfolio(),
+    getBriefing(),
+  ]);
+  const portfolio = portfolioData ?? samplePortfolio;
+  const portfolioTake = briefing?.portfolio ?? sampleBriefing.portfolio;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -37,7 +43,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
               full →
             </Link>
           </div>
-          <p className="text-sm text-fg/90">{sampleBriefing.portfolio}</p>
+          <p className="text-sm text-fg/90">{portfolioTake}</p>
         </div>
 
         {/* the rest of your life */}

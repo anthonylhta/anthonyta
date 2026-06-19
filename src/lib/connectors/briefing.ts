@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { driveToken } from "@/lib/google";
 import type { Briefing } from "@/lib/sampleBriefing";
 
@@ -73,11 +74,27 @@ export function parseBriefing(text: string): Briefing | null {
   }
 }
 
-export async function getBriefing(): Promise<Briefing | null> {
-  try {
+/**
+ * Cached at the DATA layer (not the page) so every surface — the public lobby,
+ * the command center, and `/briefing` — shares one Drive read and stays fast even
+ * though they all render dynamically (each reads the session). The `Authorization`
+ * header changes per call, so caching the function result rather than the `fetch`
+ * is what actually keys stably. Refreshed each morning by the cron via
+ * `revalidateTag("briefing")` (ADR 0010, 0013-era data-cache shift).
+ */
+const loadBriefing = unstable_cache(
+  async (): Promise<Briefing | null> => {
     const text = await fetchNewestDoc();
     if (!text) return null;
     return parseBriefing(text);
+  },
+  ["briefing"],
+  { revalidate: 600, tags: ["briefing"] },
+);
+
+export async function getBriefing(): Promise<Briefing | null> {
+  try {
+    return await loadBriefing();
   } catch (err) {
     console.error("[connector:briefing] failed", err);
     return null;
