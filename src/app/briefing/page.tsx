@@ -1,20 +1,25 @@
 import Link from "next/link";
+import { auth } from "@/auth";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 
-// Live from the Drive briefing; cached 10 min (ADR 0003, 0009).
-export const revalidate = 600;
-
+// Public market briefing for everyone; the owner also sees the private "portfolio
+// relevance" note. Reading the session makes this route dynamic — the briefing
+// data is cached at the connector (tag "briefing"), so it stays fast (ADR 0003, 0009).
 export default async function BriefingPage() {
-  const b = (await getBriefing()) ?? sampleBriefing;
+  const [session, briefing] = await Promise.all([auth(), getBriefing()]);
+  const b = briefing ?? sampleBriefing;
+  const isOwner = !!session?.user;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
-        <StatusBar user="guest" />
+        <StatusBar
+          user={isOwner ? (session?.user?.name ?? "anthony") : "guest"}
+        />
 
         <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-xs">
           <Link href="/" className="text-muted hover:text-amber">
@@ -89,18 +94,24 @@ export default async function BriefingPage() {
           ))}
         </div>
 
-        {/* private — portfolio relevance (locked; never sent to the public page) */}
+        {/* portfolio relevance — owner-only. The text is rendered only when it's
+            the owner, so it never reaches a guest's HTML. */}
         <div className="border-t border-hairline px-4 py-4">
           <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
             <span>portfolio relevance</span>
             <span className="rounded border border-hairline px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-amber">
-              🔒 private
+              {isOwner ? "private" : "🔒 private"}
             </span>
           </div>
-          <div className="rounded border border-dashed border-hairline px-4 py-5 text-sm text-muted">
-            How today maps to your portfolio — visible when you&apos;re signed
-            in.
-          </div>
+          {isOwner && b.portfolio ? (
+            <p className="text-sm text-fg/90">{b.portfolio}</p>
+          ) : (
+            <div className="rounded border border-dashed border-hairline px-4 py-5 text-sm text-muted">
+              {isOwner
+                ? "No portfolio note in today's briefing yet."
+                : "How today maps to your portfolio — visible when you're signed in."}
+            </div>
+          )}
         </div>
 
         {/* sources */}
@@ -127,7 +138,7 @@ export default async function BriefingPage() {
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
-        ingested daily via Google Drive
+        refreshed every morning before the open
       </p>
     </main>
   );
