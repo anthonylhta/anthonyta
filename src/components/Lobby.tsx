@@ -128,25 +128,39 @@ export async function Lobby() {
         {/* nav */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
           <nav className="flex gap-4 text-sm">
-            {nav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="text-muted transition-colors hover:text-amber"
-              >
-                {item.label}/
-              </Link>
-            ))}
+            {nav.map((item) =>
+              item.ready ? (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="text-muted transition-colors hover:text-amber"
+                >
+                  {item.label}/
+                </Link>
+              ) : (
+                <span
+                  key={item.href}
+                  className="cursor-default text-muted/40"
+                  title="coming soon"
+                  aria-disabled="true"
+                >
+                  {item.label}/
+                </span>
+              ),
+            )}
           </nav>
           <CommandPalette
             items={[
-              ...nav.map((n) => ({ label: n.label, href: n.href })),
+              { label: "briefing", href: "/briefing", hint: "markets" },
               { label: "today's hand", href: "/riichi", hint: "riichi" },
               {
                 label: "tone translator",
                 href: "/translator",
                 hint: "japanese",
               },
+              ...nav
+                .filter((n) => n.ready)
+                .map((n) => ({ label: n.label, href: n.href })),
             ]}
           />
         </div>
