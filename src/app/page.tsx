@@ -3,6 +3,7 @@ import { Bar } from "@/components/terminal/Bar";
 import { CommandPalette } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { getHandOfTheDay } from "@/lib/connectors/riichi";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import {
   briefing,
@@ -13,12 +14,20 @@ import {
   riichi,
 } from "@/lib/mock";
 
-// Reading is live from webnovelist's Supabase; cache for 10 min (ADR 0003, 0006).
+// Live data (reading + today's hand), cached 10 min (ADR 0003, 0006, 0007).
 export const revalidate = 600;
 
 export default async function Home() {
-  const reads = await getCurrentlyReading();
+  const [reads, hand] = await Promise.all([
+    getCurrentlyReading(),
+    getHandOfTheDay(),
+  ]);
   const top = reads[0];
+  const handTeaser = hand
+    ? hand.bestShanten === 0
+      ? `tenpai · ${hand.ukeire} ukeire`
+      : `${hand.bestShanten}-shanten · ${hand.ukeire} ukeire`
+    : `hand #${riichi.handNo}`;
   const reading = top
     ? {
         title: top.title,
@@ -90,14 +99,11 @@ export default async function Home() {
             }
           >
             <div className="space-y-1">
-              <p className="text-muted">
-                hand <span className="text-fg">#{riichi.handNo}</span>
-              </p>
+              <p className="text-fg">{handTeaser}</p>
               <p className="text-xs text-muted">
                 <span lang="ja" className="font-[family-name:var(--font-jp)]">
                   本日の一手
-                </span>{" "}
-                — {riichi.solved ? "solved ✓" : "unsolved"}
+                </span>
               </p>
             </div>
           </Module>
