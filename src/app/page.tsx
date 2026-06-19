@@ -3,25 +3,23 @@ import { Bar } from "@/components/terminal/Bar";
 import { CommandPalette } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { Tape } from "@/components/terminal/Tape";
+import { getBriefing } from "@/lib/connectors/briefing";
 import { getHandOfTheDay } from "@/lib/connectors/riichi";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
-import {
-  briefing,
-  me,
-  nav,
-  now,
-  reading as mockReading,
-  riichi,
-} from "@/lib/mock";
+import { sampleBriefing } from "@/lib/sampleBriefing";
+import { me, nav, now, reading as mockReading, riichi } from "@/lib/mock";
 
 // Live data (reading + today's hand), cached 10 min (ADR 0003, 0006, 0007).
 export const revalidate = 600;
 
 export default async function Home() {
-  const [reads, hand] = await Promise.all([
+  const [reads, hand, briefingData] = await Promise.all([
     getCurrentlyReading(),
     getHandOfTheDay(),
+    getBriefing(),
   ]);
+  const briefing = briefingData ?? sampleBriefing;
   const top = reads[0];
   const handTeaser = hand
     ? hand.bestShanten === 0
@@ -110,21 +108,23 @@ export default async function Home() {
         </div>
 
         {/* briefing */}
-        <div className="border-t border-hairline px-4 py-4">
+        <Link
+          href="/briefing"
+          className="block border-t border-hairline px-4 py-4 transition-colors hover:bg-surface/30"
+        >
           <div className="mb-2 flex items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-muted">
             <span>briefing</span>
             <span className="h-px flex-1 bg-hairline" />
-            <span className="tabular-nums">{briefing.date}</span>
+            <span className="tabular-nums">
+              {briefing.weekday} {briefing.date}
+            </span>
           </div>
-          <ul className="space-y-1 text-sm">
-            {briefing.items.map((item) => (
-              <li key={item} className="flex gap-2">
-                <span className="text-amber">•</span>
-                <span className="text-fg/90">{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+          <Tape items={briefing.tape.slice(0, 8)} />
+          <p className="mt-3 flex items-baseline justify-between gap-3 text-sm">
+            <span className="text-fg/90">driving: {briefing.driver}</span>
+            <span className="shrink-0 text-xs text-amber">full briefing →</span>
+          </p>
+        </Link>
 
         {/* nav */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
