@@ -138,7 +138,7 @@ export default async function BriefingPage() {
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
-        ingested daily via Google Drive
+        refreshed every morning before the open
       </p>
     </main>
   );
