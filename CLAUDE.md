@@ -47,27 +47,30 @@ Ground ADRs in the actual code.
 ## Stack
 
 - Next.js 16 (App Router, React 19), TypeScript · Tailwind v4
-- Hub DB: **Neon** (serverless Postgres) — site-only data: finance briefings, the weekly
-  digest, garden metadata, single-user auth. (Not yet wired — ADR 0001.)
-- AI: Claude via the **Vercel AI Gateway** (briefings, digest, coaching). (Not yet wired.)
-- Hosting: Vercel.
+- Auth: **Auth.js v5 (next-auth) + GitHub**, allow-listed to one account (ADR 0011).
+- **Google Drive ingestion** via a read-only service account (`lib/google.ts`) for the daily
+  briefing + the portfolio CSV — the hub never calls a model, zero token cost (ADR 0009, 0012).
+- Hosting: **Vercel** (`anthonyta.dev`, auto-deploy on merge); DNS on Cloudflare (ADR 0008).
+- No hub DB yet — a Neon hub DB stays an option if a write-feature ever needs one (ADR 0001).
 
 ## Architecture
 
 - **Connector pattern (ADR 0003):** each of Anthony's projects is a read-only data source.
   `src/lib/connectors/<key>.ts` reads ONE source and returns a normalized shape; the hub
   never writes to a project DB. Adding a project = adding a connector. Sources:
-  | key | source | gives |
-  |---|---|---|
-  | `webnovel` | Supabase (`webnovelist`) | reading shelf, stats |
-  | `translator` | Supabase (`tone-translator`) | vocab, JP language stats |
-  | `riichi` | Neon (`riichi`) | hand of the day, streaks |
-  | `finance` | hub DB / `risk_first_paper_bot` | daily briefing, portfolio |
-- Until a source is wired, the homepage renders `src/lib/mock.ts`. Swapping a mock field
-  for `await connector.fetch()` is the whole migration, per feature.
-- **Public lobby vs private command center (ADR 0004):** same terminal shell, two modes.
-  `StatusBar user="guest"` is public; signed-in passes the handle. Private auth is
-  single-user (it's just Anthony) — do not overbuild it.
+  | key | source | gives | status |
+  |---|---|---|---|
+  | `webnovel` | Supabase (`webnovelist`) | reading shelf | ✅ |
+  | `riichi` | Neon (`riichi`) | hand of the day (native re-render + inline grade) | ✅ |
+  | `briefing` | Google Drive (Claude app → daily doc) | markets briefing | ✅ |
+  | `portfolio` | Google Drive (CMC ProfitLoss CSV) | holdings, P&L (private) | ✅ |
+  | `translator` | Supabase (`tone-translator`) | vocab, JP language stats | ⬚ next |
+- Each connector is guarded → falls back to placeholder data (`mock.ts`, `sampleBriefing.ts`,
+  `sampleDashboard.ts`) on missing env / error, so CI builds stay green.
+- **Adaptive `/` — public lobby vs private command center (ADR 0004, 0011):** `app/page.tsx`
+  reads the session — signed in → `<CommandCenter>` (portfolio, briefing take, streaks), else
+  → `<Lobby>` (the public face). Single-user GitHub auth, no sign-up. The command center's
+  private data (the portfolio) is never rendered publicly or committed.
 
 ## Local dev (WSL)
 
@@ -92,8 +95,9 @@ Ground ADRs in the actual code.
 - `.claude/` hooks: `format-edited-file.cjs` (prettier on every edit), `pre-pr-check.cjs`
   (runs the full CI locally and blocks a red `gh pr create`), `notes-reminder.py` (nudges a
   notes entry after a `git commit`).
-- TODO (not yet set up): GitHub repo + branch protection, Husky pre-commit, Dependabot,
-  Neon hub DB + env validation, auth. See ADR 0001 "Consequences".
+- Done: public GitHub repo + branch protection (PRs + CI required), Vercel auto-deploy on
+  merge, GitHub auth. Still optional: Husky pre-commit, Dependabot, a Neon hub DB (only if a
+  write-feature needs one).
 
 ## Aesthetics — Warm Terminal (ADR 0002)
 
@@ -102,13 +106,18 @@ Ground ADRs in the actual code.
   finance. Mono (Geist Mono) carries the identity; sans (Geist Sans) for prose; JP via a
   system stack (`--font-jp`) for now.
 - Tokens in `src/app/globals.css`. Repeating unit is the bordered `Module` card; signature
-  touches are the JST live clock + blinking prompt cursor + ⌘K command palette.
+  touches are the Sydney live clock + blinking prompt cursor + ⌘K command palette.
 
-## Roadmap (vertical slice first, then connectors)
+## Roadmap
 
-1. [x] Warm Terminal shell — status bar, ⌘K, module grid (mock data).
-2. [ ] First live connector — `webnovel` (Supabase) → Reading module. Proves the pattern.
-3. [ ] `riichi` (Neon) → hand of the day, read-only → playable.
-4. [ ] Hub DB + finance briefing cron (Claude) → Briefing module.
-5. [ ] Auth gate → private command center.
-6. [ ] Garden (MDX) + project pages (`/projects`, `/garden`, `/uses`, `/contact` are stubs).
+1. [x] Warm Terminal shell — status bar, ⌘K, module grid.
+2. [x] `webnovel` connector (Supabase) → live Reading module.
+3. [x] `riichi` connector (Neon) → Hand of the Day, native re-render + inline grading.
+4. [x] Markets briefing — Google Drive ingestion + pre-warm cron.
+5. [x] Deploy — `anthonyta.dev` (Vercel, Cloudflare DNS, auto-deploy).
+6. [x] GitHub auth + adaptive homepage (lobby ↔ command center).
+7. [x] Portfolio — CMC CSV via Drive, behind auth.
+8. [ ] Unlock the briefing's "portfolio relevance" for the authed owner (data's already in the doc).
+9. [ ] `translator` connector — JP vocab / language stats.
+10. [ ] Garden (MDX) + project pages (`/projects`, `/garden`, `/uses`, `/contact` still stub).
+11. [ ] Journal / "now" from the Obsidian vault; a cash/HISA line; the weekly digest.

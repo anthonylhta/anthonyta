@@ -28,16 +28,6 @@ export const riichi = {
   solved: false,
 };
 
-/** TODO(connector: finance) — daily Claude-generated briefing, cached in hub DB */
-export const briefing = {
-  date: "2026-06-19",
-  items: [
-    "Nikkei 225 +1.2% — exporters lead on a softer yen",
-    "USD/JPY 156.3 · 10Y UST 4.31%",
-    "Watchlist: nothing triggered overnight",
-  ],
-};
-
 export const nav = [
   { label: "projects", href: "/projects" },
   { label: "garden", href: "/garden" },
