@@ -4,7 +4,7 @@ Personal hub + portfolio for Anthony Ta — a **Warm Terminal** dashboard that
 aggregates my other projects (riichi, webnovelist, tone-translator) as live data,
 with a public lobby for visitors and a private command center for daily use.
 
-Live at [anthonyta.dev](https://anthonyta.dev).
+Live at [anthonyta.dev](https://www.anthonyta.dev).
 
 ## Stack
 
