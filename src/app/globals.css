@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/*
+  Warm Terminal — the design system (notes/decisions/0002).
+  Warm charcoal base (never pure black), amber accent, hairline grid.
+*/
+@theme {
+  --color-bg: #0e0d0b; /* warm charcoal — the whole trick is it's not #000 */
+  --color-surface: #17150f; /* cards lift slightly off bg */
+  --color-hairline: #2a2519; /* borders / grid lines */
+  --color-fg: #e8e2d4; /* warm off-white */
+  --color-muted: #a39a86; /* labels, secondary */
+  --color-amber: #f5a524; /* primary accent — cursor, active, highlight */
+  --color-up: #7fd17f; /* live + positive finance (use sparingly) */
+  --color-down: #e5604d; /* negative finance only */
+}
+
+@theme inline {
+  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans);
+  /* JP glyphs (解く / 言語 / 麻雀) — system stack for now; webfont is a later decision */
+  --font-jp:
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", "Meiryo",
+    var(--font-geist-sans), sans-serif;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  /* the hub is mostly "chrome" — mono carries the terminal identity */
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: var(--color-amber);
+  color: var(--color-bg);
+}
+
+/* blinking prompt cursor */
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.cursor::after {
+  content: "▋";
+  margin-left: 0.15em;
+  color: var(--color-amber);
+  animation: blink 1.1s step-end infinite;
+}

@@ -1,0 +1,1 @@
+Run `npm run check`, `npm run lint`, `npm run test`, and `npm run build` in parallel. If all pass, create a GitHub PR for the current branch using `gh pr create` (no AI/Claude attribution in the title or body). If any fail, report the errors and do not create the PR.
