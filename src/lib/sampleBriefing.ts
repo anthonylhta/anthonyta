@@ -1,7 +1,6 @@
-// Sample briefing — a real example of Anthony's daily markets briefing (the one
-// his Claude app generates), used to mock the UI before the live Google Drive
-// ingestion is wired. The real connector will produce this same shape from the
-// structured header + markdown body the app writes to Drive.
+// Sample briefing — a real example of Anthony's daily markets briefing, used to
+// mock the UI before the live Google Drive ingestion is wired. The real connector
+// produces this same shape from the structured header + markdown body in the doc.
 
 export type TapeItem = { label: string; value: string; move?: number };
 

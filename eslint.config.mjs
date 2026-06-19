@@ -12,8 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Node CommonJS tooling (hook scripts) — intentionally use require(); not app code.
-    ".claude/**",
+    // Node CommonJS tooling scripts — intentionally use require(); not app code.
+    "**/*.cjs",
   ]),
 ]);
 

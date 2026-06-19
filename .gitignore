@@ -42,6 +42,3 @@ next-env.d.ts
 
 # local build log — append-only thought record, never committed (notes/README.md)
 /notes
-
-# personal Claude Code permissions (the shared hooks live in settings.json)
-.claude/settings.local.json
