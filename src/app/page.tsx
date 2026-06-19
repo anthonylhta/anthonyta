@@ -3,9 +3,36 @@ import { Bar } from "@/components/terminal/Bar";
 import { CommandPalette } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
-import { briefing, me, nav, now, reading, riichi } from "@/lib/mock";
+import { getCurrentlyReading } from "@/lib/connectors/webnovel";
+import {
+  briefing,
+  me,
+  nav,
+  now,
+  reading as mockReading,
+  riichi,
+} from "@/lib/mock";
 
-export default function Home() {
+// Reading is live from webnovelist's Supabase; cache for 10 min (ADR 0003, 0006).
+export const revalidate = 600;
+
+export default async function Home() {
+  const reads = await getCurrentlyReading();
+  const top = reads[0];
+  const reading = top
+    ? {
+        title: top.title,
+        chapter: top.chapter,
+        total: top.total ?? 0,
+        count: reads.length,
+      }
+    : {
+        title: mockReading.title,
+        chapter: mockReading.chapter,
+        total: mockReading.total,
+        count: 1,
+      };
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
@@ -40,9 +67,13 @@ export default function Home() {
             <div className="space-y-2">
               <p className="line-clamp-2 text-fg">{reading.title}</p>
               <p className="text-xs text-muted">
-                ch. {reading.chapter}/{reading.total}
+                ch. {reading.chapter}
+                {reading.total ? `/${reading.total}` : ""}
+                {reading.count > 1 ? ` · ${reading.count} in progress` : ""}
               </p>
-              <Bar value={reading.chapter} max={reading.total} width={8} />
+              {reading.total ? (
+                <Bar value={reading.chapter} max={reading.total} width={8} />
+              ) : null}
             </div>
           </Module>
 
@@ -112,7 +143,7 @@ export default function Home() {
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
-        warm terminal · mock data — connectors next (notes/decisions/0003)
+        warm terminal · reading is live · more connectors next
       </p>
     </main>
   );
