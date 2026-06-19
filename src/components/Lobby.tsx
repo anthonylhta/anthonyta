@@ -142,6 +142,11 @@ export async function Lobby() {
             items={[
               ...nav.map((n) => ({ label: n.label, href: n.href })),
               { label: "today's hand", href: "/riichi", hint: "riichi" },
+              {
+                label: "tone translator",
+                href: "/translator",
+                hint: "japanese",
+              },
             ]}
           />
         </div>
