@@ -115,6 +115,31 @@ export async function CommandCenter({ userName }: { userName: string }) {
             </ul>
           </Module>
         </div>
+
+        {/* quick jumps */}
+        <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
+          <nav className="flex gap-4">
+            <Link
+              href="/briefing"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              briefing/
+            </Link>
+            <Link
+              href="/riichi"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              riichi/
+            </Link>
+            <Link
+              href="/translator"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              translator/
+            </Link>
+          </nav>
+          <span className="text-xs text-muted/50">⌘K</span>
+        </div>
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
