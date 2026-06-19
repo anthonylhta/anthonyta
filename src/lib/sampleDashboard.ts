@@ -45,7 +45,6 @@ export const sampleDashboard = {
     streakDays: 23,
   },
   riichi: { currentStreak: 12, bestStreak: 41, todaySolved: false },
-  language: { jpStreakDays: 41, vocabThisWeek: 37, immersionHrs: 6.5 },
   today: [
     "wire the portfolio module",
     "review today's briefing",

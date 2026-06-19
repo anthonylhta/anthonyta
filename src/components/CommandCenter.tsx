@@ -5,14 +5,16 @@ import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getPortfolio } from "@/lib/connectors/portfolio";
+import { getLanguageStats } from "@/lib/connectors/translator";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
 
 /** Your private daily driver — what `/` becomes when you're logged in (ADR 0004). */
 export async function CommandCenter({ userName }: { userName: string }) {
-  const [portfolioData, briefing] = await Promise.all([
+  const [portfolioData, briefing, lang] = await Promise.all([
     getPortfolio(),
     getBriefing(),
+    getLanguageStats(),
   ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const portfolioTake = briefing?.portfolio ?? sampleBriefing.portfolio;
@@ -81,10 +83,13 @@ export async function CommandCenter({ userName }: { userName: string }) {
           </Module>
 
           <Module label="languages" className="border-0">
-            <p className="text-fg">jp streak {d.language.jpStreakDays}d</p>
+            <p className="text-fg">
+              {lang.total} translations{" "}
+              <span className="text-muted">· {lang.streakDays}d streak</span>
+            </p>
             <p className="text-xs text-muted">
-              {d.language.vocabThisWeek} new words · {d.language.immersionHrs}h
-              immersion
+              this week {lang.thisWeek}
+              {lang.topTone ? ` · mostly ${lang.topTone}` : ""}
             </p>
           </Module>
 

@@ -7,16 +7,18 @@ import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getHandOfTheDay } from "@/lib/connectors/riichi";
+import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { me, nav, now, reading as mockReading, riichi } from "@/lib/mock";
 
 /** The public face of the hub — what visitors / recruiters see (ADR 0004). */
 export async function Lobby() {
-  const [reads, hand, briefingData] = await Promise.all([
+  const [reads, hand, briefingData, lang] = await Promise.all([
     getCurrentlyReading(),
     getHandOfTheDay(),
     getBriefing(),
+    getLanguageStats(),
   ]);
   const briefing = briefingData ?? sampleBriefing;
   const top = reads[0];
@@ -58,9 +60,7 @@ export async function Lobby() {
             <div className="space-y-2">
               <div className="flex items-baseline justify-between">
                 <span className="text-muted">jp streak</span>
-                <span className="tabular-nums text-fg">
-                  {now.jpStreakDays}d
-                </span>
+                <span className="tabular-nums text-fg">{lang.streakDays}d</span>
               </div>
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-muted">build</span>
