@@ -3,7 +3,7 @@ import type { Briefing } from "@/lib/sampleBriefing";
 
 /**
  * briefing connector — reads the daily markets briefing from Google Drive
- * (ADR 0009). My Claude app writes a new dated doc into a shared folder each
+ * (ADR 0009). A scheduled task writes a new dated doc into a shared folder each
  * morning; this reads the NEWEST doc, extracts the JSON block, and renders it.
  *
  * Auth: a read-only service account (Drive shared the folder with its email).

@@ -11,7 +11,7 @@ import type { TileCode } from "../tiles";
  *
  * Neon is dual-stack; on WSL its IPv6 stalls Node's connect — the `dev`/`build`
  * scripts carry `NODE_OPTIONS=--dns-result-order=ipv4first ...` to force IPv4
- * (CLAUDE.md → Local dev). Prod/Vercel unaffected.
+ * locally. Prod/Vercel unaffected.
  */
 
 export interface HandPuzzle {

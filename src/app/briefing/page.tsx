@@ -127,7 +127,7 @@ export default async function BriefingPage() {
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
-        ingested daily from your Claude app via Google Drive
+        ingested daily via Google Drive
       </p>
     </main>
   );
