@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
+import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
@@ -138,6 +139,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
               translator/
             </Link>
           </nav>
+          <CommandK />
         </div>
       </div>
 
