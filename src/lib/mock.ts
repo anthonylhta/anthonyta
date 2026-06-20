@@ -32,6 +32,6 @@ export const riichi = {
 export const nav = [
   { label: "projects", href: "/projects", ready: true },
   { label: "garden", href: "/garden", ready: false },
-  { label: "uses", href: "/uses", ready: false },
+  { label: "uses", href: "/uses", ready: true },
   { label: "contact", href: "/contact", ready: true },
 ] as const;
