@@ -23,25 +23,19 @@ const projects: Project[] = [
     caseStudy: "/projects/tone-translator",
   },
   {
+    name: "riichi",
+    desc: "A browser riichi mahjong game built to teach the game — full real rules, deliberately beatable AI, and coaching grounded in real efficiency numbers.",
+    tech: ["SvelteKit", "Neon", "Rust/WASM", "Claude"],
+    live: "https://riichi.anthonyta.dev",
+    code: "https://github.com/anthonylhta/riichi",
+    caseStudy: "/projects/riichi",
+  },
+  {
     name: "webnovelist",
     desc: "An AniList-style web-novel tracker — log what you're reading, rate and review, build a library, and share a public profile.",
     tech: ["Next.js", "Clerk", "Prisma", "Postgres"],
     live: "https://novel.anthonyta.dev",
     code: "https://github.com/anthonylhta/webnovelist",
-  },
-  {
-    name: "riichi",
-    desc: "A browser-based riichi mahjong game built to actually teach the game — no account, no download, just play.",
-    tech: ["TypeScript", "Next.js"],
-    live: "https://riichi.anthonyta.dev",
-    code: "https://github.com/anthonylhta/riichi",
-  },
-  {
-    name: "anthonyta.dev",
-    desc: "The hub you're on — a dashboard that pulls all of the above in as live, read-only data.",
-    tech: ["Next.js", "Auth.js", "Supabase", "Neon"],
-    code: "https://github.com/anthonylhta/anthonyta",
-    note: "you're here",
   },
 ];
 
