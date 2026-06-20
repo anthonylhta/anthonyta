@@ -88,15 +88,12 @@ export default function ToneTranslatorCaseStudy() {
               budget kill-switch. It&apos;s live and public.
             </Bullet>
           </ul>
-          <div className="mt-4 flex items-center justify-center rounded border border-dashed border-hairline px-4 py-10 text-xs text-muted/60">
-            screenshot — the translate view + a tone switch
-          </div>
         </Section>
 
         <Section title="the interesting part">
           <p className="mb-3">
             Wiring an API call is the easy part. The real problem was making the
-            output <em>reliably</em> good when &ldquo;good&rdquo; is subjective
+            output <em>reliably good</em> when &ldquo;good&rdquo; is subjective
             and the model is non-deterministic. The decisions I&apos;m proudest
             of are all about that:
           </p>
