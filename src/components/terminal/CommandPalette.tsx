@@ -60,7 +60,8 @@ export function CommandPalette({ items }: { items: Item[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded border border-hairline px-2 py-1 text-xs text-muted transition-colors hover:border-amber hover:text-fg"
+        aria-label="Open command palette"
+        className="rounded-md border border-hairline bg-surface px-3 py-1.5 text-xs text-fg/80 shadow-lg transition-colors hover:border-amber hover:text-fg"
       >
         ⌘K
       </button>

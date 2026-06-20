@@ -138,7 +138,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
               translator/
             </Link>
           </nav>
-          <span className="text-xs text-muted/50">⌘K</span>
         </div>
       </div>
 

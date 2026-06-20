@@ -148,7 +148,6 @@ export async function Lobby() {
               ),
             )}
           </nav>
-          <span className="text-xs text-muted/50">⌘K</span>
         </div>
       </div>
 
