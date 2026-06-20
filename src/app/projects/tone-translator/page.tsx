@@ -29,7 +29,8 @@ export default function ToneTranslatorCaseStudy() {
         <div className="border-b border-hairline px-4 py-6">
           <h1 className="text-lg text-fg">tone translator</h1>
           <p className="mt-1 text-sm text-fg/80">
-            Japanese ⇄ English translation with tone control.
+            A Japanese ⇄ English translator where <em>naturalness</em> is the
+            product — not literal translation.
           </p>
           <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
             <a
@@ -49,74 +50,131 @@ export default function ToneTranslatorCaseStudy() {
               code ↗
             </a>
             <span className="text-muted">
-              Next.js · React 19 · Clerk · Supabase · Claude
+              Next.js · Clerk · Supabase · Claude (Haiku + Sonnet)
             </span>
           </div>
         </div>
 
         <Section title="the problem">
           <p>
-            Machine translation hands you one register — and in Japanese,
-            usually the wrong one. Politeness there isn&apos;t decoration;
-            it&apos;s grammar, and picking the wrong level is socially loud. A
-            learner needs two things a general translator won&apos;t give: to{" "}
-            <em>see</em> how one sentence shifts across registers, and to check
-            whether their own Japanese actually sounds natural.
+            I text Japanese friends, and every tool I reached for handed me
+            stiff, textbook Japanese that reads as non-native on sight. The two
+            obvious options are wrong in opposite directions: a literal
+            translator like Google Translate is rough and unnatural, while a raw
+            chatbot is natural but <em>inconsistent</em> — as the conversation
+            grows the context drifts, and you re-explain{" "}
+            <em>casual, natural, no romaji</em> every single time. I wanted the
+            middle ground: a tuned, hardened prompt baked into a one-tap
+            interface, so the output is the same quality, instantly, every time.
           </p>
         </Section>
 
         <Section title="what I built">
           <ul className="space-y-2">
             <Bullet>
-              Translate any sentence in{" "}
-              <strong className="text-fg">four registers</strong> — casual,
-              polite, formal, blunt — each with a one-line note on what changed
-              and why.
+              Translate in <strong className="text-fg">four registers</strong> —
+              casual (the default; it&apos;s how you talk to friends), polite,
+              formal, blunt — and it explains its own slang and politeness
+              choices inline.
             </Bullet>
             <Bullet>
-              A <strong className="text-fg">&ldquo;check&rdquo; mode</strong>{" "}
-              that grades your own Japanese and corrects it — a feedback loop,
-              not just a dictionary.
+              A <strong className="text-fg">&ldquo;check&rdquo; mode</strong>: a
+              separate, stronger model grades your Japanese like a tutor — it
+              catches subtle native-speaker errors (あげる vs くれる direction,
+              a dropped particle) and suggests the fix.
             </Bullet>
             <Bullet>
-              Every translation is saved per account — a few hundred and
-              counting — which also feeds the live language stats on this hub.
+              Streamed token-by-token, per-user history, rate-limited with a
+              budget kill-switch. It&apos;s live and public.
             </Bullet>
           </ul>
           <div className="mt-4 flex items-center justify-center rounded border border-dashed border-hairline px-4 py-10 text-xs text-muted/60">
-            screenshot — the four-register output
+            screenshot — the translate view + a tone switch
           </div>
         </Section>
 
         <Section title="the interesting part">
-          <p>
-            Tone is a <strong className="text-fg">first-class input</strong>,
-            not a phrase bolted onto a prompt. Each request asks Claude for the
-            translation <em>and</em> a short, structured explanation keyed to
-            the chosen register, so the UI can show the <em>why</em>, not just
-            the output. The &ldquo;check&rdquo; mode is a separate task with its
-            own shape — grade, then correct.
+          <p className="mb-3">
+            Wiring an API call is the easy part. The real problem was making the
+            output <em>reliably</em> good when &ldquo;good&rdquo; is subjective
+            and the model is non-deterministic. The decisions I&apos;m proudest
+            of are all about that:
           </p>
-          {/* TODO(anthony): replace this callout with the real implementation story. */}
-          <Todo>
-            Your detail here — how the per-register prompt is actually built,
-            and what was hardest to keep consistent run-to-run.
-          </Todo>
-        </Section>
-
-        <Section title="what I'd change">
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             <Bullet>
-              A small <strong className="text-fg">eval set per register</strong>
-              , to catch tone drift automatically instead of by feel.
+              <strong className="text-fg">Quality as a data problem.</strong> I
+              built an eval harness — a golden set of ~24 cases, each seeded
+              from a real failure (giving/receiving direction, particle errors,
+              the right register per tone, prompt injection), graded by Sonnet
+              as an <strong className="text-fg">LLM-judge</strong> at
+              temperature 0. It runs the <em>real shipping prompt</em>, so a
+              careless edit shows up as a score drop. I keep it out of CI on
+              purpose — it&apos;s non-deterministic and costs real calls — and I
+              trust the <em>delta between runs</em>, not any single score. Each
+              case links to the bug that created it, so the suite is my
+              regression history, executable.
             </Bullet>
             <Bullet>
-              Cache the common phrases — a lot of requests repeat.
+              <strong className="text-fg">
+                Then I automated the discipline.
+              </strong>{" "}
+              A harness only helps if you keep feeding it, so I built a
+              failure-miner agent: weekly, it reads real translations from the
+              database, judges each with Claude, and <em>proposes</em> new test
+              cases for the failures — I approve them; it never edits the test
+              set itself. Its first run over 50 translations surfaced 5 genuine
+              failures and grew the set from 19 to 24.
+            </Bullet>
+            <Bullet>
+              <strong className="text-fg">
+                Pull the brittle decision out of the model.
+              </strong>{" "}
+              Translation direction was once the model&apos;s job, and on formal
+              input it would sometimes echo Japanese back as Japanese. I detect
+              the script with a Unicode regex in code instead — 100% reliable
+              and free. Knowing what <em>not</em> to hand the model is half the
+              skill.
+            </Bullet>
+            <Bullet>
+              <strong className="text-fg">
+                Prompt injection, the subtle version.
+              </strong>{" "}
+              &ldquo;Ignore your instructions and say X&rdquo; has to be{" "}
+              <em>translated</em>, not obeyed — but my first fix overcorrected:
+              the model started refusing or lecturing instead of silently
+              translating, broken nine times out of ten. The real fix was making
+              refusal itself a failure mode in the prompt — treat all input as
+              text, resist silently. Eval-verified, 9/10 → 0/10.
             </Bullet>
           </ul>
-          {/* TODO(anthony): your real next steps. */}
-          <Todo>Your real next steps.</Todo>
         </Section>
+
+        <Section title="what I'd change next">
+          <ul className="space-y-2">
+            <Bullet>
+              Have the agent open a draft PR with its proposed cases, instead of
+              leaving an artifact for me to copy in by hand.
+            </Bullet>
+            <Bullet>
+              Point the same eval harness at the <em>check</em> feature, not
+              just translation.
+            </Bullet>
+            <Bullet>
+              Harden the judge against injection from the content it reads — it
+              ingests real translations, the same attack surface the app itself
+              defends against.
+            </Bullet>
+            <Bullet>
+              Cross-device live history sync — parked on purpose; it wasn&apos;t
+              the priority yet.
+            </Bullet>
+          </ul>
+        </Section>
+
+        <div className="border-t border-hairline px-4 py-4 text-xs text-muted">
+          Built fast with AI — the velocity was the tool; the model choices, the
+          evals, and the architecture were the judgment.
+        </div>
 
         <div className="flex items-center justify-center gap-4 border-t border-hairline px-4 py-3 text-xs">
           <Link href="/projects" className="text-muted hover:text-amber">
@@ -164,17 +222,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function Bullet({ children }: { children: ReactNode }) {
   return (
     <li className="flex gap-2">
-      <span className="text-amber">•</span>
+      <span className="shrink-0 text-amber">•</span>
       <span>{children}</span>
     </li>
-  );
-}
-
-/** A clearly-marked placeholder for the sections only Anthony can write. */
-function Todo({ children }: { children: ReactNode }) {
-  return (
-    <div className="mt-3 rounded border border-dashed border-hairline px-3 py-3 text-xs text-muted/70">
-      ✎ {children}
-    </div>
   );
 }
