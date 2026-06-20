@@ -33,5 +33,5 @@ export const nav = [
   { label: "projects", href: "/projects", ready: false },
   { label: "garden", href: "/garden", ready: false },
   { label: "uses", href: "/uses", ready: false },
-  { label: "contact", href: "/contact", ready: false },
+  { label: "contact", href: "/contact", ready: true },
 ] as const;
