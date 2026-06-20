@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { CommandPalette } from "@/components/terminal/CommandPalette";
+import { CommandPaletteProvider } from "@/components/terminal/CommandPalette";
 import { nav } from "@/lib/mock";
 import "./globals.css";
 
@@ -39,11 +39,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        {children}
-        {/* ⌘K is global — present on every view, including the command center */}
-        <div className="fixed bottom-4 right-4 z-40">
-          <CommandPalette items={paletteItems} />
-        </div>
+        {/* ⌘K is global — the provider owns the modal + key listener; the visible
+            trigger (<CommandK/>) lives in the page footers. */}
+        <CommandPaletteProvider items={paletteItems}>
+          {children}
+        </CommandPaletteProvider>
       </body>
     </html>
   );

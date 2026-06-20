@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SignIn } from "@/components/auth-buttons";
 import { Bar } from "@/components/terminal/Bar";
+import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
@@ -148,7 +149,7 @@ export async function Lobby() {
               ),
             )}
           </nav>
-          <span className="text-xs text-muted/50">⌘K</span>
+          <CommandK />
         </div>
       </div>
 

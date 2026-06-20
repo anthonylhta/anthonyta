@@ -1,16 +1,34 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 type Item = { label: string; href: string; hint?: string };
 
+const PaletteCtx = createContext<{ open: () => void } | null>(null);
+
 /**
- * ⌘K / Ctrl-K command palette — the fastest way to move around the hub, and a
- * piece of the terminal identity. Navigation-only for now; actions (solve today's
- * hand, jump to a briefing) can register here later.
+ * ⌘K / Ctrl-K command palette — the fastest way to move around the hub, and a piece
+ * of the terminal identity. The provider owns the modal + the global keydown
+ * listener (mounted once in the layout); <CommandK> triggers can live anywhere below
+ * it — currently in the lobby + command-center footers. Navigation-only for now.
  */
-export function CommandPalette({ items }: { items: Item[] }) {
+export function CommandPaletteProvider({
+  items,
+  children,
+}: {
+  items: Item[];
+  children: ReactNode;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -55,15 +73,11 @@ export function CommandPalette({ items }: { items: Item[] }) {
     if (open) inputRef.current?.focus();
   }, [open]);
 
+  const ctx = useMemo(() => ({ open: () => setOpen(true) }), []);
+
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="rounded border border-hairline px-2 py-1 text-xs text-muted transition-colors hover:border-amber hover:text-fg"
-      >
-        ⌘K
-      </button>
+    <PaletteCtx.Provider value={ctx}>
+      {children}
 
       {open && (
         <div
@@ -121,6 +135,24 @@ export function CommandPalette({ items }: { items: Item[] }) {
           </div>
         </div>
       )}
-    </>
+    </PaletteCtx.Provider>
+  );
+}
+
+/** ⌘K trigger button — place anywhere inside the provider (e.g. a footer). */
+export function CommandK({ className }: { className?: string }) {
+  const ctx = useContext(PaletteCtx);
+  return (
+    <button
+      type="button"
+      onClick={() => ctx?.open()}
+      aria-label="Open command palette"
+      className={
+        className ??
+        "rounded border border-hairline px-2 py-1 text-xs text-muted transition-colors hover:border-amber hover:text-fg"
+      }
+    >
+      ⌘K
+    </button>
   );
 }
