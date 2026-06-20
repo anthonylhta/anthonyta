@@ -30,7 +30,7 @@ export const riichi = {
 // `ready: false` renders as an inert placeholder (present, but no navigation) until
 // the page exists — flip to `true` when the route is built (roadmap #10).
 export const nav = [
-  { label: "projects", href: "/projects", ready: false },
+  { label: "projects", href: "/projects", ready: true },
   { label: "garden", href: "/garden", ready: false },
   { label: "uses", href: "/uses", ready: false },
   { label: "contact", href: "/contact", ready: true },
