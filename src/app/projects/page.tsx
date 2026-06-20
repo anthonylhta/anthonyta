@@ -17,7 +17,7 @@ const projects: Project[] = [
   {
     name: "tone translator",
     desc: "Japanese ⇄ English translation with tone control — pick a politeness register, translate, and check whether your Japanese sounds natural.",
-    tech: ["Next.js", "Clerk", "Supabase", "LLM"],
+    tech: ["Next.js", "Clerk", "Supabase", "Claude"],
     live: "https://tone.anthonyta.dev",
     code: "https://github.com/anthonylhta/tone-translator",
   },
