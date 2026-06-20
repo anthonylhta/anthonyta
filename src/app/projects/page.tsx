@@ -20,6 +20,7 @@ const projects: Project[] = [
     tech: ["Next.js", "Clerk", "Supabase", "Claude"],
     live: "https://tone.anthonyta.dev",
     code: "https://github.com/anthonylhta/tone-translator",
+    caseStudy: "/projects/tone-translator",
   },
   {
     name: "webnovelist",
