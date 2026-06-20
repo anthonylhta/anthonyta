@@ -14,7 +14,7 @@ import {
 export default async function TranslatorPage() {
   const [session, stats] = await Promise.all([auth(), getLanguageStats()]);
   const isOwner = !!session?.user;
-  const recent = isOwner ? await getRecentTranslations(10) : [];
+  const recent = isOwner ? await getRecentTranslations(6) : [];
   const maxDay = Math.max(1, ...stats.recentDays.map((d) => d.count));
 
   return (
@@ -97,7 +97,7 @@ export default async function TranslatorPage() {
             </span>
           </div>
           {isOwner ? (
-            <ul className="space-y-2">
+            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {recent.map((t, i) => (
                 <li
                   key={i}
