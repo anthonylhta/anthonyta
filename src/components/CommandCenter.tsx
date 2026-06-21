@@ -2,12 +2,13 @@ import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
-import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
+import { getCash } from "@/lib/cash";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getLanguageStats } from "@/lib/connectors/translator";
+import { arrow, aud, tone } from "@/lib/money";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
 
@@ -30,6 +31,9 @@ export async function CommandCenter({ userName }: { userName: string }) {
   ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
+  const cash = getCash();
+  const t = portfolio.totals;
+  const netWorth = t.value + cash.cash + cash.hisa;
 
   // A 3-tick market pulse for the glance module — the personalized take lives on
   // /briefing now, not dumped on the front. Curate the headline levels, fall back
@@ -51,8 +55,33 @@ export async function CommandCenter({ userName }: { userName: string }) {
           <SignOut className="text-muted transition-colors hover:text-amber" />
         </div>
 
-        {/* portfolio — the centerpiece */}
-        <PortfolioCard p={portfolio} />
+        {/* net worth — a glance; the full holdings + cash live on /portfolio */}
+        <div className="border-b border-hairline px-4 py-4">
+          <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
+            <span>net worth</span>
+            <Link
+              href="/portfolio"
+              className="normal-case tracking-normal text-amber hover:underline"
+            >
+              portfolio →
+            </Link>
+          </div>
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="text-2xl tabular-nums text-fg">
+              {aud(netWorth)}
+            </span>
+            <span className={`tabular-nums ${tone(t.dayGain)}`}>
+              {arrow(t.dayGain)} {aud(Math.abs(t.dayGain))} today
+            </span>
+          </div>
+          <p className="mt-1.5 text-xs tabular-nums text-muted">
+            invested {aud(t.value)}
+            {cash.cash > 0 ? ` · cash ${aud(cash.cash)}` : ""}
+            {cash.hisa > 0
+              ? ` · HISA ${aud(cash.hisa)}${cash.rate ? ` @ ${cash.rate}%` : ""}`
+              : ""}
+          </p>
+        </div>
 
         {/* the rest of your life — a grid of glances, briefing among them */}
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
