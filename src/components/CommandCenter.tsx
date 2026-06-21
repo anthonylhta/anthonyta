@@ -190,11 +190,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
             <span className="text-amber">+{lang.thisWeek}</span> translations
             {lang.topTone ? ` · mostly ${lang.topTone}` : ""}
           </Digest>
-          <Digest k="journal">
+          <Digest k="journal" last>
             <span className="text-amber">{journalCount}</span> notes this week
-          </Digest>
-          <Digest k="markets" last>
-            <span className="text-muted">{b.driver}</span>
           </Digest>
         </div>
 
