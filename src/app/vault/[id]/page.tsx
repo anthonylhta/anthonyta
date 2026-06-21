@@ -46,12 +46,19 @@ export default async function NotePage({
   const session = await auth();
   if (!session?.user) notFound();
 
-  const [raw, index] = await Promise.all([getVaultNote(id), getVaultIndex()]);
+  // Index is cached (fast), and gives the note's modifiedTime so the content
+  // read is cache-keyed by it — fresh after an edit, instant on revisit.
+  const index = await getVaultIndex();
+  const note = index.find((n) => n.id === id);
+  const raw = await getVaultNote(id, note?.modified);
   if (raw == null) notFound();
 
-  const note = index.find((n) => n.id === id);
   const md = preprocess(raw, index);
   const who = session.user.name ?? "anthony";
+  const dir =
+    note && note.path.includes("/")
+      ? note.path.slice(0, note.path.lastIndexOf("/"))
+      : "";
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -72,7 +79,8 @@ export default async function NotePage({
           <h1 className="text-lg text-fg">{note?.title ?? "note"}</h1>
           {note && (
             <p className="mt-2 text-[11px] tabular-nums text-muted">
-              {note.path} · {note.modified.slice(0, 10)}
+              {dir ? `${dir} · ` : ""}
+              {note.modified.slice(0, 10)}
             </p>
           )}
         </div>
