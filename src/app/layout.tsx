@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AuthForm } from "@/components/auth-buttons";
+import { KeyShortcut } from "@/components/key-shortcut";
 import { CommandPaletteProvider } from "@/components/terminal/CommandPalette";
 import { nav } from "@/lib/mock";
 import "./globals.css";
@@ -44,6 +46,8 @@ export default function RootLayout({
         <CommandPaletteProvider items={paletteItems}>
           {children}
         </CommandPaletteProvider>
+        <AuthForm />
+        <KeyShortcut />
       </body>
     </html>
   );
