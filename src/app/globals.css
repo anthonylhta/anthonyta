@@ -22,6 +22,10 @@
   --font-jp:
     "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", "Meiryo",
     var(--font-geist-sans), sans-serif;
+  /* ZH (Simplified) glyphs for /novels — 书山 / 境界 / 蛊真人; system stack, falls back to JP */
+  --font-zh:
+    "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB",
+    var(--font-jp);
 }
 
 body {
