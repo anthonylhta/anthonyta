@@ -94,25 +94,26 @@ export default async function BriefingPage() {
           ))}
         </div>
 
-        {/* portfolio relevance — owner-only. The text is rendered only when it's
-            the owner, so it never reaches a guest's HTML. */}
-        <div className="border-t border-hairline px-4 py-4">
-          <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-            <span>portfolio relevance</span>
-            <span className="rounded border border-hairline px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-amber">
-              {isOwner ? "private" : "🔒 private"}
-            </span>
-          </div>
-          {isOwner && b.portfolio ? (
-            <p className="text-sm text-fg/90">{b.portfolio}</p>
-          ) : (
-            <div className="rounded border border-dashed border-hairline px-4 py-5 text-sm text-muted">
-              {isOwner
-                ? "No portfolio note in today's briefing yet."
-                : "How today maps to your portfolio — visible when you're signed in."}
+        {/* portfolio relevance — owner-only, and invisible to guests: the whole
+            section is absent from a guest's HTML, so the public page never hints
+            that a private mode (or a login) exists. */}
+        {isOwner && (
+          <div className="border-t border-hairline px-4 py-4">
+            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+              <span>portfolio relevance</span>
+              <span className="rounded border border-hairline px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-amber">
+                private
+              </span>
             </div>
-          )}
-        </div>
+            {b.portfolio ? (
+              <p className="text-sm text-fg/90">{b.portfolio}</p>
+            ) : (
+              <div className="rounded border border-dashed border-hairline px-4 py-5 text-sm text-muted">
+                {"No portfolio note in today's briefing yet."}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* sources */}
         {b.sources && b.sources.length > 0 && (

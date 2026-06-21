@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { SignIn } from "@/components/auth-buttons";
 import { Bar } from "@/components/terminal/Bar";
+import { Prompt } from "@/components/terminal/Prompt";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
@@ -47,12 +47,7 @@ export async function Lobby() {
         <StatusBar user="guest" />
 
         {/* prompt / hero */}
-        <div className="border-b border-hairline px-4 py-6">
-          <p className="text-sm text-muted">
-            <span className="text-amber">&gt;</span>{" "}
-            <span className="cursor text-fg">{me.tagline}</span>
-          </p>
-        </div>
+        <Prompt tagline={me.tagline} />
 
         {/* module grid */}
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-3">
@@ -153,11 +148,9 @@ export async function Lobby() {
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted/50">
-        <span>warm terminal · reading is live</span>
-        <span>·</span>
-        <SignIn className="text-muted/50 transition-colors hover:text-amber" />
-      </div>
+      <p className="mt-4 text-center text-xs text-muted/50">
+        warm terminal · reading is live
+      </p>
     </main>
   );
 }

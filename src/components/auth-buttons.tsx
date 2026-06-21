@@ -1,18 +1,20 @@
 import { signIn, signOut } from "@/auth";
 
-/** Sign in with GitHub (server action). Only the owner's account is allowed in. */
-export function SignIn({ className = "" }: { className?: string }) {
+/**
+ * A GitHub sign-in form with no visible control — submitted programmatically by
+ * the Prompt / KeyShortcut components. Only the owner's account passes the auth
+ * callback (lib/auth.ts), so this is convenience, not access control.
+ */
+export function AuthForm() {
   return (
     <form
+      id="gh-auth"
+      hidden
       action={async () => {
         "use server";
         await signIn("github", { redirectTo: "/" });
       }}
-    >
-      <button type="submit" className={className}>
-        sign in
-      </button>
-    </form>
+    />
   );
 }
 
