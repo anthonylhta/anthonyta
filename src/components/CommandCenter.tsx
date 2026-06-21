@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
 import { CommandK } from "@/components/terminal/CommandPalette";
@@ -8,26 +9,47 @@ import { getCash } from "@/lib/cash";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getLanguageStats } from "@/lib/connectors/translator";
+import { getVaultIndex } from "@/lib/connectors/vault";
 import { arrow, aud, tone } from "@/lib/money";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
 
-/** The day's date, in Sydney — the command center runs on local time. */
-function sydneyDate(): string {
-  return new Intl.DateTimeFormat("en-GB", {
+/** Today's date in Sydney as YYYY-MM-DD (matches the vault's daily-note titles). */
+function sydneyISODate(): string {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Australia/Sydney",
-    weekday: "short",
-    day: "numeric",
-    month: "short",
   }).format(new Date());
 }
 
-/** Your private daily driver — what `/` becomes when you're logged in (ADR 0004). */
+/** How many vault notes were touched in the last 7 days. */
+function journalThisWeek(notes: { modified: string }[]): number {
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  return notes.filter((n) => Date.parse(n.modified) >= weekAgo).length;
+}
+
+/** A "15 Jun – 21 Jun" label for the trailing week. */
+function weekRange(): string {
+  const day = (dt: Date) =>
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Australia/Sydney",
+      day: "numeric",
+      month: "short",
+    }).format(dt);
+  const now = new Date();
+  return `${day(new Date(now.getTime() - 6 * 86_400_000))} – ${day(now)}`;
+}
+
+/**
+ * Your private daily driver — what `/` becomes when you're logged in (ADR 0004).
+ * Two zones (ADR 0032): TODAY = what you act on now; THIS WEEK = the rolling
+ * digest. Each domain lives in exactly one zone, so nothing's shown twice.
+ */
 export async function CommandCenter({ userName }: { userName: string }) {
-  const [portfolioData, briefing, lang] = await Promise.all([
+  const [portfolioData, briefing, lang, vault] = await Promise.all([
     getPortfolio(),
     getBriefing(),
     getLanguageStats(),
+    getVaultIndex(),
   ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
@@ -35,13 +57,15 @@ export async function CommandCenter({ userName }: { userName: string }) {
   const t = portfolio.totals;
   const netWorth = t.value + cash.cash + cash.hisa;
 
-  // A 3-tick market pulse for the glance module — the personalized take lives on
-  // /briefing now, not dumped on the front. Curate the headline levels, fall back
-  // to the first three (the connector orders them most-important-first).
   const curated = ["ASX 200", "S&P 500", "BTC"]
-    .map((label) => b.tape.find((t) => t.label === label))
-    .filter((t): t is TapeItem => Boolean(t));
+    .map((label) => b.tape.find((tk) => tk.label === label))
+    .filter((tk): tk is TapeItem => Boolean(tk));
   const ticks = curated.length ? curated : b.tape.slice(0, 3);
+
+  // vault-backed bits: today's "now" snippet + the week's journal count
+  const today = sydneyISODate();
+  const todayNote = vault.find((n) => n.title === today);
+  const journalCount = journalThisWeek(vault);
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -55,7 +79,10 @@ export async function CommandCenter({ userName }: { userName: string }) {
           <SignOut className="text-muted transition-colors hover:text-amber" />
         </div>
 
-        {/* net worth — a glance; the full holdings + cash live on /portfolio */}
+        {/* ───────────── TODAY ───────────── */}
+        <Zone label="today" />
+
+        {/* net worth — a glance; full holdings + cash live on /portfolio */}
         <div className="border-b border-hairline px-4 py-4">
           <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
             <span>net worth</span>
@@ -83,10 +110,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
           </p>
         </div>
 
-        {/* the rest of your life — a grid of glances, briefing among them */}
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
-          {/* markets briefing — a pulse, not a wall of text; the full take is one
-              click away on /briefing (the portfolio-relevance note lives there). */}
           <Module
             label="briefing"
             className="border-0 sm:col-span-2"
@@ -103,16 +127,31 @@ export async function CommandCenter({ userName }: { userName: string }) {
             <Tape items={ticks} className="mt-2" />
           </Module>
 
-          <Module label="reading" className="border-0">
-            <p className="line-clamp-1 text-fg">{d.reading.title}</p>
-            <p className="text-xs text-muted">
-              ch {d.reading.chapter}/{d.reading.total} · {d.reading.streakDays}
-              -day streak
+          <Module
+            label="now"
+            className="border-0"
+            action={
+              <Link
+                href="/vault"
+                className="text-xs text-amber hover:underline"
+              >
+                vault →
+              </Link>
+            }
+          >
+            <p className="text-fg">
+              <span className="text-amber">→</span> {d.today.focus}
             </p>
+            {todayNote?.preview && (
+              <p className="mt-1.5 line-clamp-2 text-xs text-muted">
+                <span className="tabular-nums">{today}</span> ·{" "}
+                {todayNote.preview}
+              </p>
+            )}
           </Module>
 
           <Module
-            label="riichi"
+            label="today's hand"
             className="border-0"
             action={
               <Link
@@ -124,60 +163,39 @@ export async function CommandCenter({ userName }: { userName: string }) {
             }
           >
             <p className="text-fg">
-              streak {d.riichi.currentStreak}{" "}
-              <span className="text-muted">· best {d.riichi.bestStreak}</span>
-            </p>
-            <p className="text-xs text-muted">
               <span lang="ja" className="font-[family-name:var(--font-jp)]">
                 本日の一手
               </span>{" "}
               — {d.riichi.todaySolved ? "solved ✓" : "unsolved"}
             </p>
+            <p className="mt-1.5 text-xs text-muted">
+              solve to keep the streak
+            </p>
           </Module>
+        </div>
 
-          <Module
-            label="languages"
-            className="border-0"
-            action={
-              <Link
-                href="/translator"
-                className="text-xs text-amber hover:underline"
-              >
-                [open]
-              </Link>
-            }
-          >
-            <p className="text-fg">
-              {lang.total} translations{" "}
-              <span className="text-muted">· {lang.streakDays}d streak</span>
-            </p>
-            <p className="text-xs text-muted">
-              this week {lang.thisWeek}
-              {lang.topTone ? ` · mostly ${lang.topTone}` : ""}
-            </p>
-          </Module>
-
-          <Module
-            label="today"
-            className="border-0"
-            action={
-              <span className="text-xs tabular-nums text-muted">
-                {sydneyDate()}
-              </span>
-            }
-          >
-            <p className="text-fg">
-              <span className="text-amber">→</span> {d.today.focus}
-            </p>
-            <ul className="mt-1.5 space-y-1 text-xs">
-              {d.today.items.map((item) => (
-                <li key={item} className="flex gap-2">
-                  <span className="text-muted">☐</span>
-                  <span className="text-fg/90">{item}</span>
-                </li>
-              ))}
-            </ul>
-          </Module>
+        {/* ──────────── THIS WEEK ──────────── */}
+        <Zone label="this week" right={weekRange()} />
+        <div className="px-4 py-3">
+          <Digest k="reading">
+            <span className="line-clamp-1">
+              {d.reading.title} · ch {d.reading.chapter}
+            </span>
+          </Digest>
+          <Digest k="riichi">
+            streak {d.riichi.currentStreak}{" "}
+            <span className="text-muted">· best {d.riichi.bestStreak}</span>
+          </Digest>
+          <Digest k="languages">
+            <span className="text-amber">+{lang.thisWeek}</span> translations
+            {lang.topTone ? ` · mostly ${lang.topTone}` : ""}
+          </Digest>
+          <Digest k="journal">
+            <span className="text-amber">{journalCount}</span> notes this week
+          </Digest>
+          <Digest k="markets" last>
+            <span className="text-muted">{b.driver}</span>
+          </Digest>
         </div>
 
         {/* quick jumps */}
@@ -216,5 +234,41 @@ export async function CommandCenter({ userName }: { userName: string }) {
         private command center · {userName}
       </p>
     </main>
+  );
+}
+
+/** A zone divider — the dashboard's fixed shape (today vs this week). */
+function Zone({ label, right }: { label: string; right?: string }) {
+  return (
+    <div className="flex items-center justify-between border-b border-hairline bg-amber/[0.04] px-4 py-1.5">
+      <span className="text-[10px] uppercase tracking-[0.22em] text-amber/85">
+        ▍ {label}
+      </span>
+      {right && (
+        <span className="text-[11px] tabular-nums text-muted">{right}</span>
+      )}
+    </div>
+  );
+}
+
+/** One digest row — a fixed key column + value. */
+function Digest({
+  k,
+  children,
+  last,
+}: {
+  k: string;
+  children: ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <div
+      className={`flex gap-3 py-1.5 text-sm ${last ? "" : "border-b border-hairline/40"}`}
+    >
+      <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+        {k}
+      </span>
+      <span className="min-w-0 flex-1 text-fg/90">{children}</span>
+    </div>
   );
 }
