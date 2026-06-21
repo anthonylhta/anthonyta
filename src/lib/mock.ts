@@ -31,6 +31,7 @@ export const riichi = {
 // the page exists — flip to `true` when the route is built (roadmap #10).
 export const nav = [
   { label: "projects", href: "/projects", ready: true },
+  { label: "novels", href: "/novels", ready: true },
   { label: "notes", href: "/notes", ready: true },
   { label: "uses", href: "/uses", ready: true },
   { label: "contact", href: "/contact", ready: true },
