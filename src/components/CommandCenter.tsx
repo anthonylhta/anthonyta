@@ -172,6 +172,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
             >
               translator/
             </Link>
+            <Link
+              href="/vault"
+              className="text-amber/80 transition-colors hover:text-amber"
+            >
+              vault/
+            </Link>
           </nav>
           <CommandK />
         </div>
