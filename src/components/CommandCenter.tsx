@@ -4,11 +4,22 @@ import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { Tape } from "@/components/terminal/Tape";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getLanguageStats } from "@/lib/connectors/translator";
-import { sampleBriefing } from "@/lib/sampleBriefing";
+import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
+
+/** The day's date, in Sydney — the command center runs on local time. */
+function sydneyDate(): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Australia/Sydney",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(new Date());
+}
 
 /** Your private daily driver — what `/` becomes when you're logged in (ADR 0004). */
 export async function CommandCenter({ userName }: { userName: string }) {
@@ -18,7 +29,15 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getLanguageStats(),
   ]);
   const portfolio = portfolioData ?? samplePortfolio;
-  const portfolioTake = briefing?.portfolio ?? sampleBriefing.portfolio;
+  const b = briefing ?? sampleBriefing;
+
+  // A 3-tick market pulse for the glance module — the personalized take lives on
+  // /briefing now, not dumped on the front. Curate the headline levels, fall back
+  // to the first three (the connector orders them most-important-first).
+  const curated = ["ASX 200", "S&P 500", "BTC"]
+    .map((label) => b.tape.find((t) => t.label === label))
+    .filter((t): t is TapeItem => Boolean(t));
+  const ticks = curated.length ? curated : b.tape.slice(0, 3);
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -35,22 +54,26 @@ export async function CommandCenter({ userName }: { userName: string }) {
         {/* portfolio — the centerpiece */}
         <PortfolioCard p={portfolio} />
 
-        {/* briefing's take on your portfolio (the unlocked private block) */}
-        <div className="border-b border-hairline px-4 py-4">
-          <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-            <span>briefing · your portfolio</span>
-            <Link
-              href="/briefing"
-              className="text-[11px] normal-case tracking-normal text-amber hover:underline"
-            >
-              full →
-            </Link>
-          </div>
-          <p className="text-sm text-fg/90">{portfolioTake}</p>
-        </div>
-
-        {/* the rest of your life */}
+        {/* the rest of your life — a grid of glances, briefing among them */}
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
+          {/* markets briefing — a pulse, not a wall of text; the full take is one
+              click away on /briefing (the portfolio-relevance note lives there). */}
+          <Module
+            label="briefing"
+            className="border-0 sm:col-span-2"
+            action={
+              <Link
+                href="/briefing"
+                className="text-xs text-amber hover:underline"
+              >
+                [full]
+              </Link>
+            }
+          >
+            <p className="text-fg">{b.driver}</p>
+            <Tape items={ticks} className="mt-2" />
+          </Module>
+
           <Module label="reading" className="border-0">
             <p className="line-clamp-1 text-fg">{d.reading.title}</p>
             <p className="text-xs text-muted">
@@ -105,9 +128,20 @@ export async function CommandCenter({ userName }: { userName: string }) {
             </p>
           </Module>
 
-          <Module label="today" className="border-0">
-            <ul className="space-y-1 text-xs">
-              {d.today.map((item) => (
+          <Module
+            label="today"
+            className="border-0"
+            action={
+              <span className="text-xs tabular-nums text-muted">
+                {sydneyDate()}
+              </span>
+            }
+          >
+            <p className="text-fg">
+              <span className="text-amber">→</span> {d.today.focus}
+            </p>
+            <ul className="mt-1.5 space-y-1 text-xs">
+              {d.today.items.map((item) => (
                 <li key={item} className="flex gap-2">
                   <span className="text-muted">☐</span>
                   <span className="text-fg/90">{item}</span>

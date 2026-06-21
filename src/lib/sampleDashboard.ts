@@ -45,9 +45,10 @@ export const sampleDashboard = {
     streakDays: 23,
   },
   riichi: { currentStreak: 12, bestStreak: 41, todaySolved: false },
-  today: [
-    "wire the portfolio module",
-    "review today's briefing",
-    "DCA into VGS next week",
-  ],
+  // The day's personal "now" — one focus, plus supporting items. Shaped to model
+  // what the Obsidian vault "now"/journal connector will return (roadmap 11).
+  today: {
+    focus: "wire the portfolio module",
+    items: ["review today's briefing", "DCA into VGS next week"],
+  },
 };
