@@ -127,6 +127,17 @@ async function mapLimit<T, R>(
   return out;
 }
 
+/** A note's preview, cached by (id, modifiedTime) and never time-expired — so an
+ *  index rebuild only re-reads previews for notes that actually changed (a new
+ *  modifiedTime = a new cache key). Unchanged notes are pure cache hits. */
+function cachedPreview(token: string, n: VaultNote): Promise<string> {
+  return unstable_cache(
+    () => fetchPreview(token, n.id),
+    ["vault-prev", n.id, n.modified],
+    { tags: ["vault"] },
+  )();
+}
+
 async function buildIndex(): Promise<VaultNote[]> {
   const token = await driveToken();
   const folderId = process.env.VAULT_FOLDER_ID;
@@ -134,7 +145,7 @@ async function buildIndex(): Promise<VaultNote[]> {
   const out: VaultNote[] = [];
   await listFolder(token, folderId, "", out);
   out.sort((a, b) => b.modified.localeCompare(a.modified)); // newest first
-  const previews = await mapLimit(out, 16, (n) => fetchPreview(token, n.id));
+  const previews = await mapLimit(out, 24, (n) => cachedPreview(token, n));
   out.forEach((n, i) => {
     n.preview = previews[i];
   });
@@ -171,14 +182,19 @@ async function fetchNoteText(id: string): Promise<string | null> {
 }
 
 /** Raw markdown for one note id (frontmatter intact). `null` on failure / bad id.
- *  Validates the id shape so a route param can't be used to probe arbitrary URLs. */
-export async function getVaultNote(id: string): Promise<string | null> {
+ *  Validates the id shape so a route param can't be used to probe arbitrary URLs.
+ *  Keyed by (id, modified) so an edited note refreshes and a revisit is a cache hit. */
+export async function getVaultNote(
+  id: string,
+  modified?: string,
+): Promise<string | null> {
   if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
   try {
-    return await unstable_cache(() => fetchNoteText(id), ["vault-note", id], {
-      revalidate: 600,
-      tags: ["vault"],
-    })();
+    return await unstable_cache(
+      () => fetchNoteText(id),
+      ["vault-note", id, modified ?? ""],
+      { revalidate: 1800, tags: ["vault"] },
+    )();
   } catch (err) {
     console.error("[connector:vault] note failed", err);
     return null;
