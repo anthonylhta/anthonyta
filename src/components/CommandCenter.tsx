@@ -10,7 +10,9 @@ import { getBriefing } from "@/lib/connectors/briefing";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getVaultIndex } from "@/lib/connectors/vault";
-import { arrow, aud, tone } from "@/lib/money";
+import { getCurrentlyReading } from "@/lib/connectors/webnovel";
+import { aud, tone } from "@/lib/money";
+import { getBaseline } from "@/lib/snapshots";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
 
@@ -45,17 +47,32 @@ function weekRange(): string {
  * digest. Each domain lives in exactly one zone, so nothing's shown twice.
  */
 export async function CommandCenter({ userName }: { userName: string }) {
-  const [portfolioData, briefing, lang, vault] = await Promise.all([
-    getPortfolio(),
-    getBriefing(),
-    getLanguageStats(),
-    getVaultIndex(),
-  ]);
+  const [portfolioData, briefing, lang, vault, reading, baseline] =
+    await Promise.all([
+      getPortfolio(),
+      getBriefing(),
+      getLanguageStats(),
+      getVaultIndex(),
+      getCurrentlyReading(),
+      getBaseline(),
+    ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
   const cash = getCash();
   const t = portfolio.totals;
   const netWorth = t.value + cash.cash + cash.hisa;
+
+  // Week-over-week deltas — diff today against a snapshot from ~7 days ago (ADR 0033).
+  // null (no baseline yet, or the store is off) → the row shows "tracking…"/current state.
+  const netWorthDelta = baseline
+    ? netWorth - baseline.netWorthCents / 100
+    : null;
+  const readingChapters = reading.reduce((sum, r) => sum + r.chapter, 0);
+  const readingDelta =
+    baseline && reading.length > 0
+      ? readingChapters - baseline.readingChapters
+      : null;
+  const topBook = reading[0] ?? null;
 
   const curated = ["ASX 200", "S&P 500", "BTC"]
     .map((label) => b.tape.find((tk) => tk.label === label))
@@ -96,9 +113,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="text-2xl tabular-nums text-fg">
               {aud(netWorth)}
-            </span>
-            <span className={`tabular-nums ${tone(t.dayGain)}`}>
-              {arrow(t.dayGain)} {aud(Math.abs(t.dayGain))} today
             </span>
           </div>
           <p className="mt-1.5 text-xs tabular-nums text-muted">
@@ -177,10 +191,31 @@ export async function CommandCenter({ userName }: { userName: string }) {
         {/* ──────────── THIS WEEK ──────────── */}
         <Zone label="this week" right={weekRange()} />
         <div className="px-4 py-3">
+          <Digest k="net worth">
+            {netWorthDelta !== null ? (
+              <span className={`tabular-nums ${tone(netWorthDelta)}`}>
+                {netWorthDelta >= 0 ? "+" : ""}
+                {aud(netWorthDelta)} this week
+              </span>
+            ) : (
+              <span className="text-muted">tracking…</span>
+            )}
+          </Digest>
           <Digest k="reading">
-            <span className="line-clamp-1">
-              {d.reading.title} · ch {d.reading.chapter}
-            </span>
+            {readingDelta !== null ? (
+              readingDelta > 0 ? (
+                <span>
+                  <span className="text-amber">+{readingDelta}</span> chapters
+                </span>
+              ) : (
+                <span className="text-muted">no change this week</span>
+              )
+            ) : (
+              <span className="line-clamp-1">
+                {topBook?.title ?? d.reading.title} · ch{" "}
+                {topBook?.chapter ?? d.reading.chapter}
+              </span>
+            )}
           </Digest>
           <Digest k="riichi">
             streak {d.riichi.currentStreak}{" "}
