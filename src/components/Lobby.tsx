@@ -12,6 +12,37 @@ import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { me, nav, now, reading as mockReading, riichi } from "@/lib/mock";
 
+/** Nav links the lobby leads with, rendered brighter than the rest. */
+const PRIMARY_NAV = new Set<string>(["projects", "contact"]);
+
+function NavItem({
+  item,
+  primary = false,
+}: {
+  item: (typeof nav)[number];
+  primary?: boolean;
+}) {
+  if (!item.ready) {
+    return (
+      <span
+        className="cursor-default text-muted/40"
+        title="coming soon"
+        aria-disabled="true"
+      >
+        {item.label}/
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={item.href}
+      className={`transition-colors hover:text-amber ${primary ? "text-fg/90" : "text-muted"}`}
+    >
+      {item.label}/
+    </Link>
+  );
+}
+
 /** The public face of the hub — what visitors / recruiters see (ADR 0004). */
 export async function Lobby() {
   const [reads, hand, briefingData, lang] = await Promise.all([
@@ -41,13 +72,18 @@ export async function Lobby() {
         count: 1,
       };
 
+  // Lead the lobby nav with what the recruiter audience came for (ADR 0004);
+  // the rest stay muted to keep the prompt the loudest thing on the page.
+  const leadNav = nav.filter((item) => PRIMARY_NAV.has(item.label));
+  const restNav = nav.filter((item) => !PRIMARY_NAV.has(item.label));
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
+    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col justify-center px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
         <StatusBar user="guest" />
 
         {/* prompt / hero */}
-        <Prompt tagline={me.tagline} />
+        <Prompt tagline={me.tagline} subtitle={me.intro} />
 
         {/* module grid */}
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-3">
@@ -122,27 +158,18 @@ export async function Lobby() {
 
         {/* nav */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
-          <nav className="flex gap-4 text-sm">
-            {nav.map((item) =>
-              item.ready ? (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="text-muted transition-colors hover:text-amber"
-                >
-                  {item.label}/
-                </Link>
-              ) : (
-                <span
-                  key={item.href}
-                  className="cursor-default text-muted/40"
-                  title="coming soon"
-                  aria-disabled="true"
-                >
-                  {item.label}/
-                </span>
-              ),
-            )}
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            {leadNav.map((item) => (
+              <NavItem key={item.href} item={item} primary />
+            ))}
+            {leadNav.length > 0 && restNav.length > 0 ? (
+              <span aria-hidden className="text-muted/30">
+                ·
+              </span>
+            ) : null}
+            {restNav.map((item) => (
+              <NavItem key={item.href} item={item} />
+            ))}
           </nav>
           <CommandK />
         </div>
