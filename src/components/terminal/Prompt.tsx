@@ -8,7 +8,13 @@ import { useEffect, useRef } from "react";
 const TAPS = 5;
 const WINDOW_MS = 2000;
 
-export function Prompt({ tagline }: { tagline: string }) {
+export function Prompt({
+  tagline,
+  subtitle,
+}: {
+  tagline: string;
+  subtitle?: string;
+}) {
   const ref = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
@@ -37,6 +43,9 @@ export function Prompt({ tagline }: { tagline: string }) {
         <span className="text-amber">&gt;</span>{" "}
         <span className="cursor text-fg">{tagline}</span>
       </p>
+      {subtitle ? (
+        <p className="mt-2 text-xs text-muted/70">{subtitle}</p>
+      ) : null}
     </div>
   );
 }
