@@ -10,7 +10,38 @@ import { getHandOfTheDay } from "@/lib/connectors/riichi";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { sampleBriefing } from "@/lib/sampleBriefing";
-import { me, nav, now, reading as mockReading, riichi } from "@/lib/mock";
+import { me, nav, reading as mockReading, riichi } from "@/lib/mock";
+
+/** Nav links the lobby leads with, rendered brighter than the rest. */
+const PRIMARY_NAV = new Set<string>(["projects", "contact"]);
+
+function NavItem({
+  item,
+  primary = false,
+}: {
+  item: (typeof nav)[number];
+  primary?: boolean;
+}) {
+  if (!item.ready) {
+    return (
+      <span
+        className="cursor-default text-muted/40"
+        title="coming soon"
+        aria-disabled="true"
+      >
+        {item.label}/
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={item.href}
+      className={`transition-colors hover:text-amber ${primary ? "text-fg/90" : "text-muted"}`}
+    >
+      {item.label}/
+    </Link>
+  );
+}
 
 /** The public face of the hub — what visitors / recruiters see (ADR 0004). */
 export async function Lobby() {
@@ -41,26 +72,62 @@ export async function Lobby() {
         count: 1,
       };
 
+  // Lead the lobby nav with what the recruiter audience came for (ADR 0004);
+  // the rest stay muted to keep the prompt the loudest thing on the page.
+  const leadNav = nav.filter((item) => PRIMARY_NAV.has(item.label));
+  const restNav = nav.filter((item) => !PRIMARY_NAV.has(item.label));
+
+  // Tone mix share of the most-used tone (aggregate only — ADR 0015/0016).
+  const toneTotal = lang.tones.reduce((sum, t) => sum + t.count, 0);
+  const topTonePct =
+    lang.topTone && toneTotal > 0
+      ? Math.round(((lang.tones[0]?.count ?? 0) / toneTotal) * 100)
+      : null;
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
         <StatusBar user="guest" />
 
         {/* prompt / hero */}
-        <Prompt tagline={me.tagline} />
+        <Prompt tagline={me.tagline} subtitle={me.intro} />
 
         {/* module grid */}
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-3">
-          <Module label="now" className="border-0">
+          <Module
+            label="languages"
+            className="border-0"
+            action={
+              <Link
+                href="/translator"
+                className="text-xs text-amber hover:underline"
+              >
+                [open]
+              </Link>
+            }
+          >
             <div className="space-y-2">
               <div className="flex items-baseline justify-between">
                 <span className="text-muted">jp streak</span>
                 <span className="tabular-nums text-fg">{lang.streakDays}d</span>
               </div>
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-muted">build</span>
-                <Bar value={now.build.value} max={now.build.max} width={6} />
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted">translations</span>
+                <span className="tabular-nums text-fg">{lang.total}</span>
               </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted">this week</span>
+                <span className="tabular-nums text-fg">{lang.thisWeek}</span>
+              </div>
+              {topTonePct != null ? (
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted">tone</span>
+                  <span className="text-fg">
+                    <span className="text-amber">{lang.topTone}</span>{" "}
+                    {topTonePct}%
+                  </span>
+                </div>
+              ) : null}
             </div>
           </Module>
 
@@ -122,27 +189,18 @@ export async function Lobby() {
 
         {/* nav */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
-          <nav className="flex gap-4 text-sm">
-            {nav.map((item) =>
-              item.ready ? (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="text-muted transition-colors hover:text-amber"
-                >
-                  {item.label}/
-                </Link>
-              ) : (
-                <span
-                  key={item.href}
-                  className="cursor-default text-muted/40"
-                  title="coming soon"
-                  aria-disabled="true"
-                >
-                  {item.label}/
-                </span>
-              ),
-            )}
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            {leadNav.map((item) => (
+              <NavItem key={item.href} item={item} primary />
+            ))}
+            {leadNav.length > 0 && restNav.length > 0 ? (
+              <span aria-hidden className="text-muted/30">
+                ·
+              </span>
+            ) : null}
+            {restNav.map((item) => (
+              <NavItem key={item.href} item={item} />
+            ))}
           </nav>
           <CommandK />
         </div>
