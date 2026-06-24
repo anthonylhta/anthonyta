@@ -78,7 +78,7 @@ export async function Lobby() {
   const restNav = nav.filter((item) => !PRIMARY_NAV.has(item.label));
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col justify-center px-4 py-6 sm:px-6">
+    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
         <StatusBar user="guest" />
 
