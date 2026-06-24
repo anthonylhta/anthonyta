@@ -9,7 +9,9 @@ import {
 
 // Public tone/activity stats for everyone; the recent feed is owner-only — it's
 // only fetched when signed in, so a guest's HTML never contains my translation
-// text. Reading the session makes this dynamic; the data is cached at the
+// text. Guests also see NO trace of the section (no "private" badge, no "sign in"
+// prompt) — the public face must never reveal that a logged-in mode exists (ADR
+// 0022). Reading the session makes this dynamic; the data is cached at the
 // connector (tag "translator", ADR 0014, 0016).
 export default async function TranslatorPage() {
   const [session, stats] = await Promise.all([auth(), getLanguageStats()]);
@@ -55,8 +57,10 @@ export default async function TranslatorPage() {
           </div>
         </div>
 
-        {/* activity — public */}
-        <div className="border-b border-hairline px-4 py-4">
+        {/* activity — public (last section for guests, so no trailing border) */}
+        <div
+          className={`px-4 py-4${isOwner ? " border-b border-hairline" : ""}`}
+        >
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-[11px] uppercase tracking-[0.2em] text-muted">
               activity
@@ -88,15 +92,15 @@ export default async function TranslatorPage() {
           </p>
         </div>
 
-        {/* recent — owner-only */}
-        <div className="px-4 py-4">
-          <div className="mb-3 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-            <span>recent</span>
-            <span className="rounded border border-hairline px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-amber">
-              {isOwner ? "private" : "🔒 private"}
-            </span>
-          </div>
-          {isOwner ? (
+        {/* recent — owner-only; guests see no trace of it at all (ADR 0022) */}
+        {isOwner && (
+          <div className="px-4 py-4">
+            <div className="mb-3 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+              <span>recent</span>
+              <span className="rounded border border-hairline px-1.5 py-0.5 text-[10px] normal-case tracking-normal text-amber">
+                private
+              </span>
+            </div>
             <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {recent.map((t, i) => (
                 <li
@@ -119,12 +123,8 @@ export default async function TranslatorPage() {
                 </li>
               ))}
             </ul>
-          ) : (
-            <div className="rounded border border-dashed border-hairline px-4 py-5 text-sm text-muted">
-              My translations — visible when you&apos;re signed in.
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
