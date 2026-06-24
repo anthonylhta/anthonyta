@@ -12,11 +12,6 @@ export const me = {
   intro: "sydney · building things in typescript · open to work",
 } as const;
 
-/** `build` is still placeholder; the JP streak is now live (connector: translator). */
-export const now = {
-  build: { value: 83, max: 100 }, // placeholder "site build" progress
-};
-
 /** TODO(connector: webnovel) — current read + progress from webnovelist (Supabase) */
 export const reading = {
   title: "Lord of the Mysteries",
