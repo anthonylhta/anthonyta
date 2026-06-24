@@ -7,6 +7,9 @@
 export const me = {
   name: "anthony ta",
   tagline: "builder · languages · markets",
+  // one quiet line under the prompt — who I am + a soft availability signal for
+  // the lobby's recruiter audience (ADR 0004).
+  intro: "sydney · building things in typescript · open to work",
 } as const;
 
 /** `build` is still placeholder; the JP streak is now live (connector: translator). */
