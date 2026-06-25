@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { PuzzleCard } from "@/components/terminal/PuzzleCard";
-import { StatusBar } from "@/components/terminal/StatusBar";
+import { SessionStatusBar } from "@/components/SessionStatusBar";
 import { getHandOfTheDay, SAMPLE_PUZZLE } from "@/lib/connectors/riichi";
 
-// Today's hand, cached 10 min (ADR 0003, 0007).
-export const revalidate = 600;
-
+// SessionStatusBar reads the session, making this dynamic; the puzzle is the same
+// daily row for everyone (ADR 0003, 0007).
 export default async function RiichiPage() {
   const live = await getHandOfTheDay();
   const puzzle = live ?? SAMPLE_PUZZLE;
@@ -13,7 +12,7 @@ export default async function RiichiPage() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-2xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
-        <StatusBar user="guest" />
+        <SessionStatusBar />
 
         <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-xs">
           <Link href="/" className="text-muted hover:text-amber">

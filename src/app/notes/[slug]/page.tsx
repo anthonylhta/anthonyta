@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { StatusBar } from "@/components/terminal/StatusBar";
+import { SessionStatusBar } from "@/components/SessionStatusBar";
 import { formatNoteDate, getNote, notes } from "@/lib/notes";
 
 export function generateStaticParams() {
@@ -33,7 +33,7 @@ export default async function NotePage({
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
-        <StatusBar user="guest" />
+        <SessionStatusBar />
 
         <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-xs">
           <Link href="/notes" className="text-muted hover:text-amber">
