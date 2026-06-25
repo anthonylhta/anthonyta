@@ -12,6 +12,13 @@ const OWNER = (process.env.OWNER_GITHUB_LOGIN ?? "").toLowerCase();
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   providers: [GitHub],
+  // No public auth UI (ADR 0022): redirect the built-in sign-in / sign-out / error
+  // pages to the lobby, so `/api/auth/signin` can't render a "Sign in with GitHub"
+  // page and a denied (non-owner) login can't land on a stock error screen. The
+  // hidden door calls `signIn("github", …)` directly, so it's unaffected. (The
+  // providers/session JSON endpoints still respond — this reduces the tell, it
+  // doesn't fully erase it.)
+  pages: { signIn: "/", signOut: "/", error: "/" },
   callbacks: {
     signIn({ profile }) {
       const login =

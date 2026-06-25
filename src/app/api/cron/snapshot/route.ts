@@ -1,6 +1,7 @@
 import { getCash } from "@/lib/cash";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
+import { authorizeCron } from "@/lib/cron-auth";
 import { writeSnapshot } from "@/lib/snapshots";
 
 export const dynamic = "force-dynamic";
@@ -17,14 +18,13 @@ function sydneyDate(): string {
  * Daily snapshot of net worth + total reading chapters into the hub store (ADR 0033),
  * so the command center's "this week" digest can diff today against ~7 days ago. Runs
  * late each Sydney evening via Vercel Cron (vercel.json). Vercel sends
- * `Authorization: Bearer <CRON_SECRET>`; required when the secret is set. No-ops cleanly
- * when `HUB_DATABASE_URL` isn't configured (the write store is guarded).
+ * `Authorization: Bearer <CRON_SECRET>`; required, fail-closed in production (see
+ * lib/cron-auth). No-ops cleanly when `HUB_DATABASE_URL` isn't configured (the write
+ * store is guarded).
  */
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.get("authorization") !== `Bearer ${secret}`) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const denied = authorizeCron(req);
+  if (denied) return denied;
 
   const [portfolio, reading] = await Promise.all([
     getPortfolio(),
