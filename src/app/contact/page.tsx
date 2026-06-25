@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { StatusBar } from "@/components/terminal/StatusBar";
+import { SessionStatusBar } from "@/components/SessionStatusBar";
 
 // Static page — no data, no auth. Public "how to reach me" links.
 const channels = [
@@ -24,7 +24,7 @@ export default function ContactPage() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
-        <StatusBar user="guest" />
+        <SessionStatusBar />
 
         <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-xs">
           <Link href="/" className="text-muted hover:text-amber">
