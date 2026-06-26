@@ -44,6 +44,8 @@ export interface LanguageStats {
   topTone: string | null;
   /** per-day message counts, last 14 days, oldest → newest (zero-filled) */
   recentDays: DayCount[];
+  /** per-day message counts, last 70 days, oldest → newest — for the pulse strip */
+  activity: number[];
   /** false when served from SAMPLE (creds not set / read failed) */
   isLive: boolean;
 }
@@ -64,6 +66,10 @@ export const sampleLanguageStats: LanguageStats = {
   ],
   topTone: "casual",
   recentDays: sampleSeries(),
+  activity: Array.from(
+    { length: 70 },
+    (_, i) => [1, 0, 2, 3, 1, 4, 2, 0, 1, 3][i % 10],
+  ),
   isLive: false,
 };
 
@@ -175,6 +181,7 @@ function summarize(rows: Row[]): LanguageStats {
     tones,
     topTone: tones[0]?.tone ?? null,
     recentDays: lastNDays(dayCounts, 14),
+    activity: lastNDays(dayCounts, 70).map((day) => day.count),
     isLive: true,
   };
 }

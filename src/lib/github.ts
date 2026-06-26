@@ -14,6 +14,10 @@ export interface GithubStats {
   currentStreak: number;
   bestStreak: number;
   publicRepos: number;
+  /** contributions in the last 7 days — the "this week" number */
+  thisWeek: number;
+  /** trailing daily contribution counts, oldest → newest — for the pulse strip */
+  daily: number[];
   /** contribution levels 0–4, [week][day], oldest → newest (weeks may be ragged) */
   weeks: number[][];
   /** month labels keyed to the week index where each month starts */
@@ -108,6 +112,8 @@ export function summarizeGithub(user: RawUser, login: string): GithubStats {
     contributions: cal.totalContributions,
     ...streaks(counts),
     publicRepos: user.repositories.totalCount,
+    thisWeek: counts.slice(-7).reduce((a, b) => a + b, 0),
+    daily: counts,
     weeks,
     months: monthLabels(cal.weeks),
     recent: top
@@ -165,6 +171,8 @@ export const sampleGithub: GithubStats = {
   currentStreak: 18,
   bestStreak: 73,
   publicRepos: 14,
+  thisWeek: 14,
+  daily: sampleWeeks().flat(),
   weeks: sampleWeeks(),
   months: [
     "Jul",
