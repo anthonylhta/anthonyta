@@ -57,9 +57,7 @@ export async function Lobby() {
   const briefing = briefingData ?? sampleBriefing;
   const top = reads[0];
   const handTeaser = hand
-    ? hand.bestShanten === 0
-      ? `tenpai · ${hand.ukeire} ukeire`
-      : `${hand.bestShanten}-shanten · ${hand.ukeire} ukeire`
+    ? "what would you discard?"
     : `hand #${riichi.handNo}`;
   const reading = top
     ? {

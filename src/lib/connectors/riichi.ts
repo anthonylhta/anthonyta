@@ -5,16 +5,21 @@ import type { Connector } from "./types";
 import type { TileCode } from "../tiles";
 
 /**
- * riichi connector — reads today's Hand of the Day from the `riichi` project's
- * Neon DB (ADR 0003, 0007). READ-ONLY: only SELECTs the shared daily puzzle (one
- * row, same for everyone — no user data). The hub re-renders it natively and
- * grades locally against the stored answer; it never writes back. Streak tracking
- * stays in the riichi app until the hub has auth.
+ * riichi connector (ADR 0003, 0007, 0046, 0047). Two read-only reads:
+ *
+ *  - `getHandOfTheDay` — today's hand, fetched ANSWER-STRIPPED from riichi's public
+ *    `GET /api/hand-of-the-day` (riichi ADR 0074). DISPLAY-ONLY: the answer stays in
+ *    the app, so the hub shows the hand and links out to solve. (The old
+ *    `hand_of_the_day` table this used to read was abandoned upstream — riichi
+ *    ADR 0073 — which is why it had frozen.)
+ *  - `getRiichiStats` — the OWNER's streak + solve history from the `puzzle_results`
+ *    table (the same one riichi's own streak reads). Owner-only; behind auth.
  *
  * Neon is dual-stack; on WSL its IPv6 stalls Node's connect — the `dev`/`build`
- * scripts carry `NODE_OPTIONS=--dns-result-order=ipv4first ...` to force IPv4
- * locally. Prod/Vercel unaffected.
+ * scripts carry `NODE_OPTIONS=--dns-result-order=ipv4first ...`. Prod/Vercel unaffected.
  */
+
+const RIICHI_URL = process.env.RIICHI_URL ?? "https://riichi.anthonyta.dev";
 
 export interface HandPuzzle {
   date: string;
@@ -23,20 +28,17 @@ export interface HandPuzzle {
   roundWind: TileCode;
   doraIndicator: TileCode;
   question: string;
-  bestDiscards: TileCode[];
-  bestShanten: number;
-  ukeire: number;
-  ukeireTiles: TileCode[];
-  explanation: string;
-  /** false when served from the built-in SAMPLE_PUZZLE (DB not configured). */
+  /** false when the live fetch failed and SAMPLE_PUZZLE is shown. */
   isLive: boolean;
 }
 
-// The `puzzle` jsonb shape stored by riichi (src/lib/server/handOfTheDay.ts).
-type PuzzleJson = Omit<HandPuzzle, "date" | "isLive">;
-type Row = { date: string; puzzle: PuzzleJson };
+/** The answer-stripped shape riichi's GET returns under `puzzle`. */
+type PublicPuzzleResponse = {
+  date: string;
+  puzzle: Omit<HandPuzzle, "date" | "isLive">;
+};
 
-/** Shown when RIICHI_DATABASE_URL isn't set (local dev without the string, CI). */
+/** Shown when the live hand can't be fetched (offline, CI). Not the real daily hand. */
 export const SAMPLE_PUZZLE: HandPuzzle = {
   date: "sample",
   hand: [1, 1, 2, 3, 4, 9, 14, 15, 16, 21, 22, 23, 25, 26],
@@ -45,16 +47,33 @@ export const SAMPLE_PUZZLE: HandPuzzle = {
   doraIndicator: 13,
   question:
     "You just drew your 14th tile. Which single tile is the most efficient discard?",
-  bestDiscards: [9],
-  bestShanten: 1,
-  ukeire: 8,
-  ukeireTiles: [24, 27],
-  explanation:
-    "Discard the lone 9m — it connects to nothing, while keeping 7s8s leaves a ryanmen and the 1m pair can still become a triplet, a clean 1-shanten. (Sample puzzle — set RIICHI_DATABASE_URL to read the live daily hand.)",
   isLive: false,
 };
 
-/** YYYY-MM-DD on the Sydney calendar day — riichi keys the puzzle this way. */
+/**
+ * Today's hand, fetched answer-stripped from riichi's public endpoint. `null` on any
+ * failure → the page falls back to SAMPLE_PUZZLE. Cached 5 min (the hand changes once
+ * a day), refreshable via the "riichi-hand" tag.
+ */
+export async function getHandOfTheDay(): Promise<HandPuzzle | null> {
+  try {
+    const res = await fetch(`${RIICHI_URL}/api/hand-of-the-day`, {
+      next: { revalidate: 300, tags: ["riichi-hand"] },
+    });
+    if (!res.ok) {
+      console.error("[connector:riichi] hand http", res.status);
+      return null;
+    }
+    const data = (await res.json()) as PublicPuzzleResponse;
+    if (!data?.puzzle?.hand?.length) return null;
+    return { date: data.date, ...data.puzzle, isLive: true };
+  } catch (err) {
+    console.error("[connector:riichi] hand fetch failed:", err);
+    return null;
+  }
+}
+
+/** YYYY-MM-DD on the Sydney calendar day — riichi keys solves this way. */
 function sydneyDate(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Australia/Sydney",
@@ -75,35 +94,12 @@ function client() {
   return sql;
 }
 
-/** Today's Hand of the Day (falls back to the most recent day, then `null`). */
-export async function getHandOfTheDay(): Promise<HandPuzzle | null> {
-  const db = client();
-  if (!db) return null;
-  try {
-    const today = sydneyDate();
-    let rows = await db<Row[]>`
-      select date, puzzle from hand_of_the_day where date = ${today} limit 1
-    `;
-    if (rows.length === 0) {
-      rows = await db<Row[]>`
-        select date, puzzle from hand_of_the_day order by date desc limit 1
-      `;
-    }
-    const row = rows[0];
-    if (!row) return null;
-    return { date: row.date, ...row.puzzle, isLive: true };
-  } catch (err) {
-    console.error("[connector:riichi] read failed:", err);
-    return null;
-  }
-}
-
 /**
  * The owner's riichi streak + a trailing solve history for the command center pulse
  * (ADR 0046). Reads `puzzle_results` directly — the same per-user/day table riichi's
- * own streak reads (not the deprecated `hand_of_the_day`). OWNER-ONLY: it's personal
- * solve data, so the caller (command center) is already behind auth. Guarded: no DB
- * or no `RIICHI_USER_ID` (the serial `users.id`) → sample.
+ * own streak reads. OWNER-ONLY: personal solve data, so the caller (command center)
+ * is already behind auth. Guarded: no DB or no `RIICHI_USER_ID` (the serial
+ * `users.id`) → sample.
  */
 export async function getRiichiStats(): Promise<RiichiStats> {
   const db = client();
