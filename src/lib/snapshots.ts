@@ -20,6 +20,11 @@ export interface Snapshot {
   readingChapters: number;
 }
 
+/** A snapshot with the day it was taken — for the trend series. */
+export interface SnapshotPoint extends Snapshot {
+  date: string; // YYYY-MM-DD (Sydney)
+}
+
 let sql: ReturnType<typeof postgres> | null = null;
 function client() {
   if (sql) return sql;
@@ -96,5 +101,33 @@ export async function getBaseline(days = 7): Promise<Snapshot | null> {
   } catch (err) {
     console.error("[snapshots] baseline read failed:", err);
     return null;
+  }
+}
+
+/**
+ * The daily snapshots over the trailing `days`, oldest → newest — the series the
+ * `/portfolio` net-worth trend chart draws. `[]` when the store is off, the table
+ * doesn't exist yet, or nothing has accrued (the first days). Read-only and guarded,
+ * so it's safe to call straight from a page. `taken_on` is formatted in SQL to dodge
+ * the date-object timezone round-trip.
+ */
+export async function getSeries(days = 30): Promise<SnapshotPoint[]> {
+  const db = client();
+  if (!db) return [];
+  const cutoff = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Sydney",
+  }).format(new Date(Date.now() - days * 86_400_000));
+  try {
+    return await db<SnapshotPoint[]>`
+      select to_char(taken_on, 'YYYY-MM-DD') as date,
+             net_worth_cents  as "netWorthCents",
+             reading_chapters as "readingChapters"
+      from weekly_snapshot
+      where taken_on >= ${cutoff}
+      order by taken_on asc
+    `;
+  } catch (err) {
+    console.error("[snapshots] series read failed:", err);
+    return [];
   }
 }

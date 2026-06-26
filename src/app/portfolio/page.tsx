@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
+import { Sparkline } from "@/components/terminal/Sparkline";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { getCash } from "@/lib/cash";
 import { getPortfolio } from "@/lib/connectors/portfolio";
-import { aud } from "@/lib/money";
+import { arrow, aud, tone } from "@/lib/money";
+import { getSeries } from "@/lib/snapshots";
 import { samplePortfolio } from "@/lib/sampleDashboard";
 
 export const metadata = { title: "portfolio" };
@@ -18,10 +20,27 @@ export default async function PortfolioPage() {
   const session = await auth();
   if (!session?.user) notFound();
 
-  const portfolio = (await getPortfolio()) ?? samplePortfolio;
+  const [portfolioData, series] = await Promise.all([
+    getPortfolio(),
+    getSeries(30),
+  ]);
+  const portfolio = portfolioData ?? samplePortfolio;
   const cash = getCash();
   const netWorth = portfolio.totals.value + cash.cash + cash.hisa;
   const who = session.user.name ?? "anthony";
+
+  // The daily net-worth series (snapshots already include cash, ADR 0033). Needs at
+  // least two points to draw a line; before that the chart yields to a quiet note.
+  const nw = series.map((p) => p.netWorthCents / 100);
+  const trend =
+    nw.length >= 2
+      ? {
+          values: nw,
+          delta: nw[nw.length - 1] - nw[0],
+          from: series[0].date.slice(5),
+          to: series[series.length - 1].date.slice(5),
+        }
+      : null;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -50,6 +69,27 @@ export default async function PortfolioPage() {
             invested {aud(portfolio.totals.value)} · cash{" "}
             {aud(cash.cash + cash.hisa)}
           </span>
+
+          {trend ? (
+            <div className="mt-4">
+              <div className="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-[0.2em] text-muted">
+                <span>trend</span>
+                <span className={`tabular-nums ${tone(trend.delta)}`}>
+                  {arrow(trend.delta)} {trend.delta >= 0 ? "+" : ""}
+                  {aud(trend.delta)}
+                </span>
+              </div>
+              <Sparkline values={trend.values} delta={trend.delta} />
+              <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted/60">
+                <span>{trend.from}</span>
+                <span>{trend.to}</span>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-[11px] text-muted/60">
+              trend builds as daily snapshots accrue
+            </p>
+          )}
         </div>
 
         {/* invested — the holdings */}
