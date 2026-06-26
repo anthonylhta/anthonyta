@@ -32,3 +32,8 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # E2E gating tests run against the already-built app (next start). They're
+      # request-only, so no browser binaries are installed.
+      - name: E2E gating tests
+        run: npm run test:e2e
