@@ -80,6 +80,8 @@ describe("summarizeGithub", () => {
     expect(s.login).toBe("anthonylhta");
     expect(s.contributions).toBe(5);
     expect(s.publicRepos).toBe(7);
+    expect(s.thisWeek).toBe(5); // 0 + 4 + 1, last 7 days
+    expect(s.daily).toEqual([0, 4, 1]);
     expect(s.weeks[0]).toEqual([0, 4, 1]); // levels scaled to max=4
     expect(s.recent).toEqual({
       repo: "riichi",
