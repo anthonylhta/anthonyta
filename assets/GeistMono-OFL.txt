@@ -1,0 +1,9 @@
+Geist Mono (GeistMono-Regular.ttf)
+Copyright © Vercel, Inc. — https://github.com/vercel/geist-font
+
+Licensed under the SIL Open Font License, Version 1.1.
+Full license text: https://openfontlicense.org/open-font-license-official-text/
+
+Bundled here (not via next/font) only so the dynamic Open Graph image
+(app/opengraph-image.tsx) can render the hub's monospace identity through
+Satori, which needs a raw TTF/OTF/WOFF at generation time.
