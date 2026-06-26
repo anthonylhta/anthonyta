@@ -27,6 +27,12 @@ export default defineConfig({
       PORT: String(PORT),
       NODE_OPTIONS:
         "--dns-result-order=ipv4first --no-network-family-autoselection",
+      // Throwaway auth config so the app boots in a valid state under test (no
+      // secrets in CI). These are NOT real credentials and never authenticate
+      // anyone — the suite is guest-only; they just stop Auth.js erroring on boot.
+      AUTH_SECRET: "e2e-throwaway-secret-not-a-real-credential",
+      AUTH_GITHUB_ID: "e2e",
+      AUTH_GITHUB_SECRET: "e2e",
     },
   },
 });

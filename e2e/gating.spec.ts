@@ -66,7 +66,9 @@ test.describe("guest gating", () => {
   }) => {
     const res = await request.get("/api/auth/signin", { maxRedirects: 0 });
     expect(res.status()).toBe(302);
-    expect(res.headers()["location"]).toMatch(/^\/(\?|$)/);
+    // Lands on the lobby root — robust to relative vs absolute Location and any query.
+    const loc = res.headers()["location"] ?? "";
+    expect(new URL(loc, "http://localhost:3210").pathname).toBe("/");
   });
 
   test("the cron write endpoint rejects an unauthenticated call", async ({
