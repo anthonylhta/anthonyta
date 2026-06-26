@@ -8,7 +8,8 @@ export const SITE_NAME = "Anthony Ta";
 export const SITE_TAGLINE = "builder · languages · markets";
 export const SITE_DESCRIPTION =
   "A personal hub & portfolio: a live reading shelf, a daily riichi hand, a morning markets briefing, and a tone-aware Japanese translator — built on a read-only connector pattern.";
-export const GITHUB_URL = "https://github.com/anthonylhta";
+export const GITHUB_LOGIN = "anthonylhta";
+export const GITHUB_URL = `https://github.com/${GITHUB_LOGIN}`;
 
 /**
  * Crawlable routes only — the public lobby surfaces. The owner-only pages
