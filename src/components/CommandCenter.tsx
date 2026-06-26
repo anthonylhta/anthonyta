@@ -1,18 +1,26 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
+import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
+import {
+  ACTIVITY_DAYS,
+  dailyCounts,
+  dailyDeltas,
+  toLevels,
+} from "@/lib/activity";
 import { getCash } from "@/lib/cash";
 import { getBriefing } from "@/lib/connectors/briefing";
+import { getGithub } from "@/lib/connectors/github";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getVaultIndex } from "@/lib/connectors/vault";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
-import { aud, tone } from "@/lib/money";
-import { getBaseline } from "@/lib/snapshots";
+import { arrow, aud, tone } from "@/lib/money";
+import { getBaseline, getSeries } from "@/lib/snapshots";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
 
@@ -43,19 +51,31 @@ function weekRange(): string {
 
 /**
  * Your private daily driver — what `/` becomes when you're logged in (ADR 0004).
- * Two zones (ADR 0032): TODAY = what you act on now; THIS WEEK = the rolling
- * digest. Each domain lives in exactly one zone, so nothing's shown twice.
+ * Two zones (ADR 0032): TODAY = what you act on now; THIS WEEK = the rolling digest.
+ * Each domain lives in exactly one zone. THIS WEEK now pairs each domain's
+ * this-week number with its trailing ~10-week trend strip (ADR 0044) — the digest
+ * IS the pulse, so there's no separate heatmap to duplicate it.
  */
 export async function CommandCenter({ userName }: { userName: string }) {
-  const [portfolioData, briefing, lang, vault, reading, baseline] =
-    await Promise.all([
-      getPortfolio(),
-      getBriefing(),
-      getLanguageStats(),
-      getVaultIndex(),
-      getCurrentlyReading(),
-      getBaseline(),
-    ]);
+  const [
+    portfolioData,
+    briefing,
+    lang,
+    vault,
+    reading,
+    baseline,
+    gh,
+    snapshots,
+  ] = await Promise.all([
+    getPortfolio(),
+    getBriefing(),
+    getLanguageStats(),
+    getVaultIndex(),
+    getCurrentlyReading(),
+    getBaseline(),
+    getGithub(),
+    getSeries(ACTIVITY_DAYS),
+  ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
   const cash = getCash();
@@ -63,7 +83,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
   const netWorth = t.value + cash.cash + cash.hisa;
 
   // Week-over-week deltas — diff today against a snapshot from ~7 days ago (ADR 0033).
-  // null (no baseline yet, or the store is off) → the row shows "tracking…"/current state.
+  // null (no baseline yet, or the store is off) → "tracking…".
   const netWorthDelta = baseline
     ? netWorth - baseline.netWorthCents / 100
     : null;
@@ -72,7 +92,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
     baseline && reading.length > 0
       ? readingChapters - baseline.readingChapters
       : null;
-  const topBook = reading[0] ?? null;
 
   const curated = ["ASX 200", "S&P 500", "BTC"]
     .map((label) => b.tape.find((tk) => tk.label === label))
@@ -83,6 +102,57 @@ export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
   const todayNote = vault.find((n) => n.title === today);
   const journalCount = journalThisWeek(vault);
+
+  // THIS WEEK rows — number = this week, strip = the trailing ~10-week trend.
+  // riichi is DEFERRED: its daily solve activity isn't exposed yet (the streak lives
+  // in the riichi app, ADR 0007) — POINT OF INTEREST to circle back on (ADR 0044).
+  const readingSeries = snapshots.map((p) => ({
+    date: p.date,
+    value: p.readingChapters,
+  }));
+  const rows: { k: string; value: ReactNode; levels: number[] }[] = [
+    {
+      k: "commits",
+      value: <span className="text-amber">+{gh.thisWeek}</span>,
+      levels: toLevels(gh.daily.slice(-ACTIVITY_DAYS)),
+    },
+    {
+      k: "reading",
+      value:
+        readingDelta !== null ? (
+          <span>
+            <span className="text-amber">
+              {readingDelta >= 0 ? "+" : ""}
+              {readingDelta}
+            </span>{" "}
+            ch
+          </span>
+        ) : (
+          <span className="text-muted">tracking…</span>
+        ),
+      levels: toLevels(dailyDeltas(readingSeries, ACTIVITY_DAYS, today)),
+    },
+    {
+      k: "languages",
+      value: <span className="text-amber">+{lang.thisWeek}</span>,
+      levels: toLevels(lang.activity),
+    },
+    {
+      k: "journal",
+      value: (
+        <span>
+          <span className="text-amber">{journalCount}</span> notes
+        </span>
+      ),
+      levels: toLevels(
+        dailyCounts(
+          vault.map((n) => n.modified),
+          ACTIVITY_DAYS,
+          today,
+        ),
+      ),
+    },
+  ];
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -114,6 +184,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
             <span className="text-2xl tabular-nums text-fg">
               {aud(netWorth)}
             </span>
+            {netWorthDelta !== null && (
+              <span className={`text-sm tabular-nums ${tone(netWorthDelta)}`}>
+                {arrow(netWorthDelta)} {netWorthDelta >= 0 ? "+" : ""}
+                {aud(netWorthDelta)} this week
+              </span>
+            )}
           </div>
           <p className="mt-1.5 text-xs tabular-nums text-muted">
             invested {aud(t.value)}
@@ -190,44 +266,16 @@ export async function CommandCenter({ userName }: { userName: string }) {
 
         {/* ──────────── THIS WEEK ──────────── */}
         <Zone label="this week" right={weekRange()} />
-        <div className="px-4 py-3">
-          <Digest k="net worth">
-            {netWorthDelta !== null ? (
-              <span className={`tabular-nums ${tone(netWorthDelta)}`}>
-                {netWorthDelta >= 0 ? "+" : ""}
-                {aud(netWorthDelta)} this week
-              </span>
-            ) : (
-              <span className="text-muted">tracking…</span>
-            )}
-          </Digest>
-          <Digest k="reading">
-            {readingDelta !== null ? (
-              readingDelta > 0 ? (
-                <span>
-                  <span className="text-amber">+{readingDelta}</span> chapters
-                </span>
-              ) : (
-                <span className="text-muted">no change this week</span>
-              )
-            ) : (
-              <span className="line-clamp-1">
-                {topBook?.title ?? d.reading.title} · ch{" "}
-                {topBook?.chapter ?? d.reading.chapter}
-              </span>
-            )}
-          </Digest>
-          <Digest k="riichi">
-            streak {d.riichi.currentStreak}{" "}
-            <span className="text-muted">· best {d.riichi.bestStreak}</span>
-          </Digest>
-          <Digest k="languages">
-            <span className="text-amber">+{lang.thisWeek}</span> translations
-            {lang.topTone ? ` · mostly ${lang.topTone}` : ""}
-          </Digest>
-          <Digest k="journal" last>
-            <span className="text-amber">{journalCount}</span> notes this week
-          </Digest>
+        <div className="px-4 py-2">
+          {rows.map((r, i) => (
+            <ActivityRow
+              key={r.k}
+              k={r.k}
+              value={r.value}
+              levels={r.levels}
+              last={i === rows.length - 1}
+            />
+          ))}
         </div>
 
         {/* quick jumps */}
@@ -283,24 +331,29 @@ function Zone({ label, right }: { label: string; right?: string }) {
   );
 }
 
-/** One digest row — a fixed key column + value. */
-function Digest({
+/** One THIS WEEK row — a fixed key column, the week's number, and the trend strip. */
+function ActivityRow({
   k,
-  children,
+  value,
+  levels,
   last,
 }: {
   k: string;
-  children: ReactNode;
+  value: ReactNode;
+  levels: number[];
   last?: boolean;
 }) {
   return (
     <div
-      className={`flex gap-3 py-1.5 text-sm ${last ? "" : "border-b border-hairline/40"}`}
+      className={`flex items-center gap-3 py-2 text-sm ${last ? "" : "border-b border-hairline/40"}`}
     >
       <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
         {k}
       </span>
-      <span className="min-w-0 flex-1 text-fg/90">{children}</span>
+      <span className="w-24 shrink-0 tabular-nums text-fg/90">{value}</span>
+      <span className="min-w-0 flex-1">
+        <ActivityStrip levels={levels} />
+      </span>
     </div>
   );
 }
