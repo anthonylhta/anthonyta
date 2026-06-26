@@ -35,7 +35,7 @@ export default async function RiichiPage() {
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
-        read-only from riichi · solve here, streak tracked in the app
+        read-only from riichi · solve in the app, where your streak is tracked
       </p>
     </main>
   );
