@@ -25,8 +25,7 @@ const QUERY = `query($login:String!){
     repositories(first:100, privacy:PUBLIC, ownerAffiliations:OWNER, isFork:false,
       orderBy:{field:PUSHED_AT, direction:DESC}){
       totalCount
-      nodes{ name pushedAt primaryLanguage{ name }
-        languages(first:8, orderBy:{field:SIZE, direction:DESC}){ edges{ size node{ name } } } }
+      nodes{ name pushedAt primaryLanguage{ name } }
     }
   }
 }`;
