@@ -1,4 +1,6 @@
 import postgres from "postgres";
+import { ACTIVITY_DAYS } from "@/lib/activity";
+import { riichiStats, sampleRiichiStats, type RiichiStats } from "@/lib/riichi";
 import type { Connector } from "./types";
 import type { TileCode } from "../tiles";
 
@@ -93,6 +95,28 @@ export async function getHandOfTheDay(): Promise<HandPuzzle | null> {
   } catch (err) {
     console.error("[connector:riichi] read failed:", err);
     return null;
+  }
+}
+
+/**
+ * The owner's riichi streak + a trailing solve history for the command center pulse
+ * (ADR 0046). Reads `puzzle_results` directly — the same per-user/day table riichi's
+ * own streak reads (not the deprecated `hand_of_the_day`). OWNER-ONLY: it's personal
+ * solve data, so the caller (command center) is already behind auth. Guarded: no DB
+ * or no `RIICHI_USER_ID` (the serial `users.id`) → sample.
+ */
+export async function getRiichiStats(): Promise<RiichiStats> {
+  const db = client();
+  const userId = Number(process.env.RIICHI_USER_ID);
+  if (!db || !Number.isInteger(userId) || userId <= 0) return sampleRiichiStats;
+  try {
+    const rows = await db<{ date: string; correct: boolean }[]>`
+      select date, correct from puzzle_results where user_id = ${userId}
+    `;
+    return riichiStats(rows, sydneyDate(), ACTIVITY_DAYS);
+  } catch (err) {
+    console.error("[connector:riichi] stats read failed:", err);
+    return sampleRiichiStats;
   }
 }
 
