@@ -16,6 +16,7 @@ import { getCash } from "@/lib/cash";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getPortfolio } from "@/lib/connectors/portfolio";
+import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getVaultIndex } from "@/lib/connectors/vault";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
@@ -66,6 +67,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     baseline,
     gh,
     snapshots,
+    riichi,
   ] = await Promise.all([
     getPortfolio(),
     getBriefing(),
@@ -75,6 +77,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getBaseline(),
     getGithub(),
     getSeries(ACTIVITY_DAYS),
+    getRiichiStats(),
   ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
@@ -104,8 +107,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
   const journalCount = journalThisWeek(vault);
 
   // THIS WEEK rows — number = this week, strip = the trailing ~10-week trend.
-  // riichi is DEFERRED: its daily solve activity isn't exposed yet (the streak lives
-  // in the riichi app, ADR 0007) — POINT OF INTEREST to circle back on (ADR 0044).
+  // riichi reads `puzzle_results` (the same table its app's streak uses), so its
+  // solve history + real streak are live now (ADR 0046, was deferred under 0007/0044).
   const readingSeries = snapshots.map((p) => ({
     date: p.date,
     value: p.readingChapters,
@@ -136,6 +139,15 @@ export async function CommandCenter({ userName }: { userName: string }) {
       k: "languages",
       value: <span className="text-amber">+{lang.thisWeek}</span>,
       levels: toLevels(lang.activity),
+    },
+    {
+      k: "riichi",
+      value: (
+        <span>
+          streak <span className="text-amber">{riichi.currentStreak}</span>
+        </span>
+      ),
+      levels: toLevels(riichi.activity),
     },
     {
       k: "journal",
@@ -256,7 +268,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
               <span lang="ja" className="font-[family-name:var(--font-jp)]">
                 本日の一手
               </span>{" "}
-              — {d.riichi.todaySolved ? "solved ✓" : "unsolved"}
+              — {riichi.todaySolved ? "solved ✓" : "unsolved"}
             </p>
             <p className="mt-1.5 text-xs text-muted">
               solve to keep the streak
