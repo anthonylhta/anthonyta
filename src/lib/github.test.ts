@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  aggregateLanguages,
-  contribLevel,
-  relativeTime,
-  streaks,
-  summarizeGithub,
-} from "./github";
+import { contribLevel, relativeTime, streaks, summarizeGithub } from "./github";
 
 describe("contribLevel", () => {
   it("is 0 for no contributions", () => {
@@ -37,36 +31,6 @@ describe("streaks", () => {
   });
   it("handles an all-empty history", () => {
     expect(streaks([0, 0, 0])).toEqual({ currentStreak: 0, bestStreak: 0 });
-  });
-});
-
-describe("aggregateLanguages", () => {
-  const repos = [
-    {
-      name: "a",
-      pushedAt: "",
-      primaryLanguage: { name: "TS" },
-      languages: { edges: [{ size: 800, node: { name: "TS" } }] },
-    },
-    {
-      name: "b",
-      pushedAt: "",
-      primaryLanguage: { name: "Py" },
-      languages: {
-        edges: [
-          { size: 200, node: { name: "TS" } },
-          { size: 100, node: { name: "Py" } },
-        ],
-      },
-    },
-  ];
-  it("sums sizes across repos and ranks by total", () => {
-    const langs = aggregateLanguages(repos);
-    expect(langs[0]).toEqual({ name: "TS", pct: 91 }); // 1000 / 1100
-    expect(langs[1]).toEqual({ name: "Py", pct: 9 });
-  });
-  it("caps at n", () => {
-    expect(aggregateLanguages(repos, 1)).toHaveLength(1);
   });
 });
 
@@ -106,19 +70,17 @@ describe("summarizeGithub", () => {
           name: "riichi",
           pushedAt: "2026-06-26T10:00:00Z",
           primaryLanguage: { name: "TypeScript" },
-          languages: { edges: [{ size: 500, node: { name: "TypeScript" } }] },
         },
       ],
     },
   };
 
-  it("normalizes calendar, repos, languages, and the recent push", () => {
+  it("normalizes calendar, repos, and the recent push", () => {
     const s = summarizeGithub(user, "anthonylhta");
     expect(s.login).toBe("anthonylhta");
     expect(s.contributions).toBe(5);
     expect(s.publicRepos).toBe(7);
     expect(s.weeks[0]).toEqual([0, 4, 1]); // levels scaled to max=4
-    expect(s.languages[0]).toEqual({ name: "TypeScript", pct: 100 });
     expect(s.recent).toEqual({
       repo: "riichi",
       lang: "TypeScript",

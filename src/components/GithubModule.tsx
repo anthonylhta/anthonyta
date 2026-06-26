@@ -5,7 +5,7 @@ import { GITHUB_URL } from "@/lib/site";
 /**
  * The lobby's "code" band — the live coding signal for recruiters (ADR 0042). A
  * full-width strip below the module grid: contributions + streak + repos, the
- * contribution heatmap, top languages, and the latest push. All public data.
+ * contribution heatmap, and the latest push. All public data.
  */
 export function GithubModule({ gh }: { gh: GithubStats }) {
   const when = gh.recent ? relativeTime(gh.recent.at) : null;
@@ -44,26 +44,8 @@ export function GithubModule({ gh }: { gh: GithubStats }) {
       </div>
 
       {/* contribution heatmap */}
-      <div className="mb-4">
+      <div>
         <ContribGraph weeks={gh.weeks} months={gh.months} />
-      </div>
-
-      {/* top languages */}
-      <div className="space-y-1.5">
-        {gh.languages.map((l) => (
-          <div key={l.name} className="flex items-center gap-3 text-[13px]">
-            <span className="w-24 shrink-0 text-fg/90">{l.name}</span>
-            <span className="h-2 flex-1 overflow-hidden rounded-sm bg-hairline">
-              <span
-                className="block h-full bg-amber"
-                style={{ width: `${l.pct}%` }}
-              />
-            </span>
-            <span className="w-9 shrink-0 text-right tabular-nums text-muted">
-              {l.pct}%
-            </span>
-          </div>
-        ))}
       </div>
 
       {/* recent push */}

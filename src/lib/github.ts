@@ -7,11 +7,6 @@ import { GITHUB_LOGIN } from "./site";
  * (connectors/github) wraps these around the fetch + cache.
  */
 
-export interface GithubLang {
-  name: string;
-  pct: number;
-}
-
 export interface GithubStats {
   login: string;
   /** total contributions in the trailing year */
@@ -19,8 +14,6 @@ export interface GithubStats {
   currentStreak: number;
   bestStreak: number;
   publicRepos: number;
-  /** top languages by aggregate bytes, % of the total */
-  languages: GithubLang[];
   /** contribution levels 0–4, [week][day], oldest → newest (weeks may be ragged) */
   weeks: number[][];
   /** month labels keyed to the week index where each month starts */
@@ -68,26 +61,11 @@ export function streaks(counts: number[]): {
   return { currentStreak: current, bestStreak: best };
 }
 
-type LangEdge = { size: number; node: { name: string } };
 export type Repo = {
   name: string;
   pushedAt: string;
   primaryLanguage: { name: string } | null;
-  languages: { edges: LangEdge[] };
 };
-
-/** Aggregate language bytes across repos → top `n`, as % of the grand total. */
-export function aggregateLanguages(repos: Repo[], n = 4): GithubLang[] {
-  const sizes = new Map<string, number>();
-  for (const r of repos)
-    for (const e of r.languages.edges)
-      sizes.set(e.node.name, (sizes.get(e.node.name) ?? 0) + e.size);
-  const total = [...sizes.values()].reduce((a, b) => a + b, 0) || 1;
-  return [...sizes.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n)
-    .map(([name, size]) => ({ name, pct: Math.round((size / total) * 100) }));
-}
 
 type CalDay = { contributionCount: number; date: string };
 type CalWeek = { contributionDays: CalDay[] };
@@ -130,7 +108,6 @@ export function summarizeGithub(user: RawUser, login: string): GithubStats {
     contributions: cal.totalContributions,
     ...streaks(counts),
     publicRepos: user.repositories.totalCount,
-    languages: aggregateLanguages(user.repositories.nodes),
     weeks,
     months: monthLabels(cal.weeks),
     recent: top
@@ -188,12 +165,6 @@ export const sampleGithub: GithubStats = {
   currentStreak: 18,
   bestStreak: 73,
   publicRepos: 14,
-  languages: [
-    { name: "TypeScript", pct: 61 },
-    { name: "Python", pct: 18 },
-    { name: "Rust", pct: 11 },
-    { name: "CSS", pct: 6 },
-  ],
   weeks: sampleWeeks(),
   months: [
     "Jul",
