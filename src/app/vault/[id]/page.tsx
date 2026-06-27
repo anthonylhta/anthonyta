@@ -3,37 +3,16 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import {
+  getVaultImages,
   getVaultIndex,
   getVaultNote,
-  type VaultNote,
 } from "@/lib/connectors/vault";
+import { preprocessNote } from "@/lib/vault";
 import { NoteBody } from "./NoteBody";
 
 export const metadata = { title: "vault" };
 
 export const dynamic = "force-dynamic";
-
-/** Strip YAML frontmatter, turn Obsidian `[[wikilinks]]` into in-vault links, and
- *  replace `![[embeds]]` with a placeholder (images come later). */
-function preprocess(raw: string, index: VaultNote[]): string {
-  const byTitle = new Map<string, string>();
-  for (const n of index) byTitle.set(n.title.toLowerCase(), n.id);
-
-  let md = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
-  md = md.replace(
-    /!\[\[([^\]]+)\]\]/g,
-    (_m, name) => `*[embed: ${String(name).trim()}]*`,
-  );
-  md = md.replace(
-    /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g,
-    (_m, name, alias) => {
-      const id = byTitle.get(String(name).trim().toLowerCase());
-      const label = String(alias ?? name).trim();
-      return id ? `[${label}](/vault/${id})` : label;
-    },
-  );
-  return md;
-}
 
 export default async function NotePage({
   params,
@@ -47,13 +26,17 @@ export default async function NotePage({
   if (!session?.user) notFound();
 
   // Index is cached (fast), and gives the note's modifiedTime so the content
-  // read is cache-keyed by it — fresh after an edit, instant on revisit.
-  const index = await getVaultIndex();
+  // read is cache-keyed by it — fresh after an edit, instant on revisit. The image
+  // index resolves `![[image]]` embeds to the gated `/vault/img/<id>` route.
+  const [index, images] = await Promise.all([
+    getVaultIndex(),
+    getVaultImages(),
+  ]);
   const note = index.find((n) => n.id === id);
   const raw = await getVaultNote(id, note?.modified);
   if (raw == null) notFound();
 
-  const md = preprocess(raw, index);
+  const md = preprocessNote(raw, { notes: index, images });
   const who = session.user.name ?? "anthony";
   const dir =
     note && note.path.includes("/")

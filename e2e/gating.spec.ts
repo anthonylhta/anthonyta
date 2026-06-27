@@ -9,7 +9,12 @@ import { expect, test } from "@playwright/test";
  */
 
 test.describe("guest gating", () => {
-  for (const path of ["/vault", "/portfolio", "/vault/abc123XYZ"]) {
+  for (const path of [
+    "/vault",
+    "/portfolio",
+    "/vault/abc123XYZ",
+    "/vault/img/abc123XYZ", // the owner-gated image route (ADR 0048)
+  ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
     });

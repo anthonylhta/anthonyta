@@ -9,8 +9,9 @@ import { driveToken } from "@/lib/google";
  * READ-ONLY, fully guarded — missing env/creds (CI) or any failure returns
  * `[]`/`null`. OWNER-ONLY by contract: every caller MUST gate on the session
  * before invoking these (the `/vault` route `notFound()`s for guests, so vault
- * data never reaches a non-authed response). Skips `.obsidian`/`.trash`; only
- * markdown is indexed (the `Images/` folder is ignored for the index).
+ * data never reaches a non-authed response). Skips `.obsidian`/`.trash`. Markdown
+ * builds the note index; image files are indexed separately (`getVaultImages`) so
+ * the reader can resolve `![[image]]` embeds to the owner-gated image route (ADR 0048).
  */
 
 export interface VaultNote {
@@ -19,6 +20,13 @@ export interface VaultNote {
   path: string; // vault-relative path, e.g. "Weekly Planners/2026-W25.md"
   modified: string; // ISO
   preview?: string; // first content line (a small byte-range read), for the index
+}
+
+export interface VaultImage {
+  id: string; // Drive file id
+  name: string; // filename, e.g. "20260620_101500.jpg"
+  path: string; // vault-relative path, e.g. "Journals/Images/2026-06-20/20260620_101500.jpg"
+  mimeType: string; // e.g. "image/jpeg"
 }
 
 const DRIVE = "https://www.googleapis.com/drive/v3/files";
@@ -31,11 +39,16 @@ type DriveFile = {
   modifiedTime: string;
 };
 
+interface VaultTree {
+  notes: VaultNote[];
+  images: VaultImage[];
+}
+
 async function listFolder(
   token: string,
   folderId: string,
   prefix: string,
-  out: VaultNote[],
+  tree: VaultTree,
 ): Promise<void> {
   let pageToken: string | undefined;
   do {
@@ -58,13 +71,20 @@ async function listFolder(
     for (const f of data.files ?? []) {
       if (f.mimeType === "application/vnd.google-apps.folder") {
         if (SKIP_FOLDERS.has(f.name)) continue;
-        await listFolder(token, f.id, `${prefix}${f.name}/`, out);
+        await listFolder(token, f.id, `${prefix}${f.name}/`, tree);
       } else if (f.mimeType === "text/markdown" || f.name.endsWith(".md")) {
-        out.push({
+        tree.notes.push({
           id: f.id,
           title: f.name.replace(/\.md$/, ""),
           path: `${prefix}${f.name}`,
           modified: f.modifiedTime,
+        });
+      } else if (f.mimeType.startsWith("image/")) {
+        tree.images.push({
+          id: f.id,
+          name: f.name,
+          path: `${prefix}${f.name}`,
+          mimeType: f.mimeType,
         });
       }
     }
@@ -138,22 +158,24 @@ function cachedPreview(token: string, n: VaultNote): Promise<string> {
   )();
 }
 
-async function buildIndex(): Promise<VaultNote[]> {
+async function buildTree(): Promise<VaultTree> {
   const token = await driveToken();
   const folderId = process.env.VAULT_FOLDER_ID;
-  if (!token || !folderId) return [];
-  const out: VaultNote[] = [];
-  await listFolder(token, folderId, "", out);
-  out.sort((a, b) => b.modified.localeCompare(a.modified)); // newest first
-  const previews = await mapLimit(out, 24, (n) => cachedPreview(token, n));
-  out.forEach((n, i) => {
+  if (!token || !folderId) return { notes: [], images: [] };
+  const tree: VaultTree = { notes: [], images: [] };
+  await listFolder(token, folderId, "", tree);
+  tree.notes.sort((a, b) => b.modified.localeCompare(a.modified)); // newest first
+  const previews = await mapLimit(tree.notes, 24, (n) =>
+    cachedPreview(token, n),
+  );
+  tree.notes.forEach((n, i) => {
     n.preview = previews[i];
   });
-  return out;
+  return tree;
 }
 
 // Heavier build (a byte-range read per note for previews), so cache it longer.
-const loadIndex = unstable_cache(buildIndex, ["vault-index"], {
+const loadTree = unstable_cache(buildTree, ["vault-tree"], {
   revalidate: 1800,
   tags: ["vault"],
 });
@@ -161,9 +183,20 @@ const loadIndex = unstable_cache(buildIndex, ["vault-index"], {
 /** The note index (newest first). `[]` on any failure. Gate on the session first. */
 export async function getVaultIndex(): Promise<VaultNote[]> {
   try {
-    return await loadIndex();
+    return (await loadTree()).notes;
   } catch (err) {
     console.error("[connector:vault] index failed", err);
+    return [];
+  }
+}
+
+/** The vault's image files, for resolving `![[image]]` embeds to the owner-gated
+ *  image route (ADR 0048). `[]` on any failure. Gate on the session first. */
+export async function getVaultImages(): Promise<VaultImage[]> {
+  try {
+    return (await loadTree()).images;
+  } catch (err) {
+    console.error("[connector:vault] images failed", err);
     return [];
   }
 }
