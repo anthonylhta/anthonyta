@@ -201,6 +201,59 @@ export async function getVaultImages(): Promise<VaultImage[]> {
   }
 }
 
+/** The id + modified time of the note titled `date` (YYYY-MM-DD), or null if it
+ *  doesn't exist yet. A name-scoped Drive query — the service account only has the
+ *  vault folder shared, and daily-note names are unique per day, so this is one
+ *  cheap lookup rather than a walk of the whole tree. */
+async function fetchTodayMeta(
+  date: string,
+): Promise<{ id: string; modified: string } | null> {
+  const token = await driveToken();
+  if (!token) return null;
+  const q = encodeURIComponent(`name = '${date}.md' and trashed = false`);
+  const url =
+    `${DRIVE}?q=${q}&pageSize=1&orderBy=modifiedTime desc` +
+    `&fields=files(id,modifiedTime)`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    console.error("[connector:vault] today lookup failed", res.status);
+    return null;
+  }
+  const data = (await res.json()) as { files?: DriveFile[] };
+  const f = data.files?.[0];
+  return f ? { id: f.id, modified: f.modifiedTime } : null;
+}
+
+/**
+ * Today's daily note — its id, modified time, and raw markdown — or null if no
+ * note exists yet (a fresh, unplanned day). A LIGHT, short-TTL lookup kept apart
+ * from the heavy 30-min reader index (`getVaultIndex`) so the dashboard digest
+ * notices a new note / a checked box within ~60s; the body itself is keyed by
+ * modifiedTime, so an unchanged note is a pure cache hit and only real edits
+ * re-fetch. OWNER-ONLY — gate on the session before calling (ADR 0049).
+ */
+export async function getTodayNote(
+  date: string,
+): Promise<{ id: string; modified: string; text: string } | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  try {
+    const meta = await unstable_cache(
+      () => fetchTodayMeta(date),
+      ["vault-today", date],
+      { revalidate: 60, tags: ["vault"] },
+    )();
+    if (!meta) return null;
+    const text = await getVaultNote(meta.id, meta.modified);
+    if (text === null) return null;
+    return { id: meta.id, modified: meta.modified, text };
+  } catch (err) {
+    console.error("[connector:vault] today failed", err);
+    return null;
+  }
+}
+
 async function fetchNoteText(id: string): Promise<string | null> {
   const token = await driveToken();
   if (!token) return null;
