@@ -18,17 +18,28 @@ import { getGithub } from "@/lib/connectors/github";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getLanguageStats } from "@/lib/connectors/translator";
-import { getVaultIndex } from "@/lib/connectors/vault";
+import { getTodayNote, getVaultIndex } from "@/lib/connectors/vault";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { arrow, aud, tone } from "@/lib/money";
 import { getBaseline, getSeries } from "@/lib/snapshots";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
-import { sampleDashboard as d, samplePortfolio } from "@/lib/sampleDashboard";
+import { samplePortfolio } from "@/lib/sampleDashboard";
+import { parseDaily, type TodayDigest } from "@/lib/today";
 
 /** Today's date in Sydney as YYYY-MM-DD (matches the vault's daily-note titles). */
 function sydneyISODate(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Australia/Sydney",
+  }).format(new Date());
+}
+
+/** A "Sun 28 Jun" label for the TODAY zone header. */
+function todayLabel(): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Australia/Sydney",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
   }).format(new Date());
 }
 
@@ -58,6 +69,7 @@ function weekRange(): string {
  * IS the pulse, so there's no separate heatmap to duplicate it.
  */
 export async function CommandCenter({ userName }: { userName: string }) {
+  const today = sydneyISODate();
   const [
     portfolioData,
     briefing,
@@ -68,6 +80,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     gh,
     snapshots,
     riichi,
+    todayRaw,
   ] = await Promise.all([
     getPortfolio(),
     getBriefing(),
@@ -78,6 +91,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getGithub(),
     getSeries(ACTIVITY_DAYS),
     getRiichiStats(),
+    getTodayNote(today),
   ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
@@ -101,9 +115,9 @@ export async function CommandCenter({ userName }: { userName: string }) {
     .filter((tk): tk is TapeItem => Boolean(tk));
   const ticks = curated.length ? curated : b.tape.slice(0, 3);
 
-  // vault-backed bits: today's "now" snippet + the week's journal count
-  const today = sydneyISODate();
-  const todayNote = vault.find((n) => n.title === today);
+  // vault-backed bits: today's parsed digest + the week's journal count.
+  // digest is null when no note exists yet (a fresh, unplanned morning).
+  const digest = todayRaw ? parseDaily(todayRaw.text) : null;
   const journalCount = journalThisWeek(vault);
 
   // THIS WEEK rows — number = this week, strip = the trailing ~10-week trend.
@@ -179,7 +193,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
         </div>
 
         {/* ───────────── TODAY ───────────── */}
-        <Zone label="today" />
+        <Zone label="today" right={todayLabel()} />
 
         {/* net worth — a glance; full holdings + cash live on /portfolio */}
         <div className="border-b border-hairline px-4 py-4">
@@ -212,6 +226,9 @@ export async function CommandCenter({ userName }: { userName: string }) {
           </p>
         </div>
 
+        {/* today's daily note, parsed: headline + planner + a journal peek */}
+        <DailyDigest digest={digest} noteId={todayRaw?.id} date={today} />
+
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
           <Module
             label="briefing"
@@ -230,31 +247,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
           </Module>
 
           <Module
-            label="now"
-            className="border-0"
-            action={
-              <Link
-                href="/vault"
-                className="text-xs text-amber hover:underline"
-              >
-                vault →
-              </Link>
-            }
-          >
-            <p className="text-fg">
-              <span className="text-amber">→</span> {d.today.focus}
-            </p>
-            {todayNote?.preview && (
-              <p className="mt-1.5 line-clamp-2 text-xs text-muted">
-                <span className="tabular-nums">{today}</span> ·{" "}
-                {todayNote.preview}
-              </p>
-            )}
-          </Module>
-
-          <Module
             label="today's hand"
-            className="border-0"
+            className="border-0 sm:col-span-2"
             action={
               <Link
                 href="/riichi"
@@ -340,6 +334,100 @@ function Zone({ label, right }: { label: string; right?: string }) {
         <span className="text-[11px] tabular-nums text-muted">{right}</span>
       )}
     </div>
+  );
+}
+
+/** The TODAY digest — today's daily note parsed into a headline, the day planner
+ *  (checkbox state + times), and a muted journal peek. `digest` is null when no
+ *  note exists yet (an unplanned morning); the planner is empty on a note that's
+ *  only been journaled in. Read-only — checking off happens in Obsidian. */
+function DailyDigest({
+  digest,
+  noteId,
+  date,
+}: {
+  digest: TodayDigest | null;
+  noteId?: string;
+  date: string;
+}) {
+  return (
+    <Module
+      label="daily note"
+      className="border-0 border-b border-hairline"
+      action={
+        noteId ? (
+          <Link
+            href={`/vault/${noteId}`}
+            className="text-xs text-amber hover:underline"
+          >
+            read full day →
+          </Link>
+        ) : (
+          <Link href="/vault" className="text-xs text-amber hover:underline">
+            vault →
+          </Link>
+        )
+      }
+    >
+      {!digest ? (
+        <p className="text-muted">
+          no note for <span className="tabular-nums">{date}</span> yet — plan it
+          in the vault
+        </p>
+      ) : (
+        <>
+          {digest.summary && (
+            <p className="text-fg">
+              <span className="text-amber">→</span> {digest.summary}
+            </p>
+          )}
+
+          {digest.planner.length > 0 ? (
+            <div className={digest.summary ? "mt-3" : ""}>
+              <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-muted">
+                <span>day planner</span>
+                <span className="tabular-nums">
+                  <span className="text-amber">{digest.doneCount}</span> done ·{" "}
+                  {digest.openCount} left
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {digest.planner.map((item, i) => (
+                  <li key={i} className="flex items-baseline gap-2 text-sm">
+                    <span
+                      className={item.done ? "text-up" : "text-muted"}
+                      aria-hidden
+                    >
+                      {item.done ? "✓" : "○"}
+                    </span>
+                    {item.time && (
+                      <span className="shrink-0 tabular-nums text-muted">
+                        {item.time}
+                      </span>
+                    )}
+                    <span
+                      className={
+                        item.done ? "text-muted line-through" : "text-fg"
+                      }
+                    >
+                      {item.text}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-muted">no plans logged yet</p>
+          )}
+
+          {digest.journalPreview && (
+            <p className="mt-3 line-clamp-2 border-t border-hairline/40 pt-2 text-xs text-muted">
+              {digest.journalPreview}
+            </p>
+          )}
+        </>
+      )}
+    </Module>
   );
 }
 
