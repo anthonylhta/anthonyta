@@ -286,7 +286,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
 
         {/* quick jumps */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
-          <nav className="flex gap-4">
+          <nav className="flex flex-wrap gap-x-4 gap-y-1">
             <Link
               href="/briefing"
               className="text-muted transition-colors hover:text-amber"
