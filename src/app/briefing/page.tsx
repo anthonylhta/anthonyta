@@ -46,8 +46,10 @@ export default async function BriefingPage() {
                 ahead
               </span>
               {b.watch.map((w) => (
-                <span key={w.label} className="whitespace-nowrap">
-                  <span className="tabular-nums text-amber">{w.date}</span>{" "}
+                <span key={w.label}>
+                  <span className="whitespace-nowrap tabular-nums text-amber">
+                    {w.date}
+                  </span>{" "}
                   <span className="text-fg/80">{w.label}</span>
                 </span>
               ))}
