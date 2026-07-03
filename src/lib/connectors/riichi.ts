@@ -102,10 +102,11 @@ function client() {
  * `users.id`) → sample.
  */
 export async function getRiichiStats(): Promise<RiichiStats> {
-  const db = client();
-  const userId = Number(process.env.RIICHI_USER_ID);
-  if (!db || !Number.isInteger(userId) || userId <= 0) return sampleRiichiStats;
   try {
+    const db = client();
+    const userId = Number(process.env.RIICHI_USER_ID);
+    if (!db || !Number.isInteger(userId) || userId <= 0)
+      return sampleRiichiStats;
     const rows = await db<{ date: string; correct: boolean }[]>`
       select date, correct from puzzle_results where user_id = ${userId}
     `;

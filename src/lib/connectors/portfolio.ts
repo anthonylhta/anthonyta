@@ -11,12 +11,12 @@ const DRIVE = "https://www.googleapis.com/drive/v3/files";
  * to the demo numbers. Anthony drops a fresh export in the folder each week.
  */
 export async function getPortfolio(): Promise<Portfolio | null> {
-  const token = await driveToken();
-  const folderId = process.env.BRIEFING_FOLDER_ID;
-  if (!token || !folderId) return null;
-  const headers = { Authorization: `Bearer ${token}` };
-
   try {
+    const token = await driveToken();
+    const folderId = process.env.BRIEFING_FOLDER_ID;
+    if (!token || !folderId) return null;
+    const headers = { Authorization: `Bearer ${token}` };
+
     const q = encodeURIComponent(
       `'${folderId}' in parents and mimeType='text/csv' and trashed=false`,
     );
