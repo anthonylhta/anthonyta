@@ -37,8 +37,14 @@ export function toLevels(counts: number[]): number[] {
   return counts.map((c) => contribLevel(c, max));
 }
 
+// en-CA formats as YYYY-MM-DD. Hoisted — Intl formatters are costly to build.
+const SYDNEY_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Australia/Sydney",
+});
+
 /** Count items per day over the trailing window — `isoDates` are each item's
- *  timestamp (only the YYYY-MM-DD prefix matters). For notes, translations, etc. */
+ *  timestamp, bucketed on its Sydney calendar day (the `today` anchor is a Sydney
+ *  day, so a UTC-evening timestamp belongs to the next day). For notes etc. */
 export function dailyCounts(
   isoDates: string[],
   days: number,
@@ -46,7 +52,7 @@ export function dailyCounts(
 ): number[] {
   const perDay = new Map<string, number>();
   for (const iso of isoDates) {
-    const day = iso.slice(0, 10);
+    const day = SYDNEY_DAY.format(new Date(iso));
     perDay.set(day, (perDay.get(day) ?? 0) + 1);
   }
   return windowSeries(perDay, days, today);
