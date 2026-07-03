@@ -179,6 +179,7 @@ export const notes: Note[] = [
     oneLiner:
       "Fail loud and early on bad config — but be precise about which edge.",
     updated: "2026-06-08",
+    related: ["graceful-degradation-is-an-invariant"],
     body: (
       <>
         <p>
@@ -235,6 +236,59 @@ export const notes: Note[] = [
           </strong>{" "}
           It’s the messy, unwritten, “you just have to know” case — and that’s
           the one worth building for.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "graceful-degradation-is-an-invariant",
+    title: "graceful degradation is an invariant, not a vibe",
+    oneLiner:
+      "A fallback only counts if the try starts at the first fallible line.",
+    updated: "2026-07-04",
+    related: ["validate-your-environment-at-the-edge"],
+    body: (
+      <>
+        <p>
+          This site aggregates my other projects as live data — the reading
+          tracker, the riichi trainer, market briefings out of Google Drive.
+          Every source sits behind a connector with one hard rule:{" "}
+          <strong>
+            if anything fails — missing config, dead upstream, bad data — the
+            connector returns placeholder data, never a crash.
+          </strong>{" "}
+          That’s why CI builds with zero secrets and the site renders even when
+          a source is down. Degradation is designed, not hoped for.
+        </p>
+        <p>
+          Then an audit of my own code found two connectors quietly breaking the
+          rule. Both did fallible setup <em>before</em> the try: one awaited a
+          Google Drive token on its first line; the other constructed a database
+          client, which throws synchronously on a malformed connection string.
+          The catch guarded the query, not the setup — so the invariant held for
+          runtime failures and silently didn’t for setup failures. One transient
+          auth blip and the page whose whole promise was “never crash” would
+          have crashed.
+        </p>
+        <p>
+          The fix was moving two lines. The lesson is the class of bug:{" "}
+          <strong>graceful degradation fails at the seams.</strong> “This
+          function never throws” is a claim about its{" "}
+          <em>first fallible expression</em>, not its happy path — so the try
+          has to start there. And now tests hold the promise in place: mock the
+          token to reject and the client to throw, and assert the sample data
+          comes back instead of a rejection.
+        </p>
+        <p>
+          The mirror of this rule is my config policy: environment validation
+          fails <em>loud</em> at startup, while public read paths fail{" "}
+          <em>quiet</em>. That’s not a contradiction — it’s the same question
+          answered per edge. Config breaks in front of the person deploying;
+          read paths break in front of a visitor.{" "}
+          <strong>
+            A failure policy is chosen per edge, then enforced like any other
+            invariant — with tests, not intentions.
+          </strong>
         </p>
       </>
     ),
