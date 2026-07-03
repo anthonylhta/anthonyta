@@ -111,6 +111,28 @@ describe("parseDaily — planner shapes", () => {
   });
 });
 
+describe("parseDaily — code fences", () => {
+  it("keeps planner tasks after a fenced # line", () => {
+    const d = parseDaily(
+      "# Day planner\n- [x] Gym\n```sh\n# not a heading\n```\n- [ ] Groceries\n",
+    );
+    expect(d.planner.map((p) => p.text)).toEqual(["Gym", "Groceries"]);
+  });
+
+  it("does not let a fenced # Journal steal the journal section", () => {
+    const d = parseDaily(
+      "# Day planner\n- [ ] Work\n```\n# Journal\nfenced text\n```\n# Journal\nreal first line\n",
+    );
+    expect(d.planner).toHaveLength(1);
+    expect(d.journalPreview).toBe("real first line");
+  });
+
+  it("treats ~~~ fences the same as backtick fences", () => {
+    const d = parseDaily("# Day planner\n~~~\n# comment\n~~~\n- [ ] Dentist\n");
+    expect(d.planner.map((p) => p.text)).toEqual(["Dentist"]);
+  });
+});
+
 describe("parseDaily — empty and partial notes", () => {
   it("returns an empty digest for empty input", () => {
     expect(parseDaily("")).toEqual({

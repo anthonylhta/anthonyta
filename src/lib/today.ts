@@ -76,12 +76,25 @@ function summaryFrom(fm: string | null): string | null {
   return null;
 }
 
-/** Split the body into `# heading` sections; lines before the first heading drop. */
+/**
+ * Split the body into `# heading` sections; lines before the first heading drop.
+ * A `#` line inside a ``` / ~~~ fence is content, not a heading — otherwise a
+ * fenced comment splits the planner and silently drops the tasks after it.
+ */
 function sections(body: string): Section[] {
   const out: Section[] = [];
   let cur: Section | null = null;
+  let fence: string | null = null; // the opening run, e.g. "```"
   for (const raw of body.split(/\r?\n/)) {
-    const h = raw.match(/^#{1,6}\s+(.+?)\s*$/);
+    const f = raw.match(/^\s{0,3}(`{3,}|~{3,})/);
+    if (f) {
+      if (!fence) fence = f[1];
+      else if (f[1][0] === fence[0] && f[1].length >= fence.length)
+        fence = null;
+      cur?.lines.push(raw);
+      continue;
+    }
+    const h = fence ? null : raw.match(/^#{1,6}\s+(.+?)\s*$/);
     if (h) {
       cur = { heading: h[1].trim().toLowerCase(), lines: [] };
       out.push(cur);
