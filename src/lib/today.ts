@@ -139,7 +139,8 @@ function journalPreviewFrom(secs: Section[]): string {
       .replace(/!?\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g, "$1") // wikilinks/embeds
       .replace(/[*_`~]/g, "") // emphasis
       .trim();
-    if (line) return line.slice(0, 140);
+    // Slice by code points — a UTF-16 slice can cut an emoji in half.
+    if (line) return [...line].slice(0, 140).join("");
   }
   return "";
 }

@@ -133,6 +133,16 @@ describe("parseDaily — code fences", () => {
   });
 });
 
+describe("parseDaily — journal preview truncation", () => {
+  it("never splits a surrogate pair at the 140-char cut", () => {
+    // 139 chars then an emoji: a UTF-16 slice(0, 140) would keep only the
+    // high surrogate. The preview must end with the whole emoji.
+    const line = "a".repeat(139) + "😀 and more after the cut";
+    const d = parseDaily(`# Journal\n${line}\n`);
+    expect(d.journalPreview).toBe("a".repeat(139) + "😀");
+  });
+});
+
 describe("parseDaily — empty and partial notes", () => {
   it("returns an empty digest for empty input", () => {
     expect(parseDaily("")).toEqual({
