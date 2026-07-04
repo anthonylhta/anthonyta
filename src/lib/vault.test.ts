@@ -56,6 +56,21 @@ describe("preprocessNote — image embeds", () => {
     const src = "![x](https://example.com/a.png)";
     expect(preprocessNote(src, refs)).toContain(src);
   });
+
+  it("survives a bare % in an image path instead of throwing", () => {
+    const src = "![x](not%valid.png)";
+    expect(preprocessNote(src, refs)).toContain(src);
+  });
+
+  it("resolves an image whose real filename contains a bare %", () => {
+    const pctRefs = {
+      notes: [],
+      images: [{ id: "imgPct", name: "100%.png", path: "Charts/100%.png" }],
+    };
+    expect(preprocessNote("![done](100%.png)", pctRefs)).toContain(
+      "![done](/vault/img/imgPct)",
+    );
+  });
 });
 
 describe("preprocessNote — wikilinks & frontmatter", () => {

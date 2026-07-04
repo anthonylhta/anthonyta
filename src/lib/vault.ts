@@ -24,6 +24,16 @@ function baseName(p: string): string {
   return p.split("/").pop() ?? p;
 }
 
+/** decodeURIComponent, except a bare `%` (e.g. `100%.png`) keeps the raw path
+ *  instead of throwing URIError — Obsidian doesn't always percent-encode. */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export function preprocessNote(
   raw: string,
   refs: { notes: NoteRef[]; images: ImageRef[] },
@@ -60,7 +70,7 @@ export function preprocessNote(
   // External URLs (http/https/data) and already-rewritten routes are left alone.
   md = md.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
     if (/^(https?:|data:|\/vault\/img\/)/i.test(url)) return m;
-    const id = resolveImage(decodeURIComponent(url).trim());
+    const id = resolveImage(safeDecode(url).trim());
     return id ? `![${alt || baseName(url)}](/vault/img/${id})` : m;
   });
 
