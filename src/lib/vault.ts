@@ -38,16 +38,23 @@ export function preprocessNote(
   raw: string,
   refs: { notes: NoteRef[]; images: ImageRef[] },
 ): string {
+  // First write wins on duplicate names: `refs.notes` arrives newest-first
+  // (getVaultIndex sorts it), so a duplicated title resolves to the newest note.
   const noteByTitle = new Map<string, string>();
-  for (const n of refs.notes) noteByTitle.set(n.title.toLowerCase(), n.id);
+  for (const n of refs.notes) {
+    const key = n.title.toLowerCase();
+    if (!noteByTitle.has(key)) noteByTitle.set(key, n.id);
+  }
 
   // Images resolve by full vault path first, then by bare filename (Obsidian's
   // "shortest path" embeds drop the folders), both case-insensitive.
   const imgByPath = new Map<string, string>();
   const imgByName = new Map<string, string>();
   for (const im of refs.images) {
-    imgByPath.set(im.path.toLowerCase(), im.id);
-    imgByName.set(baseName(im.name).toLowerCase(), im.id);
+    const pathKey = im.path.toLowerCase();
+    const nameKey = baseName(im.name).toLowerCase();
+    if (!imgByPath.has(pathKey)) imgByPath.set(pathKey, im.id);
+    if (!imgByName.has(nameKey)) imgByName.set(nameKey, im.id);
   }
   const resolveImage = (target: string): string | undefined => {
     const key = target.toLowerCase();

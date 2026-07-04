@@ -122,3 +122,48 @@ describe("preprocessNote — wikilinks & frontmatter", () => {
     );
   });
 });
+
+describe("preprocessNote — duplicate names", () => {
+  it("resolves a duplicated note title to the first (newest) entry", () => {
+    // getVaultIndex sorts newest-first, so the first entry must win.
+    const dupNotes = {
+      notes: [
+        { id: "newer", title: "Meeting" },
+        { id: "older", title: "Meeting" },
+      ],
+      images: [],
+    };
+    expect(preprocessNote("[[Meeting]]", dupNotes)).toContain(
+      "[Meeting](/vault/newer)",
+    );
+  });
+
+  it("resolves a duplicated image basename to the first entry", () => {
+    const dupImages = {
+      notes: [],
+      images: [
+        { id: "firstImg", name: "shot.png", path: "A/shot.png" },
+        { id: "secondImg", name: "shot.png", path: "B/shot.png" },
+      ],
+    };
+    expect(preprocessNote("![[shot.png]]", dupImages)).toContain(
+      "(/vault/img/firstImg)",
+    );
+  });
+
+  it("still resolves both duplicate images by their full paths", () => {
+    const dupImages = {
+      notes: [],
+      images: [
+        { id: "firstImg", name: "shot.png", path: "A/shot.png" },
+        { id: "secondImg", name: "shot.png", path: "B/shot.png" },
+      ],
+    };
+    expect(preprocessNote("![[A/shot.png]]", dupImages)).toContain(
+      "(/vault/img/firstImg)",
+    );
+    expect(preprocessNote("![[B/shot.png]]", dupImages)).toContain(
+      "(/vault/img/secondImg)",
+    );
+  });
+});
