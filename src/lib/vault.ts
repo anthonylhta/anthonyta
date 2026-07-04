@@ -24,20 +24,37 @@ function baseName(p: string): string {
   return p.split("/").pop() ?? p;
 }
 
+/** decodeURIComponent, except a bare `%` (e.g. `100%.png`) keeps the raw path
+ *  instead of throwing URIError — Obsidian doesn't always percent-encode. */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export function preprocessNote(
   raw: string,
   refs: { notes: NoteRef[]; images: ImageRef[] },
 ): string {
+  // First write wins on duplicate names: `refs.notes` arrives newest-first
+  // (getVaultIndex sorts it), so a duplicated title resolves to the newest note.
   const noteByTitle = new Map<string, string>();
-  for (const n of refs.notes) noteByTitle.set(n.title.toLowerCase(), n.id);
+  for (const n of refs.notes) {
+    const key = n.title.toLowerCase();
+    if (!noteByTitle.has(key)) noteByTitle.set(key, n.id);
+  }
 
   // Images resolve by full vault path first, then by bare filename (Obsidian's
   // "shortest path" embeds drop the folders), both case-insensitive.
   const imgByPath = new Map<string, string>();
   const imgByName = new Map<string, string>();
   for (const im of refs.images) {
-    imgByPath.set(im.path.toLowerCase(), im.id);
-    imgByName.set(baseName(im.name).toLowerCase(), im.id);
+    const pathKey = im.path.toLowerCase();
+    const nameKey = baseName(im.name).toLowerCase();
+    if (!imgByPath.has(pathKey)) imgByPath.set(pathKey, im.id);
+    if (!imgByName.has(nameKey)) imgByName.set(nameKey, im.id);
   }
   const resolveImage = (target: string): string | undefined => {
     const key = target.toLowerCase();
@@ -60,16 +77,21 @@ export function preprocessNote(
   // External URLs (http/https/data) and already-rewritten routes are left alone.
   md = md.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, url) => {
     if (/^(https?:|data:|\/vault\/img\/)/i.test(url)) return m;
-    const id = resolveImage(decodeURIComponent(url).trim());
+    const id = resolveImage(safeDecode(url).trim());
     return id ? `![${alt || baseName(url)}](/vault/img/${id})` : m;
   });
 
   // `[[wikilink]]` (optional `|alias`) → in-vault link, or just the label if unknown.
+  // A `#heading` / `^block` suffix targets a spot INSIDE the note (`#`/`^` are
+  // illegal in Obsidian titles), so it's stripped for the lookup; the reader has
+  // no anchors, so the link lands on the note top and the label keeps the suffix.
   md = md.replace(
     /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g,
     (_m, name, alias) => {
-      const id = noteByTitle.get(String(name).trim().toLowerCase());
-      const label = String(alias ?? name).trim();
+      const written = String(name).trim();
+      const title = written.split(/[#^]/)[0].trim();
+      const id = title ? noteByTitle.get(title.toLowerCase()) : undefined;
+      const label = String(alias ?? written).trim();
       return id ? `[${label}](/vault/${id})` : label;
     },
   );
