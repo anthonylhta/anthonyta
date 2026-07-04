@@ -75,11 +75,16 @@ export function preprocessNote(
   });
 
   // `[[wikilink]]` (optional `|alias`) → in-vault link, or just the label if unknown.
+  // A `#heading` / `^block` suffix targets a spot INSIDE the note (`#`/`^` are
+  // illegal in Obsidian titles), so it's stripped for the lookup; the reader has
+  // no anchors, so the link lands on the note top and the label keeps the suffix.
   md = md.replace(
     /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g,
     (_m, name, alias) => {
-      const id = noteByTitle.get(String(name).trim().toLowerCase());
-      const label = String(alias ?? name).trim();
+      const written = String(name).trim();
+      const title = written.split(/[#^]/)[0].trim();
+      const id = title ? noteByTitle.get(title.toLowerCase()) : undefined;
+      const label = String(alias ?? written).trim();
       return id ? `[${label}](/vault/${id})` : label;
     },
   );

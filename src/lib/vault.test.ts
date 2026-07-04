@@ -92,6 +92,30 @@ describe("preprocessNote — wikilinks & frontmatter", () => {
     );
   });
 
+  it("resolves a [[Note#Heading]] link to the note", () => {
+    expect(preprocessNote("[[Daily 2026-06-20#Morning]]", refs)).toContain(
+      "[Daily 2026-06-20#Morning](/vault/noteA)",
+    );
+  });
+
+  it("resolves a [[Note^block]] link to the note", () => {
+    expect(preprocessNote("[[Daily 2026-06-20^ab12cd]]", refs)).toContain(
+      "[Daily 2026-06-20^ab12cd](/vault/noteA)",
+    );
+  });
+
+  it("resolves a suffixed link with an alias to the alias label", () => {
+    expect(
+      preprocessNote("[[Daily 2026-06-20#Morning|the morning]]", refs),
+    ).toContain("[the morning](/vault/noteA)");
+  });
+
+  it("keeps a same-note [[#Heading]] link as its bare label", () => {
+    const out = preprocessNote("see [[#Morning]]", refs);
+    expect(out).toContain("see #Morning");
+    expect(out).not.toContain("](/vault/");
+  });
+
   it("strips YAML frontmatter", () => {
     expect(preprocessNote("---\ntags: x\n---\nbody", refs).trimStart()).toBe(
       "body",
