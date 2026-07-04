@@ -27,19 +27,24 @@ export async function GET(
   const image = (await getVaultImages()).find((im) => im.id === id);
   if (!image) return nf();
 
-  const token = await driveToken();
-  if (!token) return nf();
+  try {
+    const token = await driveToken();
+    if (!token) return nf();
 
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  if (!res.ok || !res.body) return nf();
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok || !res.body) return nf();
 
-  return new Response(res.body, {
-    headers: {
-      "content-type": image.mimeType,
-      "cache-control": "private, max-age=3600",
-    },
-  });
+    return new Response(res.body, {
+      headers: {
+        "content-type": image.mimeType,
+        "cache-control": "private, max-age=3600",
+      },
+    });
+  } catch (err) {
+    console.error("[vault/img] fetch failed", err);
+    return nf();
+  }
 }
