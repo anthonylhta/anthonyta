@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthForm } from "@/components/auth-buttons";
 import { KeyShortcut } from "@/components/key-shortcut";
+import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { CommandPaletteProvider } from "@/components/terminal/CommandPalette";
 import { nav } from "@/lib/mock";
 import {
@@ -46,6 +47,21 @@ export const metadata: Metadata = {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
   },
+  // Installed-to-home-screen behaviour on iOS: run standalone (no Safari chrome)
+  // under the hub's own title. The manifest (app/manifest.ts) and the icon routes
+  // are auto-linked by Next's file conventions.
+  appleWebApp: {
+    capable: true,
+    title: SITE_NAME,
+    statusBarStyle: "black-translucent",
+  },
+};
+
+// Warm charcoal address bar / splash to match the shell (Next wants theme color
+// in the viewport export, not metadata). The hub is dark-only by design.
+export const viewport: Viewport = {
+  themeColor: "#0e0d0b",
+  colorScheme: "dark",
 };
 
 // JSON-LD Person — static, controlled data (no user input), the Next-recommended
@@ -92,6 +108,8 @@ export default function RootLayout({
         </CommandPaletteProvider>
         <AuthForm />
         <KeyShortcut />
+        {/* Self-hides unless the app is installable and not already installed. */}
+        <InstallPrompt />
       </body>
     </html>
   );
