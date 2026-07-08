@@ -50,6 +50,19 @@ Warm charcoal base (never pure black), a hairline grid, a single amber accent, w
 green/red reserved for live finance. Monospace carries the identity; a live Sydney
 clock, a blinking prompt cursor, and a ⌘K command palette are the signature touches.
 
+## Installable — PWA
+
+The hub installs to a phone's home screen and launches standalone, so it opens like an
+app instead of a browser tab. A web manifest (`app/manifest.ts`) carries the shell
+colors and a long-press jump-list to the daily surfaces; the app icon is rendered
+through the same `next/og` pipeline as the share card (`lib/pwa`), so it stays on
+brand — the amber prompt on warm charcoal — across Android (`any` + `maskable`) and
+iOS. A small service worker (`public/sw.js`) adds offline resilience: network-first for
+pages so an online launch is never stale, with a hand-drawn `/offline` shell as the
+fallback. `/api/` and cross-origin requests are never cached. An in-app prompt
+(`InstallPrompt`) offers the native install on Chromium and the Share → Add to Home
+Screen recipe on iOS, and self-hides once installed.
+
 ## Stack
 
 Next.js 16 (App Router, React 19) · TypeScript · Tailwind v4 · Auth.js v5 (GitHub) ·
