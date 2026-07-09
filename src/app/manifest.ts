@@ -63,10 +63,13 @@ export default function manifest(): MetadataRoute.Manifest {
         url: "/translator?source=pwa",
       },
     ],
-    // Android share sheet → the owner-only files inbox. Sharing a file to the
-    // installed app POSTs it to the share route, which stores it and redirects.
+    // Android share sheet → the owner-only files inbox. The action lives
+    // OUTSIDE /api/ so the service worker can intercept the POST, stash the
+    // files locally, and let the page encrypt before anything is uploaded
+    // (ADR 0053) — plaintext never reaches the server. A server fallback at
+    // the same path catches the rare SW miss and redirects without storing.
     share_target: {
-      action: "/api/files/share",
+      action: "/files/share-target",
       method: "POST",
       enctype: "multipart/form-data",
       params: { files: [{ name: "file", accept: ["*/*"] }] },

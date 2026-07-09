@@ -28,6 +28,14 @@ describe("web app manifest", () => {
     }
   });
 
+  it("share-target posts outside /api/ so the SW can intercept (ADR 0053)", () => {
+    expect(m.share_target?.action).toBe("/files/share-target");
+    expect(m.share_target?.method).toBe("POST");
+    // The SW's fetch handler skips /api/ entirely — an action under it could
+    // never be intercepted, and plaintext would reach the server.
+    expect(m.share_target?.action).not.toMatch(/^\/api\//);
+  });
+
   it("only links shortcuts to public, non-owner routes (ADR 0022)", () => {
     const shortcuts = m.shortcuts ?? [];
     expect(shortcuts.length).toBeGreaterThan(0);

@@ -67,8 +67,8 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("POST /api/files/share is 404 for a guest", async ({ request }) => {
-    const res = await request.post("/api/files/share");
+  test("POST /files/share-target is 404 for a guest", async ({ request }) => {
+    const res = await request.post("/files/share-target");
     expect(res.status()).toBe(404);
   });
 
