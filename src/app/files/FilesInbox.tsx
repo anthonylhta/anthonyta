@@ -176,20 +176,28 @@ export function FilesInbox({
   }
 
   // A share-sheet landing (?shared=1): pick up what the SW stashed once the
-  // vault is open, then run it through the same encrypt-and-upload path.
+  // vault is open, then run it through the same encrypt-and-upload path. The
+  // busy guard matters: draining removes the stash, and handleFiles no-ops
+  // while an upload is in flight — so drain only when it can actually run
+  // (the effect re-fires when busy clears).
   useEffect(() => {
-    if (!shared || !unlocked || consumedShare.current) return;
+    if (!shared || !unlocked || busy || consumedShare.current) return;
     consumedShare.current = true;
     (async () => {
       const stashed = await drainSharedCache();
       if (stashed.length > 0) await handleFiles(stashed);
     })();
-  }, [shared, unlocked, handleFiles]);
+  }, [shared, unlocked, busy, handleFiles]);
 
   return (
     <div className="px-4 py-4">
       {vault.status === "setup" && <SetupPanel vault={vault} />}
       {vault.status === "locked" && <LockedPanel vault={vault} />}
+      {vault.status === "error" && (
+        <p className="mb-4 text-xs text-down">
+          vault unreachable — reload to retry (your key is untouched)
+        </p>
+      )}
 
       {unlocked && (
         <div className="mb-4">
@@ -203,7 +211,13 @@ export function FilesInbox({
               disabled={busy}
               onChange={(e) => setNote(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                // isComposing: Enter confirming an IME candidate (JP/ZH input)
+                // must not fire the send.
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
                   e.preventDefault();
                   sendNote();
                 }
@@ -251,8 +265,8 @@ export function FilesInbox({
             </p>
           )}
 
-          {failed.map((name) => (
-            <p key={name} className="mt-2 text-xs text-down">
+          {failed.map((name, i) => (
+            <p key={`${i}-${name}`} className="mt-2 text-xs text-down">
               upload failed — {name}
             </p>
           ))}
