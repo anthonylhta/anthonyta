@@ -24,7 +24,8 @@ export async function POST(request: Request) {
         if (!session?.user) throw new Error("unauthorized");
         if (!isValidPathname(pathname)) throw new Error("bad pathname");
         return {
-          maximumSizeInBytes: 25 * 1024 * 1024,
+          // 25MB of content + headroom for the ~300B E2EE envelope overhead.
+          maximumSizeInBytes: 26 * 1024 * 1024,
           addRandomSuffix: true,
           tokenPayload: null,
         };

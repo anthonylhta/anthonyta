@@ -24,6 +24,8 @@ export interface InboxFile {
   kind: FileKind;
   /** Inline content for a small text note (hydrated by lib/inbox); unset otherwise. */
   text?: string;
+  /** True for an E2EE envelope blob — the client decrypts, the server can't. */
+  encrypted?: boolean;
 }
 
 /** Text notes above this many bytes stay plain files — never hydrated or inlined. */
@@ -89,6 +91,18 @@ export function isTextNote(f: { pathname: string; size: number }): boolean {
     f.size > 0 &&
     f.size <= TEXT_NOTE_MAX
   );
+}
+
+/**
+ * An E2EE envelope blob (ADR 0053): every new upload is stored as
+ * `inbox/e-<22 b64url>.bin`. Keys on the `e-` prefix + `.bin` suffix of the leaf
+ * only — the upload route's `addRandomSuffix` inserts `-<random>` before the
+ * extension, so exact length can't be trusted. Legacy plaintext rows never match:
+ * nothing before this scheme produced an `e-*.bin` name.
+ */
+export function isEncrypted(pathname: string): boolean {
+  const leaf = pathname.slice(pathname.lastIndexOf("/") + 1);
+  return leaf.startsWith("e-") && leaf.endsWith(".bin");
 }
 
 /** Traversal/probe guard for a STORED pathname — the only shape we serve. */
@@ -176,6 +190,7 @@ export function toInboxFile(raw: {
     size: raw.size,
     uploadedAt,
     kind: fileKind(raw.pathname),
+    encrypted: isEncrypted(raw.pathname),
   };
 }
 

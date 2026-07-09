@@ -90,6 +90,25 @@ async function hydrateTextNotes(files: InboxFile[]): Promise<void> {
 }
 
 /**
+ * Stream one inbox blob's raw bytes (the ciphertext envelope) without buffering.
+ * `null` when the store is off, the pathname is malformed (which structurally
+ * excludes `meta/*`), the blob is missing, or the read throws.
+ */
+export async function readFileStream(
+  pathname: string,
+): Promise<ReadableStream | null> {
+  if (!enabled() || !isValidPathname(pathname)) return null;
+  try {
+    const res = await get(pathname, { access: "private" });
+    if (!res || res.statusCode !== 200) return null;
+    return res.stream;
+  } catch (err) {
+    console.error("[inbox] read failed:", pathname, err);
+    return null;
+  }
+}
+
+/**
  * Delete one blob by pathname (`del` accepts a pathname directly, no URL lookup). `false`
  * when the store is off, the pathname is malformed, or the delete throws — never surfaces
  * the error to the caller.
