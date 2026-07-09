@@ -268,10 +268,9 @@ export async function open(
   );
 
   if (payload.length < 4) throw new Error("envelope: bad payload");
-  const headerLen = new DataView(
-    payload.buffer,
-    payload.byteOffset,
-  ).getUint32(0);
+  const headerLen = new DataView(payload.buffer, payload.byteOffset).getUint32(
+    0,
+  );
   if (headerLen > payload.length - 4) throw new Error("envelope: bad header");
 
   const meta = JSON.parse(

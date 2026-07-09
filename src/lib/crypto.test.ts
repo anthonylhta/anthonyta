@@ -179,7 +179,11 @@ describe("keystore", () => {
     const stored = JSON.stringify(buildKeystore(salt, FAST, wrapped, iv));
 
     const ks = JSON.parse(stored) as ReturnType<typeof buildKeystore>;
-    const kek2 = await deriveKek("pass", fromB64url(ks.kdf.salt_b64), ks.kdf.iterations);
+    const kek2 = await deriveKek(
+      "pass",
+      fromB64url(ks.kdf.salt_b64),
+      ks.kdf.iterations,
+    );
     const mk = await unwrapMk(
       fromB64url(ks.wrapped_mk_b64),
       fromB64url(ks.iv_b64),
@@ -203,8 +207,12 @@ describe("keystore", () => {
     expect(isKeystore(good)).toBe(true);
     expect(isKeystore({ ...good, v: 0 })).toBe(false);
     expect(isKeystore({ ...good, wrapped_mk_b64: "" })).toBe(false);
-    expect(isKeystore({ ...good, wrapped_mk_b64: "x".repeat(200) })).toBe(false);
-    expect(isKeystore({ ...good, kdf: { salt_b64: "a", iterations: 10 } })).toBe(
+    expect(isKeystore({ ...good, wrapped_mk_b64: "x".repeat(200) })).toBe(
+      false,
+    );
+    expect(
+      isKeystore({ ...good, kdf: { salt_b64: "a", iterations: 10 } }),
+    ).toBe(
       false, // sub-floor iteration counts are refused, not silently honored
     );
     expect(

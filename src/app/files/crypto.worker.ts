@@ -10,7 +10,13 @@
 import { open, seal, type EnvelopeMeta } from "@/lib/crypto";
 
 export type WorkerRequest =
-  | { id: number; op: "seal"; mk: CryptoKey; meta: EnvelopeMeta; buf: ArrayBuffer }
+  | {
+      id: number;
+      op: "seal";
+      mk: CryptoKey;
+      meta: EnvelopeMeta;
+      buf: ArrayBuffer;
+    }
   | { id: number; op: "open"; mk: CryptoKey; buf: ArrayBuffer };
 
 export type WorkerResponse =

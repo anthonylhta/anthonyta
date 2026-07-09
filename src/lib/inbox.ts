@@ -1,4 +1,11 @@
-import { del, get, issueSignedToken, list, presignUrl, put } from "@vercel/blob";
+import {
+  del,
+  get,
+  issueSignedToken,
+  list,
+  presignUrl,
+  put,
+} from "@vercel/blob";
 import {
   INBOX_PREFIX,
   isTextNote,

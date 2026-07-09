@@ -75,7 +75,11 @@ describe("keystore route", () => {
   });
 
   it("PUT 404s a malformed shape and never writes", async () => {
-    for (const bad of ["not json", "{}", JSON.stringify({ ...KEYSTORE, v: 2 })]) {
+    for (const bad of [
+      "not json",
+      "{}",
+      JSON.stringify({ ...KEYSTORE, v: 2 }),
+    ]) {
       expect((await putReq(bad)).status).toBe(404);
     }
     expect(putKeystore).not.toHaveBeenCalled();

@@ -123,9 +123,9 @@ describe("isTextNote", () => {
     expect(isTextNote({ pathname: "inbox/x.pdf", size: 100 })).toBe(false);
   });
   it("never matches an E2EE envelope — ciphertext must not be hydrated", () => {
-    expect(
-      isTextNote({ pathname: "inbox/e-AbC123_-xyz.bin", size: 100 }),
-    ).toBe(false);
+    expect(isTextNote({ pathname: "inbox/e-AbC123_-xyz.bin", size: 100 })).toBe(
+      false,
+    );
   });
 });
 
