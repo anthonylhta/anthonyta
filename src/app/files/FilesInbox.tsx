@@ -7,6 +7,7 @@ import {
   age,
   formatSize,
   INBOX_PREFIX,
+  noteName,
   sanitizePathname,
   type FileKind,
   type InboxFile,
@@ -34,6 +35,7 @@ export function FilesInbox({
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [note, setNote] = useState("");
   const [progress, setProgress] = useState<{
     name: string;
     pct: number;
@@ -67,10 +69,60 @@ export function FilesInbox({
     router.refresh();
   }
 
+  async function sendNote() {
+    const text = note;
+    if (!text.trim() || busy) return;
+    setBusy(true);
+    setFailed([]);
+    setProgress({ name: "note", pct: 0 });
+    let ok = true;
+    try {
+      await upload(
+        INBOX_PREFIX + noteName(text),
+        new Blob([text], { type: "text/plain" }),
+        {
+          access: "private",
+          handleUploadUrl: "/api/files/upload",
+          contentType: "text/plain",
+          onUploadProgress: (e) =>
+            setProgress({ name: "note", pct: Math.round(e.percentage) }),
+        },
+      );
+    } catch {
+      ok = false;
+    }
+    setProgress(null);
+    setBusy(false);
+    if (ok) {
+      setNote("");
+      router.refresh();
+    } else {
+      setFailed(["note"]);
+    }
+  }
+
   return (
     <div className="px-4 py-4">
       {!offline && (
         <div className="mb-4">
+          <div className="mb-3 flex items-start gap-2">
+            <span className="mt-1.5 font-mono text-sm text-amber">&gt;</span>
+            <textarea
+              rows={2}
+              value={note}
+              disabled={busy}
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendNote();
+                }
+              }}
+              placeholder="paste text · enter to send"
+              className="flex-1 resize-none bg-transparent py-1 font-mono text-[13px] text-fg placeholder:text-muted focus:outline-none disabled:opacity-50"
+            />
+          </div>
+
           <label
             onDragOver={(e) => {
               e.preventDefault();
@@ -136,13 +188,26 @@ export function FilesInbox({
   );
 }
 
-/** One inbox row — thumbnail/type tag, name + meta, and dl · link · del actions. */
+/** One inbox row — a file (thumbnail, dl · link · del) or an inlined text note (copy · del). */
 function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [linkLabel, setLinkLabel] = useState("link");
+  const [copyLabel, setCopyLabel] = useState("copy");
   const [delError, setDelError] = useState(false);
 
   const dl = `/api/files/dl?p=${encodeURIComponent(f.pathname)}`;
+  const noteText = f.text;
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyLabel("copied");
+    } catch {
+      setCopyLabel("error");
+    } finally {
+      setTimeout(() => setCopyLabel("copy"), 2000);
+    }
+  }
 
   async function copyLink() {
     setBusy(true);
@@ -182,7 +247,11 @@ function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
   return (
     <li className="py-2">
       <div className="flex items-center gap-3">
-        {f.kind === "image" ? (
+        {noteText !== undefined ? (
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-hairline font-mono text-[10px] text-muted">
+            [txt]
+          </span>
+        ) : f.kind === "image" ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={dl}
@@ -197,28 +266,47 @@ function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
         )}
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] text-fg">{f.name}</p>
+          {noteText !== undefined ? (
+            <p className="line-clamp-3 font-mono text-[13px] break-words whitespace-pre-wrap text-fg">
+              {noteText}
+            </p>
+          ) : (
+            <p className="truncate text-[13px] text-fg">{f.name}</p>
+          )}
           <p className="text-xs text-muted">
             {formatSize(f.size)} · {age(f.uploadedAt)}
           </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-3 text-xs">
-          <a
-            href={dl}
-            download
-            className="text-muted transition-colors hover:text-amber"
-          >
-            dl
-          </a>
-          <button
-            type="button"
-            onClick={copyLink}
-            disabled={busy}
-            className="tabular-nums text-muted transition-colors hover:text-amber disabled:opacity-30"
-          >
-            {linkLabel}
-          </button>
+          {noteText !== undefined ? (
+            <button
+              type="button"
+              onClick={() => copyText(noteText)}
+              disabled={busy}
+              className="text-muted transition-colors hover:text-amber disabled:opacity-30"
+            >
+              {copyLabel}
+            </button>
+          ) : (
+            <>
+              <a
+                href={dl}
+                download
+                className="text-muted transition-colors hover:text-amber"
+              >
+                dl
+              </a>
+              <button
+                type="button"
+                onClick={copyLink}
+                disabled={busy}
+                className="tabular-nums text-muted transition-colors hover:text-amber disabled:opacity-30"
+              >
+                {linkLabel}
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={remove}

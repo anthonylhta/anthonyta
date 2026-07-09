@@ -4,9 +4,12 @@ import {
   displayName,
   fileKind,
   formatSize,
+  isTextNote,
   isValidPathname,
+  noteName,
   sanitizePathname,
   sortInbox,
+  TEXT_NOTE_MAX,
   toInboxFile,
 } from "./files";
 
@@ -68,6 +71,55 @@ describe("isValidPathname", () => {
     expect(isValidPathname("inbox/%2e%2e")).toBe(false); // percent probe
     expect(isValidPathname("inbox/" + "a".repeat(251))).toBe(false); // too long
     expect(isValidPathname("inbox/")).toBe(false); // empty remainder
+  });
+});
+
+describe("noteName", () => {
+  it("slugs plain text and appends .txt", () => {
+    expect(noteName("hello world")).toBe("hello-world.txt");
+  });
+  it("keeps a pasted URL's host — no basename collapse", () => {
+    const n = noteName("https://example.com/a/b");
+    expect(n).toContain("example.com");
+    expect(n.endsWith(".txt")).toBe(true);
+  });
+  it("truncates the stem past 40 chars but keeps .txt", () => {
+    expect(noteName("x".repeat(60))).toBe("x".repeat(40) + ".txt");
+  });
+  it("falls back to note.txt for empty or whitespace-only text", () => {
+    expect(noteName("")).toBe("note.txt");
+    expect(noteName("   \n\t ")).toBe("note.txt");
+  });
+  it("always yields a valid inbox leaf, even for nasty input", () => {
+    for (const nasty of [
+      "report..final.pdf",
+      "..hidden..name..",
+      "a. .b.png",
+      "..\\..\\evil.exe",
+    ]) {
+      expect(isValidPathname("inbox/" + noteName(nasty))).toBe(true);
+    }
+  });
+});
+
+describe("isTextNote", () => {
+  it("is true for a .txt within the size ceiling", () => {
+    expect(isTextNote({ pathname: "inbox/note.txt", size: 100 })).toBe(true);
+    expect(
+      isTextNote({ pathname: "inbox/note.txt", size: TEXT_NOTE_MAX }),
+    ).toBe(true);
+  });
+  it("matches the extension case-insensitively", () => {
+    expect(isTextNote({ pathname: "inbox/NOTE.TXT", size: 100 })).toBe(true);
+  });
+  it("is false over the ceiling or at zero size", () => {
+    expect(
+      isTextNote({ pathname: "inbox/note.txt", size: TEXT_NOTE_MAX + 1 }),
+    ).toBe(false);
+    expect(isTextNote({ pathname: "inbox/note.txt", size: 0 })).toBe(false);
+  });
+  it("is false for a non-txt file", () => {
+    expect(isTextNote({ pathname: "inbox/x.pdf", size: 100 })).toBe(false);
   });
 });
 
