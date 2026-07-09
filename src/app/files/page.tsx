@@ -20,7 +20,7 @@ export default async function FilesPage({
   const session = await auth();
   if (!session?.user) notFound();
 
-  const { share } = await searchParams;
+  const { share, shared } = await searchParams;
   const { files, offline } = await listInbox();
   const who = session.user.name ?? "anthony";
 
@@ -51,7 +51,7 @@ export default async function FilesPage({
           </p>
         )}
 
-        <FilesInbox files={files} offline={offline} />
+        <FilesInbox files={files} offline={offline} shared={shared === "1"} />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>

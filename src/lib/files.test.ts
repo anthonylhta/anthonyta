@@ -4,6 +4,7 @@ import {
   displayName,
   fileKind,
   formatSize,
+  isEncrypted,
   isTextNote,
   isValidPathname,
   noteName,
@@ -121,6 +122,27 @@ describe("isTextNote", () => {
   it("is false for a non-txt file", () => {
     expect(isTextNote({ pathname: "inbox/x.pdf", size: 100 })).toBe(false);
   });
+  it("never matches an E2EE envelope — ciphertext must not be hydrated", () => {
+    expect(isTextNote({ pathname: "inbox/e-AbC123_-xyz.bin", size: 100 })).toBe(
+      false,
+    );
+  });
+});
+
+describe("isEncrypted", () => {
+  it("matches the e-<id>.bin shape, with and without the upload suffix", () => {
+    expect(isEncrypted("inbox/e-mB4d5S3CkQxGxUKz2AkKfg.bin")).toBe(true);
+    // addRandomSuffix inserts before the extension on upload.
+    expect(
+      isEncrypted("inbox/e-mB4d5S3CkQxGxUKz2AkKfg-aBcDeFgHiJkLmNoPqRsT.bin"),
+    ).toBe(true);
+  });
+  it("never matches legacy plaintext rows", () => {
+    expect(isEncrypted("inbox/photo.jpg")).toBe(false);
+    expect(isEncrypted("inbox/note.txt")).toBe(false);
+    expect(isEncrypted("inbox/data.bin")).toBe(false); // .bin alone isn't enough
+    expect(isEncrypted("inbox/e-book.epub")).toBe(false); // e- alone isn't enough
+  });
 });
 
 describe("fileKind", () => {
@@ -207,6 +229,22 @@ describe("toInboxFile", () => {
     });
     expect(f.uploadedAt).toBe("2026-07-09T00:00:00.000Z");
     expect(f.kind).toBe("video");
+  });
+  it("flags encrypted envelopes and leaves plaintext rows unflagged", () => {
+    const enc = toInboxFile({
+      pathname: "inbox/e-mB4d5S3CkQxGxUKz2AkKfg-aBcDeFgHiJkLmNoPqRsT.bin",
+      url: "u",
+      size: 1,
+      uploadedAt: "2026-07-09T00:00:00.000Z",
+    });
+    expect(enc.encrypted).toBe(true);
+    const plain = toInboxFile({
+      pathname: "inbox/photo.jpg",
+      url: "u",
+      size: 1,
+      uploadedAt: "2026-07-09T00:00:00.000Z",
+    });
+    expect(plain.encrypted).toBe(false);
   });
 });
 

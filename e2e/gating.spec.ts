@@ -16,7 +16,9 @@ test.describe("guest gating", () => {
     "/vault/img/abc123XYZ", // the owner-gated image route (ADR 0048)
     "/files", // the owner-only files inbox
     "/api/files/dl?p=inbox%2Fx.jpg", // inbox download
-    "/api/files/link?p=inbox%2Fx.jpg", // inbox share-link mint
+    "/api/files/raw?p=inbox%2Fe-abc.bin", // E2EE ciphertext stream (ADR 0053)
+    "/api/files/raw?p=meta%2Fkeystore", // keystore exfil attempt via raw
+    "/api/files/keystore", // wrapped-master-key read
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
@@ -39,6 +41,20 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
+  test("a path-traversal raw read is a 404, not a probe", async ({
+    request,
+  }) => {
+    const res = await request.get(
+      "/api/files/raw?p=inbox%2F..%2Fmeta%2Fkeystore",
+    );
+    expect(res.status()).toBe(404);
+  });
+
+  test("PUT /api/files/keystore is 404 for a guest", async ({ request }) => {
+    const res = await request.put("/api/files/keystore", { data: { v: 1 } });
+    expect(res.status()).toBe(404);
+  });
+
   test("POST /api/files/upload is 404 for a guest", async ({ request }) => {
     const res = await request.post("/api/files/upload", { data: {} });
     expect(res.status()).toBe(404);
@@ -51,8 +67,8 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("POST /api/files/share is 404 for a guest", async ({ request }) => {
-    const res = await request.post("/api/files/share");
+  test("POST /files/share-target is 404 for a guest", async ({ request }) => {
+    const res = await request.post("/files/share-target");
     expect(res.status()).toBe(404);
   });
 

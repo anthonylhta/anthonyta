@@ -1,4 +1,11 @@
-import { del, get, issueSignedToken, list, presignUrl } from "@vercel/blob";
+import {
+  del,
+  get,
+  issueSignedToken,
+  list,
+  presignUrl,
+  put,
+} from "@vercel/blob";
 import {
   INBOX_PREFIX,
   isTextNote,
@@ -26,7 +33,15 @@ import {
  */
 
 export const DL_TTL_SECONDS = 300; // immediate 302 download window
-export const LINK_TTL_SECONDS = 3600; // shareable copy-link
+
+/**
+ * The E2EE keystore (ADR 0053) — one small JSON blob holding the passphrase-wrapped
+ * master key. It lives OUTSIDE `inbox/` on purpose: `isValidPathname` requires the
+ * `inbox/` prefix, so no file route can ever be coaxed into serving or deleting it,
+ * and `list({prefix: "inbox/"})` never surfaces it.
+ */
+export const KEYSTORE_PATH = "meta/keystore";
+export const KEYSTORE_MAX_BYTES = 2048;
 
 export interface Inbox {
   files: InboxFile[];
@@ -82,6 +97,25 @@ async function hydrateTextNotes(files: InboxFile[]): Promise<void> {
 }
 
 /**
+ * Stream one inbox blob's raw bytes (the ciphertext envelope) without buffering.
+ * `null` when the store is off, the pathname is malformed (which structurally
+ * excludes `meta/*`), the blob is missing, or the read throws.
+ */
+export async function readFileStream(
+  pathname: string,
+): Promise<ReadableStream | null> {
+  if (!enabled() || !isValidPathname(pathname)) return null;
+  try {
+    const res = await get(pathname, { access: "private" });
+    if (!res || res.statusCode !== 200) return null;
+    return res.stream;
+  } catch (err) {
+    console.error("[inbox] read failed:", pathname, err);
+    return null;
+  }
+}
+
+/**
  * Delete one blob by pathname (`del` accepts a pathname directly, no URL lookup). `false`
  * when the store is off, the pathname is malformed, or the delete throws — never surfaces
  * the error to the caller.
@@ -97,10 +131,66 @@ export async function deleteFile(pathname: string): Promise<boolean> {
   }
 }
 
+export type KeystoreRead =
+  | { state: "ok"; json: string }
+  | { state: "absent" }
+  | { state: "error" };
+
+/**
+ * Read the raw keystore JSON. "absent" (a healthy read found none — first run) is
+ * kept strictly apart from "error" (store off / read threw): the client treats
+ * absent as "run setup", and setup writes a FRESH master key — so mistaking a
+ * transient failure for absence would let a routine retry orphan every encrypted
+ * item. The route maps absent→404 and error→503 (owner-only; guests never get
+ * past the auth gate).
+ */
+export async function getKeystore(): Promise<KeystoreRead> {
+  if (!enabled()) return { state: "error" };
+  try {
+    const res = await get(KEYSTORE_PATH, { access: "private" });
+    if (!res) return { state: "absent" };
+    if (res.statusCode !== 200) return { state: "error" };
+    return { state: "ok", json: await new Response(res.stream).text() };
+  } catch (err) {
+    console.error("[inbox] keystore read failed:", err);
+    return { state: "error" };
+  }
+}
+
+export type KeystoreWrite = "ok" | "conflict" | "failed";
+
+/**
+ * Write the keystore JSON at its fixed path (no random suffix — there is exactly
+ * one). `overwrite` is only ever true for a passphrase change; first-run setup
+ * writes with it false, so a client that misread a flaky fetch as "no vault yet"
+ * physically cannot clobber an existing keystore — the put refuses, and the
+ * existence re-check reports "conflict". The caller validates the shape; this
+ * only moves bytes.
+ */
+export async function putKeystore(
+  json: string,
+  overwrite: boolean,
+): Promise<KeystoreWrite> {
+  if (!enabled()) return "failed";
+  try {
+    await put(KEYSTORE_PATH, json, {
+      access: "private",
+      addRandomSuffix: false,
+      allowOverwrite: overwrite,
+      contentType: "application/json",
+    });
+    return "ok";
+  } catch (err) {
+    if (!overwrite && (await getKeystore()).state === "ok") return "conflict";
+    console.error("[inbox] keystore write failed:", err);
+    return "failed";
+  }
+}
+
 /**
  * Mint a short-lived signed GET URL for a private blob, good for `ttlSeconds`. `null` when
- * the store is off, the pathname is malformed, or either signing step throws. Callers pass
- * `DL_TTL_SECONDS` for an immediate 302 or `LINK_TTL_SECONDS` for a copyable share link.
+ * the store is off, the pathname is malformed, or either signing step throws. Used by the
+ * legacy plaintext download route at `DL_TTL_SECONDS`.
  */
 export async function presignDownload(
   pathname: string,

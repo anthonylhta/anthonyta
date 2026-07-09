@@ -1,6 +1,6 @@
 import { handleUpload } from "@vercel/blob/client";
 import { auth } from "@/auth";
-import { isValidPathname } from "@/lib/files";
+import { isEncrypted, isValidPathname } from "@/lib/files";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +23,12 @@ export async function POST(request: Request) {
         const session = await auth();
         if (!session?.user) throw new Error("unauthorized");
         if (!isValidPathname(pathname)) throw new Error("bad pathname");
+        // Only E2EE envelopes get tokens (ADR 0053) — the client always seals
+        // before upload, so a plaintext-shaped name here is a bug or a forgery.
+        if (!isEncrypted(pathname)) throw new Error("not an envelope");
         return {
-          maximumSizeInBytes: 25 * 1024 * 1024,
+          // 25MB of content + headroom for the ~300B E2EE envelope overhead.
+          maximumSizeInBytes: 26 * 1024 * 1024,
           addRandomSuffix: true,
           tokenPayload: null,
         };
