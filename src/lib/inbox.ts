@@ -131,42 +131,59 @@ export async function deleteFile(pathname: string): Promise<boolean> {
   }
 }
 
+export type KeystoreRead =
+  | { state: "ok"; json: string }
+  | { state: "absent" }
+  | { state: "error" };
+
 /**
- * Read the raw keystore JSON, or `null` when the store is off, none has been written
- * yet, or the read throws. Callers can't tell "absent" from "error" here — the route
- * collapses both to 404 and the client decides what that means from the SSR offline
- * flag.
+ * Read the raw keystore JSON. "absent" (a healthy read found none — first run) is
+ * kept strictly apart from "error" (store off / read threw): the client treats
+ * absent as "run setup", and setup writes a FRESH master key — so mistaking a
+ * transient failure for absence would let a routine retry orphan every encrypted
+ * item. The route maps absent→404 and error→503 (owner-only; guests never get
+ * past the auth gate).
  */
-export async function getKeystore(): Promise<string | null> {
-  if (!enabled()) return null;
+export async function getKeystore(): Promise<KeystoreRead> {
+  if (!enabled()) return { state: "error" };
   try {
     const res = await get(KEYSTORE_PATH, { access: "private" });
-    if (!res || res.statusCode !== 200) return null;
-    return await new Response(res.stream).text();
+    if (!res) return { state: "absent" };
+    if (res.statusCode !== 200) return { state: "error" };
+    return { state: "ok", json: await new Response(res.stream).text() };
   } catch (err) {
     console.error("[inbox] keystore read failed:", err);
-    return null;
+    return { state: "error" };
   }
 }
 
+export type KeystoreWrite = "ok" | "conflict" | "failed";
+
 /**
- * Write the keystore JSON at its fixed path (no random suffix — there is exactly one,
- * and a passphrase change overwrites it in place). The caller validates the shape;
- * this only moves bytes. `false` on a disabled store or a write error.
+ * Write the keystore JSON at its fixed path (no random suffix — there is exactly
+ * one). `overwrite` is only ever true for a passphrase change; first-run setup
+ * writes with it false, so a client that misread a flaky fetch as "no vault yet"
+ * physically cannot clobber an existing keystore — the put refuses, and the
+ * existence re-check reports "conflict". The caller validates the shape; this
+ * only moves bytes.
  */
-export async function putKeystore(json: string): Promise<boolean> {
-  if (!enabled()) return false;
+export async function putKeystore(
+  json: string,
+  overwrite: boolean,
+): Promise<KeystoreWrite> {
+  if (!enabled()) return "failed";
   try {
     await put(KEYSTORE_PATH, json, {
       access: "private",
       addRandomSuffix: false,
-      allowOverwrite: true,
+      allowOverwrite: overwrite,
       contentType: "application/json",
     });
-    return true;
+    return "ok";
   } catch (err) {
+    if (!overwrite && (await getKeystore()).state === "ok") return "conflict";
     console.error("[inbox] keystore write failed:", err);
-    return false;
+    return "failed";
   }
 }
 

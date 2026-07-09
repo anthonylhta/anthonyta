@@ -54,7 +54,10 @@ describe("keystore route", () => {
   });
 
   it("GET returns the stored keystore JSON, uncacheable", async () => {
-    vi.mocked(getKeystore).mockResolvedValue(JSON.stringify(KEYSTORE));
+    vi.mocked(getKeystore).mockResolvedValue({
+      state: "ok",
+      json: JSON.stringify(KEYSTORE),
+    });
     const res = await GET();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
@@ -62,16 +65,44 @@ describe("keystore route", () => {
   });
 
   it("GET 404s when no keystore exists yet (first-run setup signal)", async () => {
-    vi.mocked(getKeystore).mockResolvedValue(null);
+    vi.mocked(getKeystore).mockResolvedValue({ state: "absent" });
     expect((await GET()).status).toBe(404);
   });
 
+  it("GET 503s a transient store failure — NEVER the setup-triggering 404", async () => {
+    vi.mocked(getKeystore).mockResolvedValue({ state: "error" });
+    expect((await GET()).status).toBe(503);
+  });
+
   it("PUT stores exactly the validated shape, dropping smuggled keys", async () => {
-    vi.mocked(putKeystore).mockResolvedValue(true);
+    vi.mocked(putKeystore).mockResolvedValue("ok");
     const res = await putReq(JSON.stringify({ ...KEYSTORE, evil: "extra" }));
     expect(res.status).toBe(200);
     const stored = JSON.parse(vi.mocked(putKeystore).mock.calls[0][0]);
     expect(stored).toEqual(KEYSTORE);
+  });
+
+  it("PUT without the overwrite header writes no-overwrite (setup can't clobber)", async () => {
+    vi.mocked(putKeystore).mockResolvedValue("ok");
+    await putReq(JSON.stringify(KEYSTORE));
+    expect(vi.mocked(putKeystore).mock.calls[0][1]).toBe(false);
+  });
+
+  it("PUT passes overwrite through only with x-keystore-overwrite: 1", async () => {
+    vi.mocked(putKeystore).mockResolvedValue("ok");
+    await PUT(
+      new Request("http://localhost/api/files/keystore", {
+        method: "PUT",
+        headers: { "x-keystore-overwrite": "1" },
+        body: JSON.stringify(KEYSTORE),
+      }),
+    );
+    expect(vi.mocked(putKeystore).mock.calls[0][1]).toBe(true);
+  });
+
+  it("PUT 409s when a keystore already exists and overwrite wasn't asked", async () => {
+    vi.mocked(putKeystore).mockResolvedValue("conflict");
+    expect((await putReq(JSON.stringify(KEYSTORE))).status).toBe(409);
   });
 
   it("PUT 404s a malformed shape and never writes", async () => {
@@ -98,7 +129,7 @@ describe("keystore route", () => {
   });
 
   it("PUT 404s when the store write fails", async () => {
-    vi.mocked(putKeystore).mockResolvedValue(false);
+    vi.mocked(putKeystore).mockResolvedValue("failed");
     expect((await putReq(JSON.stringify(KEYSTORE))).status).toBe(404);
   });
 });

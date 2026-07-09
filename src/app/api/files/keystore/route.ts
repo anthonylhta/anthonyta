@@ -10,20 +10,24 @@ const nf = () => new Response("Not found", { status: 404 });
  * Owner-gated access to the E2EE keystore (ADR 0053) — the passphrase-wrapped
  * master key at `meta/keystore`. The blob is ciphertext-of-a-key: serving it to the
  * owner reveals nothing without the passphrase, and guests get the usual 404 wall
- * (ADR 0022). GET 404s when no keystore exists yet — the client reads that as
- * "run first-time setup" (it can tell absent from store-offline via the page's SSR
- * flag). PUT is how setup and passphrase-change persist a new keystore: shape is
- * validated with the same `isKeystore` the client uses, size is capped well above
- * the ~300B a real keystore occupies, and anything malformed collapses to 404.
+ * (ADR 0022). Past the auth gate, absent and error stay distinguishable — the
+ * client treats 404 as "run first-time setup" (which mints a FRESH master key), so
+ * a transient read failure answering 404 could lure a re-entry into orphaning
+ * every encrypted item; those answer 503 instead. PUT persists a keystore: shape
+ * validated with the same `isKeystore` the client uses, size capped well above the
+ * ~300B a real keystore occupies, and overwriting requires the explicit
+ * `x-keystore-overwrite: 1` header (sent only by passphrase change) — first-run
+ * setup physically cannot clobber an existing vault (conflict → 409).
  */
 export async function GET() {
   const session = await auth();
   if (!session?.user) return nf();
 
-  const json = await getKeystore();
-  if (!json) return nf();
+  const ks = await getKeystore();
+  if (ks.state === "error") return new Response("Unavailable", { status: 503 });
+  if (ks.state === "absent") return nf();
 
-  return new Response(json, {
+  return new Response(ks.json, {
     headers: {
       "content-type": "application/json",
       "cache-control": "no-store",
@@ -43,7 +47,8 @@ export async function PUT(request: Request) {
 
     // Rebuild from the validated fields so what's at rest is exactly the
     // keystore shape, never a superset smuggled past the type guard.
-    const ok = await putKeystore(
+    const overwrite = request.headers.get("x-keystore-overwrite") === "1";
+    const result = await putKeystore(
       JSON.stringify({
         v: parsed.v,
         kdf: {
@@ -53,8 +58,10 @@ export async function PUT(request: Request) {
         wrapped_mk_b64: parsed.wrapped_mk_b64,
         iv_b64: parsed.iv_b64,
       }),
+      overwrite,
     );
-    return ok ? Response.json({ ok: true }) : nf();
+    if (result === "conflict") return new Response("Conflict", { status: 409 });
+    return result === "ok" ? Response.json({ ok: true }) : nf();
   } catch (err) {
     console.error("[files/keystore] put failed", err);
     return nf();

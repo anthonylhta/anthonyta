@@ -38,7 +38,11 @@ export type VaultStatus =
   | "loading"
   | "setup"
   | "locked"
-  | "unlocked";
+  | "unlocked"
+  /** The keystore couldn't be reached (network/store hiccup). Deliberately NOT
+   *  setup: mistaking a flaky fetch for a first run would mint a fresh master
+   *  key and orphan everything already encrypted. Reload to retry. */
+  | "error";
 
 /** Payloads below this skip the worker — the postMessage round-trip costs more
  *  than encrypting a note inline. */
@@ -137,27 +141,37 @@ async function openBytes(
 // keystore fetch
 // ---------------------------------------------------------------------------
 
-async function fetchKeystore(): Promise<Keystore | null> {
-  try {
-    const res = await fetch("/api/files/keystore");
-    if (!res.ok) return null; // 404 = none yet (the page's offline flag rules out a dead store)
-    const parsed: unknown = await res.json();
-    return isKeystore(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+/**
+ * "absent" (a healthy 404 — first run) vs a THROW (network error, 5xx, malformed
+ * body). The two must never blur: absent leads to setup, and setup writes a fresh
+ * master key — treating a hiccup as absence would orphan every encrypted item.
+ */
+async function fetchKeystore(): Promise<Keystore | "absent"> {
+  const res = await fetch("/api/files/keystore");
+  if (res.status === 404) return "absent";
+  if (!res.ok) throw new Error(`keystore fetch: ${res.status}`);
+  const parsed: unknown = await res.json();
+  if (!isKeystore(parsed)) throw new Error("keystore fetch: malformed");
+  return parsed;
 }
 
-async function putKeystore(ks: Keystore): Promise<boolean> {
+async function putKeystore(
+  ks: Keystore,
+  overwrite: boolean,
+): Promise<"ok" | "conflict" | "failed"> {
   try {
     const res = await fetch("/api/files/keystore", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(overwrite ? { "x-keystore-overwrite": "1" } : {}),
+      },
       body: JSON.stringify(ks),
     });
-    return res.ok;
+    if (res.status === 409) return "conflict";
+    return res.ok ? "ok" : "failed";
   } catch {
-    return false;
+    return "failed";
   }
 }
 
@@ -196,18 +210,34 @@ export function useVault(offline: boolean): Vault {
     if (offline) return;
     let cancelled = false;
     (async () => {
-      const [cached, ks] = await Promise.all([getCachedKey(), fetchKeystore()]);
-      if (cancelled) return;
-      ksRef.current = ks;
-      if (ks && cached) {
-        mkRef.current = cached;
-        setStatus("unlocked");
-      } else if (ks) {
-        setStatus("locked");
-      } else {
-        // No keystore: any cached key is stale (e.g. the store was reset).
-        await clearCachedKey();
-        if (!cancelled) setStatus("setup");
+      try {
+        const [cached, ks] = await Promise.all([
+          getCachedKey(),
+          fetchKeystore(),
+        ]);
+        if (cancelled) return;
+        if (ks === "absent") {
+          // A HEALTHY read found no keystore: genuine first run, so any cached
+          // key is stale (e.g. the store was reset elsewhere).
+          await clearCachedKey();
+          if (!cancelled) setStatus("setup");
+          return;
+        }
+        ksRef.current = ks;
+        if (cached) {
+          // Known limitation: nothing binds the cached key to THIS keystore. If
+          // the vault was reset on another device, decrypts fail row-by-row
+          // until a lock/unlock refreshes the key — the keystore carries no key
+          // id to compare against.
+          mkRef.current = cached;
+          setStatus("unlocked");
+        } else {
+          setStatus("locked");
+        }
+      } catch {
+        // Transient failure — keep the cached key untouched and surface an
+        // error state rather than misreading this as a first run.
+        if (!cancelled) setStatus("error");
       }
     })();
     return () => {
@@ -224,7 +254,14 @@ export function useVault(offline: boolean): Vault {
       const mk0 = await generateMk();
       const { wrapped, iv } = await wrapMk(mk0, kek);
       const ks = buildKeystore(salt, ITERATIONS, wrapped, iv);
-      if (!(await putKeystore(ks))) throw new Error("keystore write failed");
+      // No-overwrite write: if a vault already exists (this state was reached
+      // by mistake), the server refuses rather than orphaning its data.
+      const wrote = await putKeystore(ks, false);
+      if (wrote === "conflict") {
+        setError("a vault already exists — reload the page");
+        return;
+      }
+      if (wrote !== "ok") throw new Error("keystore write failed");
       // Discard the extractable handle (mk0); from here on only the
       // non-extractable unwrap result exists.
       const mk = await unwrapMk(wrapped, iv, kek);
@@ -298,7 +335,8 @@ export function useVault(offline: boolean): Vault {
         const newKek = await deriveKek(newPass, salt);
         const { wrapped, iv } = await wrapMk(tempMk, newKek);
         const next = buildKeystore(salt, ITERATIONS, wrapped, iv);
-        if (!(await putKeystore(next)))
+        // The one legitimate overwrite: same MK, new wrapping.
+        if ((await putKeystore(next, true)) !== "ok")
           throw new Error("keystore write failed");
         const mk = await unwrapMk(wrapped, iv, newKek);
         ksRef.current = next;
