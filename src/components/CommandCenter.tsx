@@ -311,6 +311,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
             >
               vault/
             </Link>
+            <Link
+              href="/files"
+              className="text-amber/80 transition-colors hover:text-amber"
+            >
+              files/
+            </Link>
           </nav>
           <CommandK />
         </div>
