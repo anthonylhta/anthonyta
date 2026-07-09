@@ -14,6 +14,9 @@ test.describe("guest gating", () => {
     "/portfolio",
     "/vault/abc123XYZ",
     "/vault/img/abc123XYZ", // the owner-gated image route (ADR 0048)
+    "/files", // the owner-only files inbox
+    "/api/files/dl?p=inbox%2Fx.jpg", // inbox download
+    "/api/files/link?p=inbox%2Fx.jpg", // inbox share-link mint
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
@@ -24,6 +27,27 @@ test.describe("guest gating", () => {
     request,
   }) => {
     const res = await request.get("/vault/..%2f..%2fetc%2fpasswd");
+    expect(res.status()).toBe(404);
+  });
+
+  test("a path-traversal files download is a 404, not a probe", async ({
+    request,
+  }) => {
+    const res = await request.get(
+      "/api/files/dl?p=inbox/..%2f..%2fetc%2fpasswd",
+    );
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/files/upload is 404 for a guest", async ({ request }) => {
+    const res = await request.post("/api/files/upload", { data: {} });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/files/delete is 404 for a guest", async ({ request }) => {
+    const res = await request.post("/api/files/delete", {
+      data: { pathname: "inbox/x.jpg" },
+    });
     expect(res.status()).toBe(404);
   });
 
@@ -55,6 +79,7 @@ test.describe("guest gating", () => {
       const body = await (await request.get(path)).text();
       expect(body, `${path} leaks /vault`).not.toContain("/vault");
       expect(body, `${path} leaks /portfolio`).not.toContain("/portfolio");
+      expect(body, `${path} leaks /files`).not.toContain("/files");
     }
   });
 
