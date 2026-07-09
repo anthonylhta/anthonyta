@@ -51,6 +51,11 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
+  test("POST /api/files/share is 404 for a guest", async ({ request }) => {
+    const res = await request.post("/api/files/share");
+    expect(res.status()).toBe(404);
+  });
+
   test("/ serves the lobby, never the command center", async ({ request }) => {
     const res = await request.get("/");
     expect(res.status()).toBe(200);
