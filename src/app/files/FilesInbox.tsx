@@ -188,10 +188,9 @@ export function FilesInbox({
   );
 }
 
-/** One inbox row — a file (thumbnail, dl · link · del) or an inlined text note (copy · del). */
+/** One inbox row — a file (thumbnail, dl · del) or an inlined text note (copy · del). */
 function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [linkLabel, setLinkLabel] = useState("link");
   const [copyLabel, setCopyLabel] = useState("copy");
   const [delError, setDelError] = useState(false);
 
@@ -206,24 +205,6 @@ function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
       setCopyLabel("error");
     } finally {
       setTimeout(() => setCopyLabel("copy"), 2000);
-    }
-  }
-
-  async function copyLink() {
-    setBusy(true);
-    try {
-      const res = await fetch(
-        `/api/files/link?p=${encodeURIComponent(f.pathname)}`,
-      );
-      if (!res.ok) throw new Error("link failed");
-      const { url } = await res.json();
-      await navigator.clipboard.writeText(url);
-      setLinkLabel("copied · 1h");
-    } catch {
-      setLinkLabel("error");
-    } finally {
-      setBusy(false);
-      setTimeout(() => setLinkLabel("link"), 2000);
     }
   }
 
@@ -289,23 +270,13 @@ function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
               {copyLabel}
             </button>
           ) : (
-            <>
-              <a
-                href={dl}
-                download
-                className="text-muted transition-colors hover:text-amber"
-              >
-                dl
-              </a>
-              <button
-                type="button"
-                onClick={copyLink}
-                disabled={busy}
-                className="tabular-nums text-muted transition-colors hover:text-amber disabled:opacity-30"
-              >
-                {linkLabel}
-              </button>
-            </>
+            <a
+              href={dl}
+              download
+              className="text-muted transition-colors hover:text-amber"
+            >
+              dl
+            </a>
           )}
           <button
             type="button"

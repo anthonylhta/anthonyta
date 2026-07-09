@@ -16,7 +16,6 @@ test.describe("guest gating", () => {
     "/vault/img/abc123XYZ", // the owner-gated image route (ADR 0048)
     "/files", // the owner-only files inbox
     "/api/files/dl?p=inbox%2Fx.jpg", // inbox download
-    "/api/files/link?p=inbox%2Fx.jpg", // inbox share-link mint
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);

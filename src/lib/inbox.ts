@@ -1,4 +1,4 @@
-import { del, get, issueSignedToken, list, presignUrl } from "@vercel/blob";
+import { del, get, issueSignedToken, list, presignUrl, put } from "@vercel/blob";
 import {
   INBOX_PREFIX,
   isTextNote,
@@ -26,7 +26,15 @@ import {
  */
 
 export const DL_TTL_SECONDS = 300; // immediate 302 download window
-export const LINK_TTL_SECONDS = 3600; // shareable copy-link
+
+/**
+ * The E2EE keystore (ADR 0053) — one small JSON blob holding the passphrase-wrapped
+ * master key. It lives OUTSIDE `inbox/` on purpose: `isValidPathname` requires the
+ * `inbox/` prefix, so no file route can ever be coaxed into serving or deleting it,
+ * and `list({prefix: "inbox/"})` never surfaces it.
+ */
+export const KEYSTORE_PATH = "meta/keystore";
+export const KEYSTORE_MAX_BYTES = 2048;
 
 export interface Inbox {
   files: InboxFile[];
@@ -98,9 +106,48 @@ export async function deleteFile(pathname: string): Promise<boolean> {
 }
 
 /**
+ * Read the raw keystore JSON, or `null` when the store is off, none has been written
+ * yet, or the read throws. Callers can't tell "absent" from "error" here — the route
+ * collapses both to 404 and the client decides what that means from the SSR offline
+ * flag.
+ */
+export async function getKeystore(): Promise<string | null> {
+  if (!enabled()) return null;
+  try {
+    const res = await get(KEYSTORE_PATH, { access: "private" });
+    if (!res || res.statusCode !== 200) return null;
+    return await new Response(res.stream).text();
+  } catch (err) {
+    console.error("[inbox] keystore read failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Write the keystore JSON at its fixed path (no random suffix — there is exactly one,
+ * and a passphrase change overwrites it in place). The caller validates the shape;
+ * this only moves bytes. `false` on a disabled store or a write error.
+ */
+export async function putKeystore(json: string): Promise<boolean> {
+  if (!enabled()) return false;
+  try {
+    await put(KEYSTORE_PATH, json, {
+      access: "private",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: "application/json",
+    });
+    return true;
+  } catch (err) {
+    console.error("[inbox] keystore write failed:", err);
+    return false;
+  }
+}
+
+/**
  * Mint a short-lived signed GET URL for a private blob, good for `ttlSeconds`. `null` when
- * the store is off, the pathname is malformed, or either signing step throws. Callers pass
- * `DL_TTL_SECONDS` for an immediate 302 or `LINK_TTL_SECONDS` for a copyable share link.
+ * the store is off, the pathname is malformed, or either signing step throws. Used by the
+ * legacy plaintext download route at `DL_TTL_SECONDS`.
  */
 export async function presignDownload(
   pathname: string,
