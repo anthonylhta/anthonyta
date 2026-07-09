@@ -1,6 +1,7 @@
-import { del, issueSignedToken, list, presignUrl } from "@vercel/blob";
+import { del, get, issueSignedToken, list, presignUrl } from "@vercel/blob";
 import {
   INBOX_PREFIX,
+  isTextNote,
   isValidPathname,
   sortInbox,
   toInboxFile,
@@ -47,11 +48,37 @@ export async function listInbox(): Promise<Inbox> {
   if (!enabled()) return { files: [], offline: true };
   try {
     const { blobs } = await list({ prefix: INBOX_PREFIX });
-    return { files: sortInbox(blobs.map(toInboxFile)), offline: false };
+    const files = sortInbox(blobs.map(toInboxFile));
+    await hydrateTextNotes(files);
+    return { files, offline: false };
   } catch (err) {
     console.error("[inbox] list failed:", err);
     return { files: [], offline: true };
   }
+}
+
+/**
+ * Fill in `text` for the small text notes so the list can inline them, mutating in place.
+ * Every read is isolated — a failed fetch just leaves that row as a plain file rather than
+ * sinking the whole listing — and the pass is skipped entirely when there are no notes.
+ * The `get()` result carries content as a stream (its `blob` field is metadata, not a
+ * Blob), so we drain `stream` through a `Response` to a string.
+ */
+async function hydrateTextNotes(files: InboxFile[]): Promise<void> {
+  const notes = files.filter(isTextNote);
+  if (notes.length === 0) return;
+  await Promise.all(
+    notes.map(async (f) => {
+      try {
+        const res = await get(f.pathname, { access: "private" });
+        if (res && res.statusCode === 200) {
+          f.text = await new Response(res.stream).text();
+        }
+      } catch (err) {
+        console.error("[inbox] note read failed:", f.pathname, err);
+      }
+    }),
+  );
 }
 
 /**

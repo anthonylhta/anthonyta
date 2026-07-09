@@ -22,7 +22,12 @@ export interface InboxFile {
   size: number;
   uploadedAt: string;
   kind: FileKind;
+  /** Inline content for a small text note (hydrated by lib/inbox); unset otherwise. */
+  text?: string;
 }
+
+/** Text notes above this many bytes stay plain files — never hydrated or inlined. */
+export const TEXT_NOTE_MAX = 4096;
 
 /** Strip a segment down to the safe `[A-Za-z0-9._-]` set, collapsing dash runs. */
 function scrub(s: string): string {
@@ -63,6 +68,27 @@ export function sanitizePathname(rawName: string): string {
 
   const out = capped + suffix;
   return capped ? out : `file${suffix}`;
+}
+
+/**
+ * A typed/pasted snippet → a safe LEAF `.txt` filename (no prefix). The first 40 chars
+ * become the stem, with slashes folded to `-` BEFORE sanitizing so a pasted URL keeps its
+ * host instead of collapsing to a last path segment. Empty/whitespace-only → `note.txt`.
+ * Always ends `.txt` and always passes `isValidPathname` once prefixed with `inbox/`.
+ */
+export function noteName(text: string): string {
+  if (!text.trim()) return "note.txt";
+  const head = text.slice(0, 40).replace(/[/\\]/g, "-");
+  return sanitizePathname(head + ".txt");
+}
+
+/** A listing entry that's a small text note — inline-renderable rather than a plain file. */
+export function isTextNote(f: { pathname: string; size: number }): boolean {
+  return (
+    f.pathname.toLowerCase().endsWith(".txt") &&
+    f.size > 0 &&
+    f.size <= TEXT_NOTE_MAX
+  );
 }
 
 /** Traversal/probe guard for a STORED pathname — the only shape we serve. */
