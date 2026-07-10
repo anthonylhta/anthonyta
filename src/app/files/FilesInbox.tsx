@@ -3,15 +3,25 @@
 import { upload } from "@vercel/blob/client";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { randomId, type EnvelopeMeta } from "@/lib/crypto";
+import {
+  exportKeyRaw,
+  generateShareKey,
+  randomId,
+  seal,
+  toB64url,
+  type EnvelopeMeta,
+} from "@/lib/crypto";
 import {
   age,
   formatSize,
   INBOX_PREFIX,
   noteName,
+  SHARE_PREFIX,
+  shareSegment,
   type FileKind,
   type InboxFile,
 } from "@/lib/files";
+import { SHARE_TTL_DAYS } from "@/lib/shares";
 import { useVault, type Vault } from "./useVault";
 
 // Short type tags for the non-image thumbnail slot.
@@ -650,6 +660,8 @@ function EncryptedRow({
     url?: string;
   } | null>(null);
   const [copyLabel, setCopyLabel] = useState("copy");
+  const [shareLabel, setShareLabel] = useState("share");
+  const [sharing, setSharing] = useState(false);
   const urlRef = useRef<string | null>(null);
   const inflight = useRef(false);
 
@@ -733,6 +745,44 @@ function EncryptedRow({
     }
   }
 
+  // Share = re-seal this item under a FRESH one-time key, upload the ciphertext to
+  // `share/`, and hand back a link whose fragment carries that key. The server only
+  // ever holds the re-encrypted bytes; the key travels in the URL, never to us.
+  async function share() {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const res = await fetch(
+        `/api/files/raw?p=${encodeURIComponent(f.pathname)}`,
+      );
+      if (!res.ok) throw new Error("fetch failed");
+      const envelope = new Uint8Array(await res.arrayBuffer());
+      const { meta, bytes } = await vault.openItem(envelope);
+      const key = await generateShareKey();
+      const sealed = await seal(key, meta, bytes);
+      const rawKey = await exportKeyRaw(key);
+      const expiry = Math.floor(Date.now() / 1000) + SHARE_TTL_DAYS * 86400;
+      const seg = shareSegment(expiry, randomId());
+      await upload(
+        `${SHARE_PREFIX}${seg}.bin`,
+        new Blob([sealed as BlobPart]),
+        {
+          access: "private",
+          handleUploadUrl: "/api/files/upload",
+          contentType: "application/octet-stream",
+        },
+      );
+      const link = `${location.origin}/s/${seg}#${toB64url(rawKey)}`;
+      await navigator.clipboard.writeText(link);
+      setShareLabel(`copied · ${SHARE_TTL_DAYS}d`);
+    } catch {
+      setShareLabel("error");
+    } finally {
+      setSharing(false);
+      setTimeout(() => setShareLabel("share"), 2000);
+    }
+  }
+
   return (
     <li className="py-2">
       <div className="flex items-center gap-3">
@@ -793,6 +843,16 @@ function EncryptedRow({
               decrypt
             </button>
           ) : null}
+          {unlocked && (
+            <button
+              type="button"
+              onClick={share}
+              disabled={sharing}
+              className="text-muted transition-colors hover:text-amber disabled:opacity-30"
+            >
+              {sharing ? "sharing…" : shareLabel}
+            </button>
+          )}
           <DelButton pathname={f.pathname} onChanged={onChanged} />
         </div>
       </div>
