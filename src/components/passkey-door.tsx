@@ -7,34 +7,21 @@ import { signIn } from "next-auth/react";
 /**
  * The hidden door, WebAuthn edition. Renders the same invisible #gh-auth form
  * the secret keystroke (key-shortcut.tsx) and the lobby 5-tap (Prompt.tsx)
- * requestSubmit() — but submit now runs the passkey ceremony in-page: one fast
+ * requestSubmit() — but submit runs the passkey ceremony in-page: one fast
  * same-origin fetch for options, then navigator.credentials.get via
  * startAuthentication, then the assertion through Auth.js. No redirect, no
- * third-party hop for a network observer to see — strictly better for
- * ADR 0022 than the GitHub bounce.
+ * third-party hop for a network observer to see (ADR 0022).
  *
  * The options fetch is the ONLY await before the credential prompt: Safari
  * grants a transient user-activation window from the triggering gesture, and
  * slow work here would spend it and silently kill the sheet.
  *
- * A genuine failure — no enrolled passkey on this device, a denied verify —
- * falls back to the GitHub server action, so the door keeps working on every
- * device for the whole migration (the fallback, and GitHub with it, is removed
- * once passkeys are verified everywhere). But a user CANCELLING the sheet
- * (NotAllowedError/AbortError) closes silently: an accidental 5-tap must not
- * escalate into a GitHub redirect, which would advertise the door louder than
- * the cancel that was meant to dismiss it (ADR 0022).
+ * ANY failure — a cancelled sheet, no passkey on this device, a denied verify —
+ * simply closes the door with nothing visible. Passkeys are the only way in now
+ * (ADR 0057 removed the GitHub fallback); the sole break-glass is the env-gated
+ * recovery form, deliberately not reachable from here.
  */
-const DISMISS = new Set(["NotAllowedError", "AbortError"]);
-
-/** True when the ceremony ended because the user closed the sheet, not failed. */
-function isDismissal(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  if (DISMISS.has(err.name)) return true;
-  return err.cause instanceof Error && DISMISS.has(err.cause.name);
-}
-
-export function PasskeyDoor({ fallback }: { fallback: () => Promise<void> }) {
+export function PasskeyDoor() {
   const busy = useRef(false); // the 5-tap can fire twice; drop re-entries
 
   async function open(e: React.FormEvent<HTMLFormElement>) {
@@ -56,13 +43,8 @@ export function PasskeyDoor({ fallback }: { fallback: () => Promise<void> }) {
       // Full navigation so the server re-renders the command center with the
       // fresh session cookie.
       location.assign("/");
-    } catch (err) {
-      // A cancelled/aborted prompt is the user dismissing the door — stay quiet.
-      // Only a real failure (no passkey here, denied verify) earns the fallback.
-      // startAuthentication wraps the DOMException in a WebAuthnError but keeps
-      // `.name` from the cause (verified against the installed pkg); check both.
-      if (isDismissal(err)) return;
-      await fallback();
+    } catch {
+      // Hidden door: a failed or cancelled ceremony leaves no trace.
     } finally {
       busy.current = false;
     }

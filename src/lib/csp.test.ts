@@ -32,7 +32,7 @@ describe("buildCsp", () => {
       "base-uri": "'none'",
       "frame-src": "'none'",
       "frame-ancestors": "'none'",
-      "form-action": "'self' https://github.com",
+      "form-action": "'self'",
     };
     expect(Object.keys(dirs)).toEqual(Object.keys(expected));
     for (const [name, value] of Object.entries(expected)) {
