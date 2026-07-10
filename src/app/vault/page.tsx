@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { StatusBar } from "@/components/terminal/StatusBar";
-import { getVaultIndex } from "@/lib/connectors/vault";
-import { VaultList } from "./VaultList";
+import { blobEnabled } from "@/lib/vaultstore";
+import { VaultReader } from "./VaultReader";
 
 export const metadata = { title: "vault" };
 
@@ -16,7 +16,6 @@ export default async function VaultPage() {
   const session = await auth();
   if (!session?.user) notFound();
 
-  const notes = await getVaultIndex();
   const who = session.user.name ?? "anthony";
 
   return (
@@ -34,14 +33,7 @@ export default async function VaultPage() {
           </span>
         </div>
 
-        {notes.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-muted">
-            No notes. Check that VAULT_FOLDER_ID is set and the folder is shared
-            with the service account.
-          </p>
-        ) : (
-          <VaultList notes={notes} />
-        )}
+        <VaultReader offline={!blobEnabled()} />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
