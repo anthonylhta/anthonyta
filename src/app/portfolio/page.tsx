@@ -2,13 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
-import { Sparkline } from "@/components/terminal/Sparkline";
 import { StatusBar } from "@/components/terminal/StatusBar";
-import { getCash } from "@/lib/cash";
 import { getPortfolio } from "@/lib/connectors/portfolio";
-import { arrow, aud, tone } from "@/lib/money";
-import { getSeries } from "@/lib/snapshots";
+import { blobEnabled } from "@/lib/finstore";
 import { samplePortfolio } from "@/lib/sampleDashboard";
+import { FinPanel } from "./FinPanel";
 
 export const metadata = { title: "portfolio" };
 
@@ -20,27 +18,9 @@ export default async function PortfolioPage() {
   const session = await auth();
   if (!session?.user) notFound();
 
-  const [portfolioData, series] = await Promise.all([
-    getPortfolio(),
-    getSeries(30),
-  ]);
+  const portfolioData = await getPortfolio();
   const portfolio = portfolioData ?? samplePortfolio;
-  const cash = getCash();
-  const netWorth = portfolio.totals.value + cash.cash + cash.hisa;
   const who = session.user.name ?? "anthony";
-
-  // The daily net-worth series (snapshots already include cash, ADR 0033). Needs at
-  // least two points to draw a line; before that the chart yields to a quiet note.
-  const nw = series.map((p) => p.netWorthCents / 100);
-  const trend =
-    nw.length >= 2
-      ? {
-          values: nw,
-          delta: nw[nw.length - 1] - nw[0],
-          from: series[0].date.slice(5),
-          to: series[series.length - 1].date.slice(5),
-        }
-      : null;
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -59,60 +39,14 @@ export default async function PortfolioPage() {
           </span>
         </div>
 
-        {/* net worth — invested + cash */}
-        <div className="border-b border-hairline px-4 py-4">
-          <p className="mb-1 text-[11px] uppercase tracking-[0.2em] text-muted">
-            net worth
-          </p>
-          <span className="text-2xl tabular-nums text-fg">{aud(netWorth)}</span>
-          <span className="ml-3 text-xs tabular-nums text-muted">
-            invested {aud(portfolio.totals.value)} · cash{" "}
-            {aud(cash.cash + cash.hisa)}
-          </span>
-
-          {trend ? (
-            <div className="mt-4">
-              <div className="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-[0.2em] text-muted">
-                <span>trend</span>
-                <span className={`tabular-nums ${tone(trend.delta)}`}>
-                  {arrow(trend.delta)} {trend.delta >= 0 ? "+" : ""}
-                  {aud(trend.delta)}
-                </span>
-              </div>
-              <Sparkline values={trend.values} delta={trend.delta} />
-              <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted/60">
-                <span>{trend.from}</span>
-                <span>{trend.to}</span>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-3 text-[11px] text-muted/60">
-              trend builds as daily snapshots accrue
-            </p>
-          )}
-        </div>
-
-        {/* invested — the holdings */}
-        <PortfolioCard p={portfolio} />
-
-        {/* cash + HISA */}
-        <div className="border-t border-hairline px-4 py-4">
-          <p className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-            cash
-          </p>
-          <div className="space-y-1.5 text-sm">
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted">chequing</span>
-              <span className="tabular-nums text-fg/90">{aud(cash.cash)}</span>
-            </div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted">
-                HISA{cash.rate ? ` · ${cash.rate}% p.a.` : ""}
-              </span>
-              <span className="tabular-nums text-fg/90">{aud(cash.hisa)}</span>
-            </div>
-          </div>
-        </div>
+        {/* Cash + net-worth trend are sealed under the vault key and decrypt in the
+            client island; the holdings stay server-rendered, passed through as a
+            prop so the order (net worth → holdings → cash) is preserved. */}
+        <FinPanel
+          invested={portfolio.totals.value}
+          offline={!blobEnabled()}
+          holdings={<PortfolioCard p={portfolio} />}
+        />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
