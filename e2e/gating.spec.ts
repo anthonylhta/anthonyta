@@ -85,6 +85,69 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
+  // Passkey enrollment is owner-gated: no unauthenticated path may exist to
+  // plant a credential, and the endpoints must be invisible (ADR 0022).
+  for (const path of [
+    "/api/auth/webauthn/register-options",
+    "/api/auth/webauthn/register-verify",
+  ]) {
+    test(`POST ${path} is 404 for a guest`, async ({ request }) => {
+      const res = await request.post(path, { data: {} });
+      expect(res.status()).toBe(404);
+    });
+  }
+
+  test("passkey auth-options are public, silent, and fresh per call", async ({
+    request,
+  }) => {
+    // Public by design — this IS the sign-in path — but inert: an empty allow
+    // list and a well-formed challenge whether or not any credential (or even
+    // a blob token) exists, so a probe learns nothing.
+    const res = await request.post("/api/auth/webauthn/auth-options");
+    expect(res.status()).toBe(200);
+    const options = await res.json();
+    expect(options.challenge).toMatch(/^[A-Za-z0-9_-]{16,}$/);
+    expect(options.rpId).toBe("localhost");
+    expect(options.allowCredentials ?? []).toEqual([]);
+    const cookie = res.headers()["set-cookie"] ?? "";
+    expect(cookie).toContain("webauthn-challenge=");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Strict");
+    expect(cookie).toContain("Path=/api/auth");
+
+    const second = await (
+      await request.post("/api/auth/webauthn/auth-options")
+    ).json();
+    expect(second.challenge).not.toBe(options.challenge);
+  });
+
+  test("a garbage passkey callback never 5xxes, just returns to the lobby", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/auth/callback/webauthn", {
+      maxRedirects: 0,
+      form: { assertion: "garbage" },
+    });
+    expect(res.status()).toBeLessThan(500);
+    expect([302, 400]).toContain(res.status());
+  });
+
+  test("break-glass recovery is unreachable by default", async ({
+    request,
+  }) => {
+    // The lobby renders no recovery UI while WEBAUTHN_RECOVERY is unset…
+    const html = await (await request.get("/")).text();
+    expect(html).not.toContain("recovery code");
+    // …and a recovery-shaped callback grants no session.
+    const res = await request.post("/api/auth/callback/webauthn", {
+      maxRedirects: 0,
+      form: { recovery: "any-code" },
+    });
+    expect(res.status()).toBeLessThan(500);
+    const session = await (await request.get("/api/auth/session")).json();
+    expect(session?.user).toBeFalsy();
+  });
+
   test("/ serves the lobby, never the command center", async ({ request }) => {
     const res = await request.get("/");
     expect(res.status()).toBe(200);
