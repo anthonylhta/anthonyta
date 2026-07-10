@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOX_MAGIC,
+  BOX_PUB_LEN,
+  boxOpen,
+  boxSeal,
   buildKeystore,
   deriveKek,
   fromB64url,
+  generateBoxKeypair,
   generateMk,
+  importBoxPriv,
+  importBoxPub,
   isKeystore,
+  isSnapkey,
   ITERATIONS,
   IV_LEN,
   open,
@@ -16,6 +24,7 @@ import {
   unwrapMk,
   wrapMk,
   type EnvelopeMeta,
+  type Snapkey,
 } from "./crypto";
 
 // Tests run the real KDF but at a tiny iteration count — the production count is
@@ -218,5 +227,123 @@ describe("keystore", () => {
     expect(
       isKeystore({ ...good, kdf: { salt_b64: 1, iterations: ITERATIONS } }),
     ).toBe(false);
+  });
+});
+
+describe("sealed box (ASB1)", () => {
+  it("pins the box constants", () => {
+    expect(BOX_MAGIC).toBe("ASB1");
+    expect(BOX_PUB_LEN).toBe(65);
+  });
+
+  it("seals to a public key and opens with the private key (text + 1KB binary)", async () => {
+    const { pubRaw, privPkcs8 } = await generateBoxKeypair();
+    const priv = await importBoxPriv(privPkcs8);
+
+    const text = new TextEncoder().encode("snapshot for the owner's eyes only");
+    expect(await boxOpen(priv, pubRaw, await boxSeal(pubRaw, text))).toEqual(
+      text,
+    );
+
+    const blob = crypto.getRandomValues(new Uint8Array(1024));
+    expect(await boxOpen(priv, pubRaw, await boxSeal(pubRaw, blob))).toEqual(
+      blob,
+    );
+  });
+
+  it("starts with the ASB1 magic and never repeats an envelope (fresh ephemeral)", async () => {
+    const { pubRaw } = await generateBoxKeypair();
+    const env = await boxSeal(pubRaw, new Uint8Array([1]));
+    expect(new TextDecoder().decode(env.subarray(0, 4))).toBe("ASB1");
+    const env2 = await boxSeal(pubRaw, new Uint8Array([1]));
+    expect(toB64url(env)).not.toBe(toB64url(env2));
+  });
+
+  it("a different recipient's private key cannot open the box", async () => {
+    const a = await generateBoxKeypair();
+    const b = await generateBoxKeypair();
+    const bPriv = await importBoxPriv(b.privPkcs8);
+    const env = await boxSeal(a.pubRaw, new Uint8Array([7, 7, 7]));
+    await expect(boxOpen(bPriv, b.pubRaw, env)).rejects.toThrow();
+    // Even handing it the correct recipient point can't rescue the wrong key.
+    await expect(boxOpen(bPriv, a.pubRaw, env)).rejects.toThrow();
+  });
+
+  it("any flipped byte — ciphertext, ephemeral point, or IV — fails to open", async () => {
+    const { pubRaw, privPkcs8 } = await generateBoxKeypair();
+    const priv = await importBoxPriv(privPkcs8);
+    const env = await boxSeal(pubRaw, new TextEncoder().encode("tamper me"));
+
+    const flip = (i: number) => {
+      const bent = new Uint8Array(env);
+      bent[i] ^= 0x01;
+      return bent;
+    };
+    // ciphertext, ephemeral-point region (4..69), IV region (69..81).
+    await expect(boxOpen(priv, pubRaw, flip(env.length - 1))).rejects.toThrow();
+    await expect(boxOpen(priv, pubRaw, flip(10))).rejects.toThrow();
+    await expect(
+      boxOpen(priv, pubRaw, flip(4 + BOX_PUB_LEN + 2)),
+    ).rejects.toThrow();
+  });
+
+  it("corrupt magic, truncation, and an empty buffer are rejected cleanly", async () => {
+    const { pubRaw, privPkcs8 } = await generateBoxKeypair();
+    const priv = await importBoxPriv(privPkcs8);
+    const env = await boxSeal(pubRaw, new Uint8Array([9]));
+
+    const bentMagic = new Uint8Array(env);
+    bentMagic[0] = "B".charCodeAt(0);
+    await expect(boxOpen(priv, pubRaw, bentMagic)).rejects.toThrow(/magic/);
+
+    const minLen = 4 + BOX_PUB_LEN + IV_LEN + 16;
+    await expect(
+      boxOpen(priv, pubRaw, env.subarray(0, minLen - 1)),
+    ).rejects.toThrow(/truncated/);
+    await expect(boxOpen(priv, pubRaw, new Uint8Array(0))).rejects.toThrow(
+      /truncated/,
+    );
+  });
+
+  it("both exported halves round-trip: pkcs8 → priv, raw → a usable public key", async () => {
+    const { pubRaw, privPkcs8 } = await generateBoxKeypair();
+    expect(pubRaw.length).toBe(BOX_PUB_LEN);
+
+    const priv = await importBoxPriv(privPkcs8);
+    const pub = await importBoxPub(pubRaw);
+    expect(pub.type).toBe("public");
+
+    const env = await boxSeal(pubRaw, new Uint8Array([5]));
+    expect((await boxOpen(priv, pubRaw, env))[0]).toBe(5);
+  });
+
+  it("importBoxPriv yields a non-extractable key", async () => {
+    const { privPkcs8 } = await generateBoxKeypair();
+    const priv = await importBoxPriv(privPkcs8);
+    expect(priv.extractable).toBe(false);
+    await expect(crypto.subtle.exportKey("pkcs8", priv)).rejects.toThrow();
+  });
+
+  it("isSnapkey accepts a valid shape and rejects everything off", () => {
+    const good: Snapkey = {
+      v: 1,
+      alg: "ECDH-P256",
+      pub_b64: "a".repeat(88),
+      sealed_priv_b64: "b".repeat(200),
+    };
+    expect(isSnapkey(good)).toBe(true);
+
+    expect(isSnapkey(null)).toBe(false);
+    expect(isSnapkey("{}")).toBe(false);
+    expect(isSnapkey({})).toBe(false);
+    expect(isSnapkey({ ...good, v: 2 })).toBe(false);
+    expect(isSnapkey({ ...good, alg: "X25519" })).toBe(false);
+    expect(isSnapkey({ ...good, pub_b64: "" })).toBe(false);
+    expect(isSnapkey({ ...good, pub_b64: "x".repeat(121) })).toBe(false);
+    // A missing private half is not a Snapkey.
+    expect(isSnapkey({ v: 1, alg: "ECDH-P256", pub_b64: "a" })).toBe(false);
+    expect(isSnapkey({ ...good, sealed_priv_b64: "x".repeat(5000) })).toBe(
+      false,
+    );
   });
 });
