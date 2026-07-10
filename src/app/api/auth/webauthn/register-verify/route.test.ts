@@ -10,6 +10,7 @@ vi.mock("@/auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/webauthn/store", () => ({
   getWebauthnRecord: vi.fn(),
   putWebauthnRecord: vi.fn(),
+  bootstrapOpen: vi.fn().mockResolvedValue(false),
 }));
 vi.mock("@simplewebauthn/server", () => ({
   verifyRegistrationResponse: vi.fn(),

@@ -132,6 +132,22 @@ test.describe("guest gating", () => {
     expect([302, 400]).toContain(res.status());
   });
 
+  test("break-glass recovery is unreachable by default", async ({
+    request,
+  }) => {
+    // The lobby renders no recovery UI while WEBAUTHN_RECOVERY is unset…
+    const html = await (await request.get("/")).text();
+    expect(html).not.toContain("recovery code");
+    // …and a recovery-shaped callback grants no session.
+    const res = await request.post("/api/auth/callback/webauthn", {
+      maxRedirects: 0,
+      form: { recovery: "any-code" },
+    });
+    expect(res.status()).toBeLessThan(500);
+    const session = await (await request.get("/api/auth/session")).json();
+    expect(session?.user).toBeFalsy();
+  });
+
   test("/ serves the lobby, never the command center", async ({ request }) => {
     const res = await request.get("/");
     expect(res.status()).toBe(200);

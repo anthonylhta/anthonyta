@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { get, put } from "@vercel/blob";
-import { getWebauthnRecord, putWebauthnRecord } from "./store";
+import { bootstrapOpen, getWebauthnRecord, putWebauthnRecord } from "./store";
 
 vi.mock("@vercel/blob", () => ({ get: vi.fn(), put: vi.fn() }));
 
@@ -104,5 +104,33 @@ describe("putWebauthnRecord", () => {
     expect(await putWebauthnRecord("{}", false)).toBe("failed");
     // an overwrite-mode throw is a plain failure, no conflict re-check
     expect(await putWebauthnRecord("{}", true)).toBe("failed");
+  });
+});
+
+describe("bootstrapOpen", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "test-token");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("is closed while the flag is unset, without touching the store", async () => {
+    mockGet.mockResolvedValue(null);
+    expect(await bootstrapOpen()).toBe(false);
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it("opens only for a strictly-absent record", async () => {
+    vi.stubEnv("WEBAUTHN_RECOVERY", "1");
+    mockGet.mockResolvedValue(null); // absent
+    expect(await bootstrapOpen()).toBe(true);
+    mockGet.mockResolvedValue(ok('{"v":1,"creds":[]}')); // exists
+    expect(await bootstrapOpen()).toBe(false);
+    mockGet.mockRejectedValue(new Error("network")); // error ≠ absent
+    expect(await bootstrapOpen()).toBe(false);
   });
 });

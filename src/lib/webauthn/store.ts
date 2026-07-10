@@ -19,6 +19,18 @@ export function webauthnStoreEnabled(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
+/**
+ * Break-glass bootstrap gate: sessionless first enrollment is permitted ONLY
+ * while the owner has deliberately set WEBAUTHN_RECOVERY=1 (a Vercel env
+ * change + redeploy) AND the record is strictly absent — a healthy read that
+ * found nothing. An errored read never qualifies: a blob hiccup must not
+ * open an enrollment window over an existing record.
+ */
+export async function bootstrapOpen(): Promise<boolean> {
+  if (process.env.WEBAUTHN_RECOVERY !== "1") return false;
+  return (await getWebauthnRecord()).state === "absent";
+}
+
 export async function getWebauthnRecord(): Promise<StoreRead<string>> {
   if (!webauthnStoreEnabled()) return { state: "error" };
   try {

@@ -7,6 +7,7 @@ vi.mock("@/auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/webauthn/store", () => ({
   getWebauthnRecord: vi.fn(),
   putWebauthnRecord: vi.fn(),
+  bootstrapOpen: vi.fn().mockResolvedValue(false),
 }));
 
 // `auth` is overloaded (session getter vs middleware), which defeats vi.mocked's
@@ -44,6 +45,14 @@ describe("webauthn/register-options route", () => {
     mockAuth.mockResolvedValue(null);
     expect((await POST()).status).toBe(404);
     expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it("admits a guest only through the break-glass bootstrap", async () => {
+    const { bootstrapOpen } = await import("@/lib/webauthn/store");
+    mockAuth.mockResolvedValue(null);
+    vi.mocked(bootstrapOpen).mockResolvedValue(true);
+    expect((await POST()).status).toBe(200);
+    vi.mocked(bootstrapOpen).mockResolvedValue(false);
   });
 
   it("503s on a store error instead of inviting a duplicate enrollment", async () => {

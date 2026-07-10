@@ -16,7 +16,11 @@ import {
 } from "@/lib/webauthn/record";
 import { hashRecoveryCode, mintRecoveryCode } from "@/lib/webauthn/recovery";
 import { rpConfig } from "@/lib/webauthn/rp";
-import { getWebauthnRecord, putWebauthnRecord } from "@/lib/webauthn/store";
+import {
+  bootstrapOpen,
+  getWebauthnRecord,
+  putWebauthnRecord,
+} from "@/lib/webauthn/store";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +38,14 @@ const unavailable = () => new Response("Unavailable", { status: 503 });
  * itself is returned exactly once for the owner to keep offline. That first
  * write refuses to overwrite (409 on a race) so a replayed bootstrap can
  * never clobber an existing record.
+ *
+ * The break-glass bootstrap (flag set + record strictly absent) is the one
+ * sessionless path in; its write still refuses to overwrite, so it closes
+ * itself the instant a record exists.
  */
 export async function POST(request: Request) {
   const session = await auth();
-  if (!session?.user) return nf();
+  if (!session?.user && !(await bootstrapOpen())) return nf();
 
   const rp = rpConfig();
   const clear = { "set-cookie": challengeClearCookie(rp.secure) };

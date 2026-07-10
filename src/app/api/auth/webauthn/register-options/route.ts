@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { challengeSetCookie, sealChallenge } from "@/lib/webauthn/cookie";
 import { isWebauthnRecord, type WebauthnRecord } from "@/lib/webauthn/record";
 import { rpConfig, RP_NAME } from "@/lib/webauthn/rp";
-import { getWebauthnRecord } from "@/lib/webauthn/store";
+import { bootstrapOpen, getWebauthnRecord } from "@/lib/webauthn/store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +17,14 @@ const nf = () => new Response("Not found", { status: 404 });
  * signed single-use cookie, not a server table. A store error is 503, never an
  * empty exclude list: options minted off a flaky read would invite enrolling a
  * duplicate of a credential the record already holds.
+ *
+ * The one exception to the session gate is the break-glass bootstrap: env
+ * flag deliberately set AND the record strictly absent — the lost-everything
+ * state where there is no credential left to enroll from.
  */
 export async function POST() {
   const session = await auth();
-  if (!session?.user) return nf();
+  if (!session?.user && !(await bootstrapOpen())) return nf();
 
   const read = await getWebauthnRecord();
   if (read.state === "error")
