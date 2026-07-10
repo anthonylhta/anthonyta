@@ -18,13 +18,15 @@ const nf = () => new Response("Not found", { status: 404 });
  * empty exclude list: options minted off a flaky read would invite enrolling a
  * duplicate of a credential the record already holds.
  *
- * The one exception to the session gate is the break-glass bootstrap: env
- * flag deliberately set AND the record strictly absent — the lost-everything
- * state where there is no credential left to enroll from.
+ * The one exception to the session gate is the break-glass bootstrap: it needs
+ * the `WEBAUTHN_BOOTSTRAP` secret presented in the `x-webauthn-bootstrap` header
+ * AND a strictly-absent record — the lost-everything state where no credential
+ * is left to enroll from. The secret, not the mere open window, is the gate.
  */
-export async function POST() {
+export async function POST(request: Request) {
   const session = await auth();
-  if (!session?.user && !(await bootstrapOpen())) return nf();
+  const bootstrapToken = request.headers.get("x-webauthn-bootstrap");
+  if (!session?.user && !(await bootstrapOpen(bootstrapToken))) return nf();
 
   const read = await getWebauthnRecord();
   if (read.state === "error")

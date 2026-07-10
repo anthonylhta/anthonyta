@@ -15,6 +15,13 @@ vi.mock("@/lib/webauthn/store", () => ({
 const mockAuth = auth as unknown as ReturnType<typeof vi.fn>;
 const mockGet = vi.mocked(getWebauthnRecord);
 
+// The route reads an x-webauthn-bootstrap header, so every call needs a Request.
+const req = (headers: Record<string, string> = {}) =>
+  new Request("http://localhost/api/auth/webauthn/register-options", {
+    method: "POST",
+    headers,
+  });
+
 const RECORD = JSON.stringify({
   v: 1,
   creds: [
@@ -43,7 +50,7 @@ describe("webauthn/register-options route", () => {
 
   it("404s a guest without touching the store", async () => {
     mockAuth.mockResolvedValue(null);
-    expect((await POST()).status).toBe(404);
+    expect((await POST(req())).status).toBe(404);
     expect(mockGet).not.toHaveBeenCalled();
   });
 
@@ -51,24 +58,24 @@ describe("webauthn/register-options route", () => {
     const { bootstrapOpen } = await import("@/lib/webauthn/store");
     mockAuth.mockResolvedValue(null);
     vi.mocked(bootstrapOpen).mockResolvedValue(true);
-    expect((await POST()).status).toBe(200);
+    expect((await POST(req())).status).toBe(200);
     vi.mocked(bootstrapOpen).mockResolvedValue(false);
   });
 
   it("503s on a store error instead of inviting a duplicate enrollment", async () => {
     mockGet.mockResolvedValue({ state: "error" });
-    expect((await POST()).status).toBe(503);
+    expect((await POST(req())).status).toBe(503);
   });
 
   it("503s on a corrupt record", async () => {
     mockGet.mockResolvedValue({ state: "ok", value: "not-json" });
-    expect((await POST()).status).toBe(503);
+    expect((await POST(req())).status).toBe(503);
     mockGet.mockResolvedValue({ state: "ok", value: '{"v":99}' });
-    expect((await POST()).status).toBe(503);
+    expect((await POST(req())).status).toBe(503);
   });
 
   it("mints discoverable, user-verified options with the challenge cookie", async () => {
-    const res = await POST();
+    const res = await POST(req());
     expect(res.status).toBe(200);
     const options = await res.json();
     expect(options.challenge).toMatch(/^[A-Za-z0-9_-]{16,}$/);
@@ -85,7 +92,7 @@ describe("webauthn/register-options route", () => {
 
   it("excludes already-enrolled credentials", async () => {
     mockGet.mockResolvedValue({ state: "ok", value: RECORD });
-    const options = await (await POST()).json();
+    const options = await (await POST(req())).json();
     expect(options.excludeCredentials).toEqual([
       { id: "existing-cred", transports: ["internal"], type: "public-key" },
     ]);

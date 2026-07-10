@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { get, put } from "@vercel/blob";
 import type { StoreRead, StoreWrite } from "@/lib/finstore";
 import { WEBAUTHN_PATH } from "./record";
@@ -20,14 +21,28 @@ export function webauthnStoreEnabled(): boolean {
 }
 
 /**
- * Break-glass bootstrap gate: sessionless first enrollment is permitted ONLY
- * while the owner has deliberately set WEBAUTHN_RECOVERY=1 (a Vercel env
- * change + redeploy) AND the record is strictly absent — a healthy read that
- * found nothing. An errored read never qualifies: a blob hiccup must not
- * open an enrollment window over an existing record.
+ * Break-glass bootstrap gate: sessionless first enrollment. Safe by
+ * construction, not by runbook — an open window is useless without the secret,
+ * so a racing attacker can't beat the owner to the first enrollment even while
+ * the window is open. Three conditions, all required:
+ *  - `WEBAUTHN_BOOTSTRAP` is set to a high-entropy secret (a deliberate Vercel
+ *    env change + redeploy by the owner);
+ *  - the caller presents that exact secret (constant-time compare — the boolean
+ *    flag alone never sufficed, since the server couldn't tell the owner's
+ *    ceremony from an attacker's);
+ *  - the record is strictly absent — a healthy read that found nothing (an
+ *    errored read never qualifies: a blob hiccup must not open a window over an
+ *    existing record).
+ * Distinct from `WEBAUTHN_RECOVERY` (which redeems an existing hash); bootstrap
+ * seeds an absent record, so the two are mutually exclusive by definition.
  */
-export async function bootstrapOpen(): Promise<boolean> {
-  if (process.env.WEBAUTHN_RECOVERY !== "1") return false;
+export async function bootstrapOpen(token: string | null): Promise<boolean> {
+  const secret = process.env.WEBAUTHN_BOOTSTRAP ?? "";
+  if (secret.length === 0 || typeof token !== "string" || token.length === 0)
+    return false;
+  const a = createHash("sha256").update(token).digest();
+  const b = createHash("sha256").update(secret).digest();
+  if (!timingSafeEqual(a, b)) return false;
   return (await getWebauthnRecord()).state === "absent";
 }
 

@@ -118,19 +118,28 @@ describe("bootstrapOpen", () => {
     vi.restoreAllMocks();
   });
 
-  it("is closed while the flag is unset, without touching the store", async () => {
+  it("is closed while the secret is unset, without touching the store", async () => {
     mockGet.mockResolvedValue(null);
-    expect(await bootstrapOpen()).toBe(false);
+    expect(await bootstrapOpen("anything")).toBe(false);
     expect(mockGet).not.toHaveBeenCalled();
   });
 
-  it("opens only for a strictly-absent record", async () => {
-    vi.stubEnv("WEBAUTHN_RECOVERY", "1");
+  it("stays closed for a wrong or missing token, without touching the store", async () => {
+    vi.stubEnv("WEBAUTHN_BOOTSTRAP", "the-real-secret");
+    mockGet.mockResolvedValue(null); // absent — the ONLY other requirement
+    expect(await bootstrapOpen("wrong-secret")).toBe(false);
+    expect(await bootstrapOpen(null)).toBe(false);
+    expect(await bootstrapOpen("")).toBe(false);
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it("opens only for the right secret AND a strictly-absent record", async () => {
+    vi.stubEnv("WEBAUTHN_BOOTSTRAP", "the-real-secret");
     mockGet.mockResolvedValue(null); // absent
-    expect(await bootstrapOpen()).toBe(true);
+    expect(await bootstrapOpen("the-real-secret")).toBe(true);
     mockGet.mockResolvedValue(ok('{"v":1,"creds":[]}')); // exists
-    expect(await bootstrapOpen()).toBe(false);
+    expect(await bootstrapOpen("the-real-secret")).toBe(false);
     mockGet.mockRejectedValue(new Error("network")); // error ≠ absent
-    expect(await bootstrapOpen()).toBe(false);
+    expect(await bootstrapOpen("the-real-secret")).toBe(false);
   });
 });

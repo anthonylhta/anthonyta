@@ -45,7 +45,8 @@ const unavailable = () => new Response("Unavailable", { status: 503 });
  */
 export async function POST(request: Request) {
   const session = await auth();
-  if (!session?.user && !(await bootstrapOpen())) return nf();
+  const bootstrapToken = request.headers.get("x-webauthn-bootstrap");
+  if (!session?.user && !(await bootstrapOpen(bootstrapToken))) return nf();
 
   const rp = rpConfig();
   const clear = { "set-cookie": challengeClearCookie(rp.secure) };
