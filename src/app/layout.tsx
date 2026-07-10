@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import { AuthForm } from "@/components/auth-buttons";
 import { KeyShortcut } from "@/components/key-shortcut";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
@@ -85,11 +86,15 @@ const paletteItems = [
   ...nav.filter((n) => n.ready).map((n) => ({ label: n.label, href: n.href })),
 ];
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading headers() forces dynamic rendering, which per-request nonces require
+  // (the accepted cost). The JSON-LD script below is non-executing but carries the
+  // nonce so the layout consumes the proxy's x-nonce header exactly once.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html
       lang="en"
@@ -99,6 +104,7 @@ export default function RootLayout({
         {/* Structured identity for crawlers; static JSON, so the inline script is safe. */}
         <script
           type="application/ld+json"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: JSON.stringify(personLd) }}
         />
         {/* ⌘K is global — the provider owns the modal + key listener; the visible

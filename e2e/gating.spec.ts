@@ -141,3 +141,80 @@ test.describe("guest gating", () => {
     expect((await request.get("/api/cron/snapshot")).status()).toBe(401);
   });
 });
+
+/**
+ * Strict CSP, Report-Only (src/proxy.ts). Every non-api HTML response gains a
+ * per-request-nonce policy in `content-security-policy-report-only`, layered on
+ * top of the UNCHANGED next.config.ts baseline. Locks the policy shape, nonce
+ * freshness, the nonce↔markup wiring, and that the proxy leaves the baseline
+ * headers byte-identical.
+ */
+test.describe("strict CSP (report-only)", () => {
+  const noncePattern =
+    /script-src 'self' 'nonce-([A-Za-z0-9+/=]+)' 'strict-dynamic'/;
+
+  // The proxy runs on the guest 404 response too, so /files carries it as well.
+  for (const path of ["/", "/files"]) {
+    test(`${path} carries the report-only policy`, async ({ request }) => {
+      const csp = (await request.get(path)).headers()[
+        "content-security-policy-report-only"
+      ];
+      expect(csp).toBeDefined();
+      expect(csp).toMatch(noncePattern);
+      for (const directive of [
+        "default-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-src 'none'",
+        "worker-src 'self'",
+        "connect-src 'self' https://vercel.com/api/blob/",
+        "img-src 'self' data: https://*.private.blob.vercel-storage.com",
+        "form-action 'self' https://github.com",
+      ]) {
+        expect(csp, `${path} is missing \`${directive}\``).toContain(directive);
+      }
+    });
+  }
+
+  test("two requests mint different nonces", async ({ request }) => {
+    const mint = async () =>
+      (await request.get("/"))
+        .headers()
+        ["content-security-policy-report-only"]?.match(noncePattern)?.[1];
+    const first = await mint();
+    const second = await mint();
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(first).not.toBe(second);
+  });
+
+  test("the nonce is wired into the HTML", async ({ request }) => {
+    const res = await request.get("/");
+    const nonce = res
+      .headers()
+      ["content-security-policy-report-only"]?.match(noncePattern)?.[1];
+    expect(nonce).toBeDefined();
+    // Proves Next threaded it into the markup, not just the header.
+    expect(await res.text()).toContain(`nonce="${nonce}"`);
+  });
+
+  test("baseline headers are byte-exact after the proxy", async ({
+    request,
+  }) => {
+    const h = (await request.get("/")).headers();
+    // Exact values copied from next.config.ts — the proxy must not touch them.
+    expect(h["content-security-policy"]).toBe(
+      "frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com",
+    );
+    expect(h["x-frame-options"]).toBe("DENY");
+    expect(h["x-content-type-options"]).toBe("nosniff");
+    expect(h["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+    expect(h["permissions-policy"]).toBe(
+      "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+    );
+    expect(h["strict-transport-security"]).toBe(
+      "max-age=63072000; includeSubDomains",
+    );
+    expect(h["x-powered-by"]).toBeUndefined();
+  });
+});
