@@ -5,7 +5,7 @@
  * `@vercel/blob`, or `react` import and no Node-only APIs, so it's safe in a client
  * component and unit-testable on its own (mirrors lib/files, lib/activity).
  *
- * The cash config supersedes the old `CASH_AUD`/`HISA_AUD` env (lib/cash): a dated,
+ * The cash config supersedes the retired `CASH_AUD`/`HISA_AUD` env vars: a dated,
  * ascending series of balances instead of a single current value, so a snapshot can
  * be valued with the cash that was true ON its day. Callers that find no entry on or
  * before a day treat it as 0 — the same "unset → 0" behavior the env had.
