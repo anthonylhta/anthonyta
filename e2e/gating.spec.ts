@@ -22,6 +22,9 @@ test.describe("guest gating", () => {
     "/api/fin/config", // E2EE financial config (ADR 0054)
     "/api/fin/snapkey", // sealed-box public/private key record
     "/api/fin/snapshots?days=30", // sealed net-worth history
+    "/api/vault/raw?p=vault%2Findex", // E2EE vault index ciphertext
+    "/api/vault/raw?p=vault%2Fn-AAAAAAAAAAAAAAAAAAAAAA.bin", // a vault note
+    "/api/vault/raw?p=meta%2Fkeystore", // keystore exfil attempt via the vault route
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
@@ -49,6 +52,15 @@ test.describe("guest gating", () => {
   }) => {
     const res = await request.get(
       "/api/files/raw?p=inbox%2F..%2Fmeta%2Fkeystore",
+    );
+    expect(res.status()).toBe(404);
+  });
+
+  test("a path-traversal vault read is a 404, not a probe", async ({
+    request,
+  }) => {
+    const res = await request.get(
+      "/api/vault/raw?p=vault%2F..%2Fmeta%2Fkeystore",
     );
     expect(res.status()).toBe(404);
   });
@@ -231,7 +243,7 @@ test.describe("strict CSP (report-only)", () => {
         "frame-src 'none'",
         "worker-src 'self'",
         "connect-src 'self' https://vercel.com/api/blob/",
-        "img-src 'self' data: https://*.private.blob.vercel-storage.com",
+        "img-src 'self' data: blob: https://*.private.blob.vercel-storage.com",
         "form-action 'self'",
       ]) {
         expect(csp, `${path} is missing \`${directive}\``).toContain(directive);
