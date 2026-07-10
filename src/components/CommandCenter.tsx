@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
+import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
 import { PasskeyManager } from "@/components/PasskeyManager";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
@@ -8,18 +9,13 @@ import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
-import {
-  ACTIVITY_DAYS,
-  dailyCounts,
-  dailyDeltas,
-  toLevels,
-} from "@/lib/activity";
+import { VaultTodayGlance } from "@/components/VaultTodayGlance";
+import { ACTIVITY_DAYS, dailyDeltas, toLevels } from "@/lib/activity";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getLanguageStats } from "@/lib/connectors/translator";
-import { getTodayNote, getVaultIndex } from "@/lib/connectors/vault";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import {
   indexBaseline,
@@ -27,10 +23,10 @@ import {
   sydneyDaysAgo,
   type SnapIndexDay,
 } from "@/lib/fin";
-import { blobEnabled, getSnapIndex } from "@/lib/finstore";
+import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { samplePortfolio } from "@/lib/sampleDashboard";
-import { parseDaily, type TodayDigest } from "@/lib/today";
+import { blobEnabled } from "@/lib/vaultstore";
 
 /** Today's date in Sydney as YYYY-MM-DD (matches the vault's daily-note titles). */
 function sydneyISODate(): string {
@@ -47,12 +43,6 @@ function todayLabel(): string {
     day: "numeric",
     month: "short",
   }).format(new Date());
-}
-
-/** How many vault notes were touched in the last 7 days. */
-function journalThisWeek(notes: { modified: string }[]): number {
-  const weekAgo = Date.now() - 7 * 86_400_000;
-  return notes.filter((n) => Date.parse(n.modified) >= weekAgo).length;
 }
 
 /** A "15 Jun – 21 Jun" label for the trailing week. */
@@ -76,27 +66,16 @@ function weekRange(): string {
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
-  const [
-    portfolioData,
-    briefing,
-    lang,
-    vault,
-    reading,
-    gh,
-    indexRead,
-    riichi,
-    todayRaw,
-  ] = await Promise.all([
-    getPortfolio(),
-    getBriefing(),
-    getLanguageStats(),
-    getVaultIndex(),
-    getCurrentlyReading(),
-    getGithub(),
-    getSnapIndex(),
-    getRiichiStats(),
-    getTodayNote(today),
-  ]);
+  const [portfolioData, briefing, lang, reading, gh, indexRead, riichi] =
+    await Promise.all([
+      getPortfolio(),
+      getBriefing(),
+      getLanguageStats(),
+      getCurrentlyReading(),
+      getGithub(),
+      getSnapIndex(),
+      getRiichiStats(),
+    ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
   const t = portfolio.totals;
@@ -124,11 +103,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
     .map((label) => b.tape.find((tk) => tk.label === label))
     .filter((tk): tk is TapeItem => Boolean(tk));
   const ticks = curated.length ? curated : b.tape.slice(0, 3);
-
-  // vault-backed bits: today's parsed digest + the week's journal count.
-  // digest is null when no note exists yet (a fresh, unplanned morning).
-  const digest = todayRaw ? parseDaily(todayRaw.text) : null;
-  const journalCount = journalThisWeek(vault);
 
   // THIS WEEK rows — number = this week, strip = the trailing ~10-week trend.
   // riichi reads `puzzle_results` (the same table its app's streak uses), so its
@@ -173,21 +147,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
       ),
       levels: toLevels(riichi.activity),
     },
-    {
-      k: "journal",
-      value: (
-        <span>
-          <span className="text-amber">{journalCount}</span> notes
-        </span>
-      ),
-      levels: toLevels(
-        dailyCounts(
-          vault.map((n) => n.modified),
-          ACTIVITY_DAYS,
-          today,
-        ),
-      ),
-    },
   ];
 
   return (
@@ -223,8 +182,10 @@ export async function CommandCenter({ userName }: { userName: string }) {
           <NetWorthGlance invested={t.value} offline={!blobEnabled()} />
         </div>
 
-        {/* today's daily note, parsed: headline + planner + a journal peek */}
-        <DailyDigest digest={digest} noteId={todayRaw?.id} date={today} />
+        {/* today's daily note, parsed: headline + planner + a journal peek. A
+            client island — the note is sealed in the E2EE vault, so it's fetched +
+            decrypted in the browser (unlock in files/), never server-rendered. */}
+        <VaultTodayGlance offline={!blobEnabled()} date={today} />
 
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
           <Module
@@ -270,15 +231,18 @@ export async function CommandCenter({ userName }: { userName: string }) {
         {/* ──────────── THIS WEEK ──────────── */}
         <Zone label="this week" right={weekRange()} />
         <div className="px-4 py-2">
-          {rows.map((r, i) => (
+          {rows.map((r) => (
             <ActivityRow
               key={r.k}
               k={r.k}
               value={r.value}
               levels={r.levels}
-              last={i === rows.length - 1}
+              last={false}
             />
           ))}
+          {/* journal — a client island (the count + trend come from the sealed
+              vault index), always the final, borderless row. */}
+          <JournalActivityRow offline={!blobEnabled()} today={today} />
         </div>
 
         {/* quick jumps */}
@@ -337,100 +301,6 @@ function Zone({ label, right }: { label: string; right?: string }) {
         <span className="text-[11px] tabular-nums text-muted">{right}</span>
       )}
     </div>
-  );
-}
-
-/** The TODAY digest — today's daily note parsed into a headline, the day planner
- *  (checkbox state + times), and a muted journal peek. `digest` is null when no
- *  note exists yet (an unplanned morning); the planner is empty on a note that's
- *  only been journaled in. Read-only — checking off happens in Obsidian. */
-function DailyDigest({
-  digest,
-  noteId,
-  date,
-}: {
-  digest: TodayDigest | null;
-  noteId?: string;
-  date: string;
-}) {
-  return (
-    <Module
-      label="daily note"
-      className="border-0 border-b border-hairline"
-      action={
-        noteId ? (
-          <Link
-            href={`/vault/${noteId}`}
-            className="text-xs text-amber hover:underline"
-          >
-            read full day →
-          </Link>
-        ) : (
-          <Link href="/vault" className="text-xs text-amber hover:underline">
-            vault →
-          </Link>
-        )
-      }
-    >
-      {!digest ? (
-        <p className="text-muted">
-          no note for <span className="tabular-nums">{date}</span> yet — plan it
-          in the vault
-        </p>
-      ) : (
-        <>
-          {digest.summary && (
-            <p className="text-fg">
-              <span className="text-amber">→</span> {digest.summary}
-            </p>
-          )}
-
-          {digest.planner.length > 0 ? (
-            <div className={digest.summary ? "mt-3" : ""}>
-              <div className="mb-1.5 flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-muted">
-                <span>day planner</span>
-                <span className="tabular-nums">
-                  <span className="text-amber">{digest.doneCount}</span> done ·{" "}
-                  {digest.openCount} left
-                </span>
-              </div>
-              <ul className="space-y-1">
-                {digest.planner.map((item, i) => (
-                  <li key={i} className="flex items-baseline gap-2 text-sm">
-                    <span
-                      className={item.done ? "text-up" : "text-muted"}
-                      aria-hidden
-                    >
-                      {item.done ? "✓" : "○"}
-                    </span>
-                    {item.time && (
-                      <span className="shrink-0 tabular-nums text-muted">
-                        {item.time}
-                      </span>
-                    )}
-                    <span
-                      className={
-                        item.done ? "text-muted line-through" : "text-fg"
-                      }
-                    >
-                      {item.text}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-muted">no plans logged yet</p>
-          )}
-
-          {digest.journalPreview && (
-            <p className="mt-3 line-clamp-2 border-t border-hairline/40 pt-2 text-xs text-muted">
-              {digest.journalPreview}
-            </p>
-          )}
-        </>
-      )}
-    </Module>
   );
 }
 
