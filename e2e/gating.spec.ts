@@ -97,6 +97,41 @@ test.describe("guest gating", () => {
     });
   }
 
+  test("passkey auth-options are public, silent, and fresh per call", async ({
+    request,
+  }) => {
+    // Public by design — this IS the sign-in path — but inert: an empty allow
+    // list and a well-formed challenge whether or not any credential (or even
+    // a blob token) exists, so a probe learns nothing.
+    const res = await request.post("/api/auth/webauthn/auth-options");
+    expect(res.status()).toBe(200);
+    const options = await res.json();
+    expect(options.challenge).toMatch(/^[A-Za-z0-9_-]{16,}$/);
+    expect(options.rpId).toBe("localhost");
+    expect(options.allowCredentials ?? []).toEqual([]);
+    const cookie = res.headers()["set-cookie"] ?? "";
+    expect(cookie).toContain("webauthn-challenge=");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Strict");
+    expect(cookie).toContain("Path=/api/auth");
+
+    const second = await (
+      await request.post("/api/auth/webauthn/auth-options")
+    ).json();
+    expect(second.challenge).not.toBe(options.challenge);
+  });
+
+  test("a garbage passkey callback never 5xxes, just returns to the lobby", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/auth/callback/webauthn", {
+      maxRedirects: 0,
+      form: { assertion: "garbage" },
+    });
+    expect(res.status()).toBeLessThan(500);
+    expect([302, 400]).toContain(res.status());
+  });
+
   test("/ serves the lobby, never the command center", async ({ request }) => {
     const res = await request.get("/");
     expect(res.status()).toBe(200);
