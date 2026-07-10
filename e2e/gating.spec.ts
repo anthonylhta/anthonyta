@@ -85,6 +85,18 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
+  // Passkey enrollment is owner-gated: no unauthenticated path may exist to
+  // plant a credential, and the endpoints must be invisible (ADR 0022).
+  for (const path of [
+    "/api/auth/webauthn/register-options",
+    "/api/auth/webauthn/register-verify",
+  ]) {
+    test(`POST ${path} is 404 for a guest`, async ({ request }) => {
+      const res = await request.post(path, { data: {} });
+      expect(res.status()).toBe(404);
+    });
+  }
+
   test("/ serves the lobby, never the command center", async ({ request }) => {
     const res = await request.get("/");
     expect(res.status()).toBe(200);
