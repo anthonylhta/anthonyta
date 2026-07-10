@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
+import { NetWorthGlance } from "@/components/NetWorthGlance";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
@@ -12,7 +13,6 @@ import {
   dailyDeltas,
   toLevels,
 } from "@/lib/activity";
-import { getCash } from "@/lib/cash";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getPortfolio } from "@/lib/connectors/portfolio";
@@ -20,8 +20,13 @@ import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getTodayNote, getVaultIndex } from "@/lib/connectors/vault";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
-import { arrow, aud, tone } from "@/lib/money";
-import { getBaseline, getSeries } from "@/lib/snapshots";
+import {
+  indexBaseline,
+  isSnapIndex,
+  sydneyDaysAgo,
+  type SnapIndexDay,
+} from "@/lib/fin";
+import { blobEnabled, getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { samplePortfolio } from "@/lib/sampleDashboard";
 import { parseDaily, type TodayDigest } from "@/lib/today";
@@ -76,9 +81,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
     lang,
     vault,
     reading,
-    baseline,
     gh,
-    snapshots,
+    indexRead,
     riichi,
     todayRaw,
   ] = await Promise.all([
@@ -87,27 +91,32 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getLanguageStats(),
     getVaultIndex(),
     getCurrentlyReading(),
-    getBaseline(),
     getGithub(),
-    getSeries(ACTIVITY_DAYS),
+    getSnapIndex(),
     getRiichiStats(),
     getTodayNote(today),
   ]);
   const portfolio = portfolioData ?? samplePortfolio;
   const b = briefing ?? sampleBriefing;
-  const cash = getCash();
   const t = portfolio.totals;
-  const netWorth = t.value + cash.cash + cash.hisa;
 
-  // Week-over-week deltas — diff today against a snapshot from ~7 days ago (ADR 0033).
-  // null (no baseline yet, or the store is off) → "tracking…".
-  const netWorthDelta = baseline
-    ? netWorth - baseline.netWorthCents / 100
-    : null;
+  // Reading week-over-week + trend now ride the sealed reading index (the cron's
+  // plaintext day series), not the retired snapshot store. A store miss or a bad
+  // shape → no days → the row's own "tracking…" fallback.
+  let indexDays: SnapIndexDay[] = [];
+  if (indexRead.state === "ok") {
+    try {
+      const parsed: unknown = JSON.parse(indexRead.value);
+      if (isSnapIndex(parsed)) indexDays = parsed.days;
+    } catch {
+      // malformed index → leave days empty
+    }
+  }
+  const readingBaseline = indexBaseline(indexDays, sydneyDaysAgo(7));
   const readingChapters = reading.reduce((sum, r) => sum + r.chapter, 0);
   const readingDelta =
-    baseline && reading.length > 0
-      ? readingChapters - baseline.readingChapters
+    readingBaseline && reading.length > 0
+      ? readingChapters - readingBaseline.readingChapters
       : null;
 
   const curated = ["ASX 200", "S&P 500", "BTC"]
@@ -123,9 +132,9 @@ export async function CommandCenter({ userName }: { userName: string }) {
   // THIS WEEK rows — number = this week, strip = the trailing ~10-week trend.
   // riichi reads `puzzle_results` (the same table its app's streak uses), so its
   // solve history + real streak are live now (ADR 0046, was deferred under 0007/0044).
-  const readingSeries = snapshots.map((p) => ({
-    date: p.date,
-    value: p.readingChapters,
+  const readingSeries = indexDays.map((d) => ({
+    date: d.date,
+    value: d.readingChapters,
   }));
   const rows: { k: string; value: ReactNode; levels: number[] }[] = [
     {
@@ -195,7 +204,9 @@ export async function CommandCenter({ userName }: { userName: string }) {
         {/* ───────────── TODAY ───────────── */}
         <Zone label="today" right={todayLabel()} />
 
-        {/* net worth — a glance; full holdings + cash live on /portfolio */}
+        {/* net worth — a glance; full holdings + cash live on /portfolio. The
+            numbers are a client island: cash + the week Δ ride the E2EE fin layer
+            (unlock in the browser), while the invested figure is always live. */}
         <div className="border-b border-hairline px-4 py-4">
           <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
             <span>net worth</span>
@@ -206,24 +217,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
               portfolio →
             </Link>
           </div>
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <span className="text-2xl tabular-nums text-fg">
-              {aud(netWorth)}
-            </span>
-            {netWorthDelta !== null && (
-              <span className={`text-sm tabular-nums ${tone(netWorthDelta)}`}>
-                {arrow(netWorthDelta)} {netWorthDelta >= 0 ? "+" : ""}
-                {aud(netWorthDelta)} this week
-              </span>
-            )}
-          </div>
-          <p className="mt-1.5 text-xs tabular-nums text-muted">
-            invested {aud(t.value)}
-            {cash.cash > 0 ? ` · cash ${aud(cash.cash)}` : ""}
-            {cash.hisa > 0
-              ? ` · HISA ${aud(cash.hisa)}${cash.rate ? ` @ ${cash.rate}%` : ""}`
-              : ""}
-          </p>
+          <NetWorthGlance invested={t.value} offline={!blobEnabled()} />
         </div>
 
         {/* today's daily note, parsed: headline + planner + a journal peek */}
