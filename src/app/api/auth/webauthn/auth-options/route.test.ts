@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openChallenge } from "@/lib/webauthn/cookie";
+import { getWebauthnRecord } from "@/lib/webauthn/store";
 import { POST } from "./route";
+
+vi.mock("@/lib/webauthn/store", () => ({ getWebauthnRecord: vi.fn() }));
 
 const SECRET = "test-secret";
 
@@ -38,5 +41,13 @@ describe("webauthn/auth-options route", () => {
     const a = await (await POST()).json();
     const b = await (await POST()).json();
     expect(a.challenge).not.toBe(b.challenge);
+  });
+
+  it("never reads the record — the empty allow list can't enumerate credentials", async () => {
+    // Anti-enumeration is structural: with no store read, an enrolled passkey
+    // cannot leak into the public options. Lock that a refactor can't add one.
+    const options = await (await POST()).json();
+    expect(options.allowCredentials ?? []).toEqual([]);
+    expect(getWebauthnRecord).not.toHaveBeenCalled();
   });
 });

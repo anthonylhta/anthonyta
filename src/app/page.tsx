@@ -20,7 +20,13 @@ export default async function Home() {
   }
   return (
     <>
-      {process.env.WEBAUTHN_RECOVERY === "1" ? <RecoveryDoor /> : null}
+      {process.env.WEBAUTHN_RECOVERY === "1" ? (
+        // Constrained to the lobby's column so the break-glass strip doesn't
+        // float full-width above the terminal card.
+        <div className="mx-auto max-w-3xl">
+          <RecoveryDoor />
+        </div>
+      ) : null}
       <Lobby />
     </>
   );
