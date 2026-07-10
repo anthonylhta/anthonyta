@@ -315,6 +315,42 @@ export async function open(
 }
 
 // ---------------------------------------------------------------------------
+// share keys — a one-time key per share link (rides in the URL #fragment)
+// ---------------------------------------------------------------------------
+
+/**
+ * A fresh one-time AES-GCM key for a single share. Extractable ONLY so its raw bytes
+ * can travel after the `#` in a share URL; it is never the master key and never
+ * touches storage, so a leaked link burns exactly one file and nothing more.
+ */
+export function generateShareKey(): Promise<CryptoKey> {
+  return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+    "encrypt",
+    "decrypt",
+  ]) as Promise<CryptoKey>;
+}
+
+/** The raw 32 bytes of a share key — the material that goes in the URL fragment. */
+export async function exportKeyRaw(key: CryptoKey): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.exportKey("raw", key));
+}
+
+/**
+ * Import a share key from the fragment on the RECIPIENT side: decrypt-only and
+ * non-extractable, so opening the link reveals the one file's bytes but the key can
+ * never be re-exported or used to seal anything new.
+ */
+export function importShareKey(raw: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    raw as BufferSource,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"],
+  );
+}
+
+// ---------------------------------------------------------------------------
 // anonymous sealed box (ASB1) — write-only server encryption
 // ---------------------------------------------------------------------------
 
