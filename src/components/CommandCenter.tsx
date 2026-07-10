@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
+import { PasskeyManager } from "@/components/PasskeyManager";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
@@ -200,6 +201,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
           </span>
           <SignOut className="text-muted transition-colors hover:text-amber" />
         </div>
+
+        <PasskeyManager />
 
         {/* ───────────── TODAY ───────────── */}
         <Zone label="today" right={todayLabel()} />
