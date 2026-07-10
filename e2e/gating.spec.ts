@@ -19,6 +19,9 @@ test.describe("guest gating", () => {
     "/api/files/raw?p=inbox%2Fe-abc.bin", // E2EE ciphertext stream (ADR 0053)
     "/api/files/raw?p=meta%2Fkeystore", // keystore exfil attempt via raw
     "/api/files/keystore", // wrapped-master-key read
+    "/api/fin/config", // E2EE financial config (ADR 0054)
+    "/api/fin/snapkey", // sealed-box public/private key record
+    "/api/fin/snapshots?days=30", // sealed net-worth history
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
@@ -52,6 +55,16 @@ test.describe("guest gating", () => {
 
   test("PUT /api/files/keystore is 404 for a guest", async ({ request }) => {
     const res = await request.put("/api/files/keystore", { data: { v: 1 } });
+    expect(res.status()).toBe(404);
+  });
+
+  test("PUT /api/fin/config is 404 for a guest", async ({ request }) => {
+    const res = await request.put("/api/fin/config", { data: "AEV1xxxx" });
+    expect(res.status()).toBe(404);
+  });
+
+  test("PUT /api/fin/snapkey is 404 for a guest", async ({ request }) => {
+    const res = await request.put("/api/fin/snapkey", { data: { v: 1 } });
     expect(res.status()).toBe(404);
   });
 
