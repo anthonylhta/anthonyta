@@ -42,7 +42,7 @@ export function buildCsp(nonce: string, opts?: { dev?: boolean }): string {
     // frame-ancestors + form-action duplicate the baseline config so this policy is
     // standalone-complete — it doesn't lean on a header merged in elsewhere.
     "frame-ancestors 'none'",
-    "form-action 'self' https://github.com",
+    "form-action 'self'",
   ];
 
   return directives.join("; ");

@@ -232,7 +232,7 @@ test.describe("strict CSP (report-only)", () => {
         "worker-src 'self'",
         "connect-src 'self' https://vercel.com/api/blob/",
         "img-src 'self' data: https://*.private.blob.vercel-storage.com",
-        "form-action 'self' https://github.com",
+        "form-action 'self'",
       ]) {
         expect(csp, `${path} is missing \`${directive}\``).toContain(directive);
       }
@@ -267,7 +267,7 @@ test.describe("strict CSP (report-only)", () => {
     const h = (await request.get("/")).headers();
     // Exact values copied from next.config.ts — the proxy must not touch them.
     expect(h["content-security-policy"]).toBe(
-      "frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://github.com",
+      "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     );
     expect(h["x-frame-options"]).toBe("DENY");
     expect(h["x-content-type-options"]).toBe("nosniff");
