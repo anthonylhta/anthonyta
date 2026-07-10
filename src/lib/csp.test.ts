@@ -24,7 +24,7 @@ describe("buildCsp", () => {
       "default-src": "'self'",
       "script-src": "'self' 'nonce-abc123' 'strict-dynamic'",
       "style-src": "'self' 'unsafe-inline'",
-      "img-src": "'self' data: https://*.private.blob.vercel-storage.com",
+      "img-src": "'self' data: blob: https://*.private.blob.vercel-storage.com",
       "font-src": "'self'",
       "connect-src": "'self' https://vercel.com/api/blob/",
       "worker-src": "'self'",

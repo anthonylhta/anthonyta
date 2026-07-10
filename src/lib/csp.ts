@@ -28,9 +28,10 @@ export function buildCsp(nonce: string, opts?: { dev?: boolean }): string {
     // Styles stay 'unsafe-inline': Tailwind v4 + next/font inject inline styles, and
     // styles aren't the injection vector scripts are — the nonce guards the scripts.
     "style-src 'self' 'unsafe-inline'",
-    // The private blob host is named because CSP validates the REDIRECT TARGET of the
-    // legacy-thumbnail 302s, not only the original request URL.
-    "img-src 'self' data: https://*.private.blob.vercel-storage.com",
+    // `blob:` for client-decrypted images (E2EE vault notes + inbox thumbnails render
+    // decrypted bytes as object URLs). The private blob host is named because CSP
+    // validates the REDIRECT TARGET of the legacy-thumbnail 302s, not only the URL.
+    "img-src 'self' data: blob: https://*.private.blob.vercel-storage.com",
     "font-src 'self'",
     // The @vercel/blob client uploads to vercel.com/api/blob/ (verified from dist —
     // NOT the storage host), so client uploads need it in connect-src.
