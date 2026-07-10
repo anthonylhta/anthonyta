@@ -206,6 +206,49 @@ test.describe("guest gating", () => {
 });
 
 /**
+ * Fragment-key share links (ADR 0058) — the ONE deliberately public surface. The
+ * serve route hands out ciphertext to a bearer (the key is in the URL #fragment,
+ * never sent), so it has no auth gate; these lock that it still can't be turned
+ * into an oracle or coaxed into serving a non-share blob, and that malformed links
+ * 404 rather than probe. In the secretless e2e env the store is off, so every
+ * share read collapses to 404 — exactly the guest-facing behaviour.
+ */
+test.describe("public share links", () => {
+  const VALID = `1900000000-e-${"A".repeat(22)}`; // well-formed, far-future expiry
+
+  test("the serve route 404s malformed, expired, traversal, and absent ids alike", async ({
+    request,
+  }) => {
+    for (const id of [
+      VALID, // well-formed but no such blob (store off) — no existence oracle
+      `1000000000-e-${"A".repeat(22)}`, // expired (2001)
+      "not-a-share", // wrong shape
+      "..%2fmeta%2fkeystore", // traversal probe
+      `1900000000-e-${"A".repeat(21)}`, // id one char short
+    ]) {
+      const res = await request.get(`/api/share/${id}`);
+      expect(res.status(), `share id "${id}" must 404`).toBe(404);
+    }
+  });
+
+  test("a malformed /s link is a 404 page, not a probe", async ({
+    request,
+  }) => {
+    expect((await request.get("/s/not-a-share")).status()).toBe(404);
+  });
+
+  test("a well-formed /s page is public and leaks no owner surface", async ({
+    request,
+  }) => {
+    const res = await request.get(`/s/${VALID}`);
+    expect(res.status()).toBe(200); // public by design — recipients aren't the owner
+    const html = await res.text();
+    expect(html).not.toContain("command center");
+    expect(html).not.toContain("net worth");
+  });
+});
+
+/**
  * Strict CSP, Report-Only (src/proxy.ts). Every non-api HTML response gains a
  * per-request-nonce policy in `content-security-policy-report-only`, layered on
  * top of the UNCHANGED next.config.ts baseline. Locks the policy shape, nonce
