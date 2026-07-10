@@ -15,6 +15,7 @@ import {
   putSnapIndex,
   writeSnapBox,
 } from "@/lib/finstore";
+import { sweepExpiredShares } from "@/lib/shares";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export const dynamic = "force-dynamic";
  * ciphertext and stays blind to it; cash/HISA are absent from the box BY DESIGN — the
  * server never learns them, so a snapshot it writes reveals nothing if the store leaks.
  *
- * Two independent outcomes, neither able to sink the other:
+ * Three independent outcomes, none able to sink another:
  * - `box`   — the sealed invested figure. Needs a LIVE portfolio (a sample-fallback
  *             `null` is skipped, never sealed) and the owner's snapkey to seal to
  *             (absent → history not enabled yet → skipped; a store flake → failed, no
@@ -35,6 +36,10 @@ export const dynamic = "force-dynamic";
  *             week-over-week baseline). A read-modify-write over ~400 days of history,
  *             so a flaky read is `failed`, NEVER mistaken for absent — overwriting the
  *             index off a transient error would erase the record (the keystore lesson).
+ * - `swept` — the count of expired fragment-key share envelopes reaped (ADR 0058).
+ *             It piggybacks on this already-authorized nightly run; `sweepExpiredShares`
+ *             never throws, but a defensive `catch → -1` keeps a sweep hiccup from
+ *             sinking the snapshot.
  *
  * Runs late each Sydney evening via Vercel Cron (vercel.json). Vercel sends
  * `Authorization: Bearer <CRON_SECRET>`; required, fail-closed in production
@@ -121,10 +126,18 @@ export async function GET(req: Request) {
     getSnapIndex(),
   ]);
 
-  const [box, index] = await Promise.all([
+  const [box, index, swept] = await Promise.all([
     sealBox(portfolio, snapkey, date),
     writeIndex(reading, snapIndex, date),
+    // A sweep failure must never fail the snapshot (the sweep never throws anyway).
+    sweepExpiredShares(Math.floor(Date.now() / 1000)).catch(() => -1),
   ]);
 
-  return Response.json({ date, box, index, at: new Date().toISOString() });
+  return Response.json({
+    date,
+    box,
+    index,
+    swept,
+    at: new Date().toISOString(),
+  });
 }
