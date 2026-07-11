@@ -557,6 +557,280 @@ export const notes: Note[] = [
       </>
     ),
   },
+  {
+    slug: "absent-and-error-are-different-nothings",
+    title: "absent and error are different nothings",
+    oneLiner:
+      "When absence arms destructive setup, a flaky read must never be allowed to look like an empty store.",
+    updated: "2026-07-12",
+    related: [
+      "graceful-degradation-is-an-invariant",
+      "save-the-work-then-mark-it-done",
+      "safe-by-construction-not-by-runbook",
+    ],
+    body: (
+      <>
+        <p>
+          The private side of this site stores everything end-to-end encrypted,
+          with one small blob holding the passphrase-wrapped master key. On a
+          first visit there’s no keystore yet, so the client offers setup — and
+          setup mints a <em>fresh</em> master key. Convenient, and hiding a
+          data-loss trap: to a naive read, “the store is down” and “nothing
+          there yet” are the same failed fetch. One transient blip, and a
+          routine reload would have offered setup, minted a new key, and
+          permanently orphaned every item sealed under the old one. It was
+          caught in review before it shipped, which is the only reason this note
+          isn’t a bug story.
+        </p>
+        <p>
+          The fix has two halves. Reads now return three states — ok, absent,
+          error — where <strong>absent is a proof, not a guess</strong>: a
+          healthy response that positively said “nothing here.” Anything
+          doubtful is an error, and an error renders as “store unreachable,
+          retry” — never as an invitation to set up. And the write side backs
+          the read side: first-run setup writes refuse to overwrite, so even a
+          client that somehow concluded “empty” cannot clobber a real keystore.
+          The UI won’t offer the destructive path, and the storage wouldn’t
+          accept it if it did.
+        </p>
+        <p>
+          The contract kept paying rent. A nightly job read-modify-writes an
+          index, so an error misread as absence would have rebuilt it from empty
+          and silently erased a year of history — same rule, different blob. And
+          when the storage backend was later swapped wholesale, the distinction
+          had to survive down to the vendor’s error body: a 404 counts as absent
+          only when it names the missing <em>key</em>; a 404 for a missing{" "}
+          <em>bucket</em> is a config typo and stays an error, because a typo
+          must never masquerade as a first run.
+        </p>
+        <p>
+          Every “not found” is doing one of two jobs — reporting a fact or
+          masking a failure — and most code lets them blur because most of the
+          time it doesn’t matter. It matters the moment absence triggers
+          initialization.{" "}
+          <strong>
+            Where an empty answer arms something destructive, prove absence and
+            assume error
+          </strong>{" "}
+          — and make the write path enforce it too, for the day the read path is
+          wrong anyway.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "safe-by-construction-not-by-runbook",
+    title: "safe by construction, not by runbook",
+    oneLiner:
+      "A safety rule that lives in an operator’s discipline eventually gets skipped; encode it in what the code can express.",
+    updated: "2026-07-12",
+    related: [
+      "absent-and-error-are-different-nothings",
+      "graceful-degradation-is-an-invariant",
+    ],
+    body: (
+      <>
+        <p>
+          Hardening the private side of this site, I kept reaching for the same
+          move without naming it at first: whenever a safety property depended
+          on someone <em>remembering</em> something, restructure until the bad
+          state can’t be expressed at all. The difference shows up in the
+          argument you’d make to a reviewer. “Safe as long as we…” is a runbook.
+          “There is no code path that can…” is a construction.
+        </p>
+        <p>
+          It became a checklist by repetition. The key material lives{" "}
+          <em>outside</em> the path prefix that file-serving routes are allowed
+          to address — the validator demands the prefix, so no request, however
+          crafted, can coax a route into serving the keystore. The one public
+          download route never takes a path at all: it takes an id and rebuilds
+          the storage name from a fixed template, so even a hostile id can only
+          ever land on the one shape of blob it exists to serve. Browser uploads
+          get presigned URLs minted only for validated name shapes, so an upload
+          URL physically cannot touch keys or notes.
+        </p>
+        <p>
+          The sharpest instance came out of review. A break-glass enrollment
+          path — for the lost-everything case — was gated by a boolean
+          environment flag: open the window, enroll, close it. Safe{" "}
+          <em>as long as</em> the window is only ever opened deliberately and
+          nothing races you while it’s open — which is to say, safe by runbook.
+          It was rebuilt so that presenting a high-entropy secret <em>is</em>{" "}
+          the gate, compared in constant time. Now an open window is useless to
+          anyone without the secret, and the safety argument no longer contains
+          the word “provided.”
+        </p>
+        <p>
+          Sometimes a runbook is all you can have. But more often than it seems,
+          there’s a construction available — a prefix, a fixed template, a
+          secret, a conditional write — that makes the wrong thing
+          unrepresentable instead of merely discouraged.{" "}
+          <strong>
+            Structure survives the 2am operator; vigilance doesn’t.
+          </strong>{" "}
+          When the safety argument leans on “as long as,” that’s the tell to
+          keep designing.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "a-cron-that-writes-secrets-it-cant-read",
+    title: "a cron that writes secrets it can’t read",
+    oneLiner:
+      "Asymmetric crypto decouples the right to record from the right to read — a keyless server can append to a diary it can never open.",
+    updated: "2026-07-12",
+    related: ["safe-by-construction-not-by-runbook", "one-store-every-door"],
+    body: (
+      <>
+        <p>
+          This site tracks my net worth as a nightly time series — a sparkline
+          needs history, and history needs something to record it every day. But
+          the financials are end-to-end encrypted: the server must never be able
+          to read them, and the nightly job runs <em>on</em> the server, with no
+          passphrase and no master key. Stated plainly it sounds impossible: how
+          does a keyless machine write an encrypted diary?
+        </p>
+        <p>
+          The answer is old and underused:{" "}
+          <strong>encrypting requires only the public half of a keypair</strong>
+          . Each night the job seals that day’s figure to the owner’s stored
+          public key — an ephemeral key, an ECDH agreement, an authenticated
+          envelope, and the ephemeral secret is gone by the next line. What
+          lands in storage can be opened only by the private half, and the
+          private half sits in the same store <em>itself encrypted</em> under
+          the master key, unwrapped only in my browser. The server appends,
+          forever, to a history it has no way to open. Write-only storage, by
+          construction.
+        </p>
+        <p>
+          The honest part is the boundary. One dashboard row still needed to
+          render server-side without a passphrase, so the index of{" "}
+          <em>which days have snapshots</em> deliberately stays plaintext —
+          drawn on purpose and written down, not discovered later. And metadata
+          survives any envelope: that a snapshot happened, when, and how big.
+          End-to-end encryption isn’t a binary you switch on; it’s a boundary
+          you choose, and the mature version of the claim says what’s outside
+          it.
+        </p>
+        <p>
+          The shape generalises to any system that must <em>log</em> sensitive
+          events without becoming a <em>reader</em> of them — audit trails,
+          health data, location pings. Symmetric thinking makes recording and
+          reading the same privilege, so every writer is a liability.{" "}
+          <strong>
+            An asymmetric design splits the privilege: many things may record;
+            one thing may read.
+          </strong>{" "}
+          Most apps never use the split. It’s sitting right there in the
+          primitives.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "one-store-every-door",
+    title: "one store, every door",
+    oneLiner:
+      "A bulk write to one feature suspended the store holding every private surface — including the record that signs me in.",
+    updated: "2026-07-12",
+    related: [
+      "absent-and-error-are-different-nothings",
+      "a-cron-that-writes-secrets-it-cant-read",
+      "prove-the-new-door-before-closing-the-old",
+    ],
+    body: (
+      <>
+        <p>
+          The first full sync of my notes vault pushed six hundred encrypted
+          blobs to the site’s storage in one burst — and blew straight through
+          the free tier’s allowance. The platform’s response wasn’t throttling;
+          it was suspension: the store flipped to inactive, reads started
+          refusing, and the free tier has no pay-as-you-go escape, just a
+          month-long wait. Every private surface read from that one store —
+          files, financials, notes,{" "}
+          <em>and the passkey record that signs me in</em>. One write burst,
+          four features dark, and my ability to log into my own site survived
+          only as an already-warm session cookie on my phone.{" "}
+          <strong>Your auth record is data too</strong>, and it shares fate with
+          wherever you put it.
+        </p>
+        <p>
+          Two design choices made the recovery cheap. Graceful degradation held:
+          every surface showed “offline,” nothing crashed. And nothing in the
+          store was a source of truth — the notes live in a local folder, the
+          snapshot history regenerates nightly, the file inbox was always
+          ephemeral, and the encryption model never cared which bucket held the
+          ciphertext. So recovery wasn’t a restore; it was a{" "}
+          <strong>rebuild from sources of truth</strong>: a fresh bucket on a
+          tier the footprint can’t trip, one shared storage layer swapped
+          underneath unchanged stores, a re-sync, a re-enrollment — done while
+          the cookie was still warm.
+        </p>
+        <p>
+          Three lessons worth keeping. First, quota suspension is an outage
+          class of its own — I had designed for the store being <em>down</em>,
+          not for it being alive and refusing me over a bill; on free tiers that
+          wall is hard and instant. Second, the resilient question isn’t “do I
+          have backups” but{" "}
+          <em>
+            “what would I rebuild from, and does it live outside the blast
+            radius?”
+          </em>{" "}
+          Third, consolidation is a real coupling: one store for everything was
+          operationally simple and a single point of failure at once. Keep the
+          coupling if it’s worth it — but name it, and never let the thing that
+          authenticates you share fate <em>silently</em> with everything else.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "prove-the-new-door-before-closing-the-old",
+    title: "prove the new door before closing the old",
+    oneLiner:
+      "Migrations are two acts, not one: add and prove in parallel, then remove in a step small enough to skip.",
+    updated: "2026-07-12",
+    related: ["one-store-every-door", "safe-by-construction-not-by-runbook"],
+    body: (
+      <>
+        <p>
+          Swapping this site’s sign-in from OAuth to passkeys is exactly the
+          kind of change where a bug doesn’t cost a feature — it locks me out of
+          my own site, permanently. So it shipped as two pull requests on
+          purpose. The first <em>added</em> passkeys next to the old login and
+          left the old door standing as the safety rope. The second — small,
+          separate, revertible — removed the old one. And the second had a
+          precondition list rather than a code list: a passkey enrolled on every
+          device, sign-in <em>proven</em> on each one, the recovery code saved
+          offline. If anything had misbehaved, the removal simply wouldn’t ship,
+          and nothing would be worse for it.
+        </p>
+        <p>
+          The same shape repeated twice more within the week. Rotating storage
+          credentials: mint the new pair, update every consumer, verify a real
+          read with the new pair, <em>then</em> revoke the old — never a moment
+          without a working way in. And the storage migration’s landing: the new
+          bucket live and verified end to end before the dead store was deleted.
+          Parallel-run, prove, then cut. The removal is always its own smallest
+          possible step, gated on evidence.
+        </p>
+        <p>
+          The part that makes it work is that “prove” has to be literal. Sign
+          out and re-enter cold, from every device that matters. Read with the
+          new credentials, in production, before the old ones die. “It should
+          work” is not a precondition — it’s the sentence people say right
+          before the lockout.{" "}
+          <strong>
+            Cutover risk concentrates in the removal, so starve the removal:
+            make it tiny, reversible, and contingent on demonstrated behaviour.
+          </strong>{" "}
+          A migration isn’t done when the new thing works; it’s done when the
+          old thing is gone and nothing noticed.
+        </p>
+      </>
+    ),
+  },
 ];
 
 export function getNote(slug: string): Note | undefined {
