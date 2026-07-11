@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import type { VaultNote } from "@/lib/connectors/vault";
+import type { VaultIndexNote } from "@/lib/vaultblob";
 
 const PAGE = 14;
 
 /** Compact, paginated, searchable note index — one screenful, dashboard-style. */
-export function VaultList({ notes }: { notes: VaultNote[] }) {
+export function VaultList({ notes }: { notes: VaultIndexNote[] }) {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
 

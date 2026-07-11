@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "vault-sync": "node --env-file=.env.local --import tsx scripts/vault-sync.ts"
   },
   "dependencies": {
     "@simplewebauthn/browser": "13.3.0",
@@ -36,6 +37,7 @@
     "eslint-config-next": "16.2.9",
     "prettier": "^3.8.4",
     "tailwindcss": "^4",
+    "tsx": "^4.23.0",
     "typescript": "^5",
     "vitest": "^4.1.9"
   },

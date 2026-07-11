@@ -2,13 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { StatusBar } from "@/components/terminal/StatusBar";
-import {
-  getVaultImages,
-  getVaultIndex,
-  getVaultNote,
-} from "@/lib/connectors/vault";
-import { preprocessNote } from "@/lib/vault";
-import { NoteBody } from "./NoteBody";
+import { blobEnabled } from "@/lib/vaultstore";
+import { NoteReader } from "./NoteReader";
 
 export const metadata = { title: "vault" };
 
@@ -21,27 +16,13 @@ export default async function NotePage({
 }) {
   const { id } = await params;
 
-  // Owner-only, and the vault read happens only after the gate.
+  // Owner-only, and the gate is all the server does — the note is now an encrypted
+  // blob the browser fetches and decrypts in place (ADR: E2EE vault). No Drive read,
+  // no plaintext title, nothing sealed ever transits the server as cleartext.
   const session = await auth();
   if (!session?.user) notFound();
 
-  // Index is cached (fast), and gives the note's modifiedTime so the content
-  // read is cache-keyed by it — fresh after an edit, instant on revisit. The image
-  // index resolves `![[image]]` embeds to the gated `/vault/img/<id>` route.
-  const [index, images] = await Promise.all([
-    getVaultIndex(),
-    getVaultImages(),
-  ]);
-  const note = index.find((n) => n.id === id);
-  const raw = await getVaultNote(id, note?.modified);
-  if (raw == null) notFound();
-
-  const md = preprocessNote(raw, { notes: index, images });
   const who = session.user.name ?? "anthony";
-  const dir =
-    note && note.path.includes("/")
-      ? note.path.slice(0, note.path.lastIndexOf("/"))
-      : "";
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -58,17 +39,7 @@ export default async function NotePage({
           </span>
         </div>
 
-        <div className="border-b border-hairline px-4 pb-3 pt-6">
-          <h1 className="text-lg text-fg">{note?.title ?? "note"}</h1>
-          {note && (
-            <p className="mt-2 text-[11px] tabular-nums text-muted">
-              {dir ? `${dir} · ` : ""}
-              {note.modified.slice(0, 10)}
-            </p>
-          )}
-        </div>
-
-        <NoteBody md={md} />
+        <NoteReader id={id} offline={!blobEnabled()} />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
