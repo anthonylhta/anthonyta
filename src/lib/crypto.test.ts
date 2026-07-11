@@ -6,11 +6,14 @@ import {
   boxSeal,
   buildKeystore,
   deriveKek,
+  exportKeyRaw,
   fromB64url,
   generateBoxKeypair,
   generateMk,
+  generateShareKey,
   importBoxPriv,
   importBoxPub,
+  importShareKey,
   isKeystore,
   isSnapkey,
   ITERATIONS,
@@ -345,5 +348,42 @@ describe("sealed box (ASB1)", () => {
     expect(isSnapkey({ ...good, sealed_priv_b64: "x".repeat(5000) })).toBe(
       false,
     );
+  });
+});
+
+describe("share keys", () => {
+  it("generate → export → import round-trips through seal/open", async () => {
+    const key = await generateShareKey();
+    const bytes = crypto.getRandomValues(new Uint8Array(2048));
+    const envelope = await seal(key, META, bytes);
+
+    // The recipient rebuilds the key from only the 32 raw fragment bytes.
+    const raw = await exportKeyRaw(key);
+    const imported = await importShareKey(raw);
+    const { meta, bytes: out } = await open(imported, envelope);
+    expect(out).toEqual(bytes);
+    expect(meta).toEqual(META);
+  });
+
+  it("a different imported key cannot open the envelope", async () => {
+    const key = await generateShareKey();
+    const envelope = await seal(key, META, new Uint8Array([1, 2, 3]));
+    const other = await importShareKey(
+      await exportKeyRaw(await generateShareKey()),
+    );
+    await expect(open(other, envelope)).rejects.toThrow();
+  });
+
+  it("exportKeyRaw yields the 32 bytes of an AES-256 key", async () => {
+    expect((await exportKeyRaw(await generateShareKey())).length).toBe(32);
+  });
+
+  it("an imported share key is decrypt-only and non-extractable", async () => {
+    const imported = await importShareKey(
+      await exportKeyRaw(await generateShareKey()),
+    );
+    expect(imported.extractable).toBe(false);
+    expect(imported.usages).toEqual(["decrypt"]);
+    await expect(crypto.subtle.exportKey("raw", imported)).rejects.toThrow();
   });
 });

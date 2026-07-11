@@ -112,6 +112,33 @@ export function isValidPathname(p: string): boolean {
   return /^[A-Za-z0-9._-]{1,250}$/.test(p.slice(INBOX_PREFIX.length));
 }
 
+/** A share re-encrypts one inbox file under a fresh key and stores it here, apart from `inbox/`. */
+export const SHARE_PREFIX = "share/";
+
+/** The URL segment for a share: `<expiryEpochSec>-e-<22 b64url>` (no prefix, no `.bin`). */
+export function shareSegment(expiryEpochSec: number, id22: string): string {
+  return `${expiryEpochSec}-e-${id22}`;
+}
+
+/**
+ * Parse + validate a share URL segment → its `{ expiry }` (epoch SECONDS) or `null`.
+ * The expiry is baked into the name so the cron sweeps by pathname without decrypting,
+ * and a tampered expiry in a link resolves to a different pathname → a 404, never a
+ * longer-lived share. 10 digits carries epoch seconds past the year 2286.
+ */
+export function parseShareSegment(seg: string): { expiry: number } | null {
+  if (typeof seg !== "string") return null;
+  const m = /^(\d{10})-e-[A-Za-z0-9_-]{22}$/.exec(seg);
+  return m ? { expiry: Number(m[1]) } : null;
+}
+
+/** Traversal/probe guard for a STORED share pathname (`share/<seg>.bin`) — upload gate + serve route. */
+export function isValidSharePath(p: string): boolean {
+  if (typeof p !== "string" || !p.startsWith(SHARE_PREFIX) || p.includes(".."))
+    return false;
+  return /^\d{10}-e-[A-Za-z0-9_-]{22}\.bin$/.test(p.slice(SHARE_PREFIX.length));
+}
+
 const KINDS: Record<string, FileKind> = {
   png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image",
   avif: "image", svg: "image", heic: "image",

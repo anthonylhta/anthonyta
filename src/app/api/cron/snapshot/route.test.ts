@@ -15,6 +15,7 @@ import {
   putSnapIndex,
   writeSnapBox,
 } from "@/lib/finstore";
+import { sweepExpiredShares } from "@/lib/shares";
 import { GET } from "./route";
 
 // The cron gates on `authorizeCron`, never `auth` — mock the gate to open (null) or
@@ -29,6 +30,7 @@ vi.mock("@/lib/finstore", () => ({
 }));
 vi.mock("@/lib/connectors/portfolio", () => ({ getPortfolio: vi.fn() }));
 vi.mock("@/lib/connectors/webnovel", () => ({ getCurrentlyReading: vi.fn() }));
+vi.mock("@/lib/shares", () => ({ sweepExpiredShares: vi.fn() }));
 
 const req = () => new Request("http://localhost/api/cron/snapshot");
 
@@ -71,6 +73,7 @@ describe("snapshot cron route", () => {
     vi.mocked(getSnapIndex).mockResolvedValue({ state: "absent" });
     vi.mocked(putSnapIndex).mockResolvedValue(true);
     vi.mocked(writeSnapBox).mockResolvedValue(true);
+    vi.mocked(sweepExpiredShares).mockResolvedValue(0);
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -90,6 +93,7 @@ describe("snapshot cron route", () => {
     expect(getSnapIndex).not.toHaveBeenCalled();
     expect(writeSnapBox).not.toHaveBeenCalled();
     expect(putSnapIndex).not.toHaveBeenCalled();
+    expect(sweepExpiredShares).not.toHaveBeenCalled();
   });
 
   it("seals the invested figure so only the owner's private key can open it", async () => {
@@ -191,5 +195,23 @@ describe("snapshot cron route", () => {
     const body = await (await GET(req())).json();
     expect(body.index).toBe("skipped");
     expect(putSnapIndex).not.toHaveBeenCalled();
+  });
+
+  it("reaps expired share envelopes and reports the count", async () => {
+    vi.mocked(sweepExpiredShares).mockResolvedValue(3);
+
+    const body = await (await GET(req())).json();
+    expect(body.swept).toBe(3);
+    expect(sweepExpiredShares).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports swept: -1 on a sweep failure without sinking the snapshot", async () => {
+    vi.mocked(sweepExpiredShares).mockRejectedValue(new Error("blob flake"));
+    vi.mocked(getPortfolio).mockResolvedValue(livePortfolio(1000));
+
+    const body = await (await GET(req())).json();
+    expect(body.swept).toBe(-1);
+    // The snapshot's own outcomes are unaffected — the sweep is fully independent.
+    expect(body.index).toBe("written");
   });
 });

@@ -7,12 +7,17 @@ import {
   isEncrypted,
   isTextNote,
   isValidPathname,
+  isValidSharePath,
   noteName,
+  parseShareSegment,
   sanitizePathname,
+  shareSegment,
   sortInbox,
   TEXT_NOTE_MAX,
   toInboxFile,
 } from "./files";
+
+const ID22 = "mB4d5S3CkQxGxUKz2AkKfg"; // 22 chars of base64url, as randomId() emits
 
 describe("sanitizePathname", () => {
   it("keeps only the basename across both slash kinds", () => {
@@ -72,6 +77,47 @@ describe("isValidPathname", () => {
     expect(isValidPathname("inbox/%2e%2e")).toBe(false); // percent probe
     expect(isValidPathname("inbox/" + "a".repeat(251))).toBe(false); // too long
     expect(isValidPathname("inbox/")).toBe(false); // empty remainder
+  });
+});
+
+describe("shareSegment", () => {
+  it("joins the epoch-second expiry and the id with the e- marker", () => {
+    expect(shareSegment(1893456000, ID22)).toBe(`1893456000-e-${ID22}`);
+  });
+});
+
+describe("parseShareSegment", () => {
+  it("returns the integer expiry for a well-formed segment", () => {
+    expect(parseShareSegment(`1893456000-e-${ID22}`)).toEqual({
+      expiry: 1893456000,
+    });
+  });
+  it("round-trips with shareSegment", () => {
+    expect(parseShareSegment(shareSegment(1800000000, ID22))?.expiry).toBe(
+      1800000000,
+    );
+  });
+  it("rejects anything off the shape", () => {
+    expect(parseShareSegment(`1893456000-e-${ID22}.bin`)).toBeNull(); // stored form, not a segment
+    expect(parseShareSegment(`../${ID22}`)).toBeNull(); // traversal
+    expect(parseShareSegment(`1893456000-e-${ID22} `)).toBeNull(); // trailing space
+    expect(parseShareSegment(`1893456000-e-${ID22}x`)).toBeNull(); // id too long
+    expect(parseShareSegment(`1893456000-e-${ID22.slice(1)}`)).toBeNull(); // id too short
+    expect(parseShareSegment(`189345600-e-${ID22}`)).toBeNull(); // 9-digit expiry
+    expect(parseShareSegment(`abcdefghij-e-${ID22}`)).toBeNull(); // non-digit expiry
+  });
+});
+
+describe("isValidSharePath", () => {
+  it("accepts a stored share leaf", () => {
+    expect(isValidSharePath(`share/1893456000-e-${ID22}.bin`)).toBe(true);
+  });
+  it("rejects anything off the happy path", () => {
+    expect(isValidSharePath(`inbox/1893456000-e-${ID22}.bin`)).toBe(false); // wrong prefix
+    expect(isValidSharePath(`share/1893456000-e-${ID22}`)).toBe(false); // missing .bin
+    expect(isValidSharePath(`share/../1893456000-e-${ID22}.bin`)).toBe(false); // traversal
+    expect(isValidSharePath(`share/189345600-e-${ID22}.bin`)).toBe(false); // 9-digit expiry
+    expect(isValidSharePath(`1893456000-e-${ID22}.bin`)).toBe(false); // no prefix
   });
 });
 
