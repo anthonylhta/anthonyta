@@ -1,28 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { useRef, useState, useEffect, type ReactNode } from "react";
+import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import {
-  boxOpen,
-  fromB64url,
-  generateBoxKeypair,
-  importBoxPriv,
-  isSnapkey,
-  toB64url,
-  type Snapkey,
-} from "@/lib/crypto";
-import {
-  buildNetWorthSeries,
-  isFinConfig,
-  isSnapBoxPayload,
+  buildStepSeries,
+  importPortfolioCsv,
+  investedAt,
   latestEntry,
+  normalizeFinConfig,
   sydneyToday,
   upsertEntry,
   type FinConfig,
   type FinEntry,
   type NetWorthPoint,
-  type SnapBoxPayload,
 } from "@/lib/fin";
 import { arrow, aud, tone } from "@/lib/money";
 import { useVault, type Vault } from "@/app/files/useVault";
@@ -37,21 +29,27 @@ const UNREACHABLE =
   "vault unreachable — reload to retry (your key is untouched)";
 const TAMPER = "cannot decrypt — lock and unlock";
 
+/** The "as of" stamp for a CSV imported right now — Sydney clock, the same shape
+ *  the Drive modifiedTime used to produce, so the card reads identically. */
+function importStamp(now: Date = new Date()): string {
+  return now.toLocaleString("en-AU", {
+    timeZone: "Australia/Sydney",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 /**
- * The E2EE finance panel: net worth + holdings + the sealed cash/HISA config, all
- * behind the same master key the files vault owns (there is one setup flow, one MK).
- * The server never sees a plaintext balance — the config envelope and the nightly
- * snapshot boxes decrypt here, on the client, only while the vault is unlocked.
+ * The E2EE finance panel: net worth + holdings + cash, all sealed inside ONE fin
+ * envelope behind the same master key the files vault owns (ADR 0061). The server
+ * never sees a plaintext figure — the CSV is parsed HERE, in the browser, and the
+ * envelope decrypts here, only while the vault is unlocked. Until then the panel
+ * shows placeholders: nothing financial renders before the key does.
  */
-export function FinPanel({
-  invested,
-  offline,
-  holdings,
-}: {
-  invested: number;
-  offline: boolean;
-  holdings: ReactNode;
-}) {
+export function FinPanel({ offline }: { offline: boolean }) {
   const vault = useVault(offline);
   const { openItem } = vault;
   const unlocked = vault.status === "unlocked";
@@ -60,13 +58,7 @@ export function FinPanel({
   const [cfg, setCfg] = useState<FinConfig | null>(null);
   const [configExisted, setConfigExisted] = useState(false);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
-  const [snapkeyAbsent, setSnapkeyAbsent] = useState(false);
-  const [payloads, setPayloads] = useState<SnapBoxPayload[]>([]);
-  const [trendNote, setTrendNote] = useState<string | null>(null);
-  const [justEnabled, setJustEnabled] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [enabling, setEnabling] = useState(false);
-  const [enableErr, setEnableErr] = useState(false);
 
   // Render-phase adjustment (not an effect): reset the per-unlock state on the
   // lock/unlock edge, per the lint-blessed reset pattern.
@@ -75,10 +67,6 @@ export function FinPanel({
     setPrevUnlocked(unlocked);
     setDataErr(null);
     setCfg(null);
-    setSnapkeyAbsent(false);
-    setPayloads([]);
-    setTrendNote(null);
-    setJustEnabled(false);
     setEditing(false);
   }
 
@@ -90,108 +78,38 @@ export function FinPanel({
     let cancelled = false;
 
     (async () => {
-      // One round-trip each, fired together.
-      const [cfgR, skR, snapR] = await Promise.allSettled([
-        fetch("/api/fin/config"),
-        fetch("/api/fin/snapkey"),
-        fetch("/api/fin/snapshots?days=30"),
-      ]);
-
-      // config — a flake must never read as an empty (re-seedable) editor, so
-      // 503/network → the unreachable banner, only a healthy 404 → fresh config.
+      // A flake must never read as an empty (re-seedable) editor, so 503/network
+      // → the unreachable banner; only a healthy 404 → fresh config.
       let config: FinConfig | null = null;
       let existed = false;
-      if (cfgR.status === "rejected") {
-        if (!cancelled) setDataErr("unreachable");
-        return;
-      }
-      const cfgRes = cfgR.value;
-      if (cfgRes.status === 404) {
-        config = { v: 1, entries: [] };
-      } else if (cfgRes.status === 200) {
-        try {
-          const envelope = new Uint8Array(await cfgRes.arrayBuffer());
-          const { bytes } = await openItem(envelope);
-          const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-          if (!isFinConfig(parsed)) throw new Error("bad shape");
-          config = parsed;
-          existed = true;
-        } catch {
-          if (!cancelled) setDataErr("tamper");
-          return;
-        }
-      } else {
-        if (!cancelled) setDataErr("unreachable");
-        return;
-      }
-
-      // snapkey — 404 offers the enable flow, 503/network hides the trend.
-      let sk: Snapkey | null = null;
-      let skAbsent = false;
-      let unavailable = false;
-      if (skR.status === "rejected") {
-        unavailable = true;
-      } else if (skR.value.status === 404) {
-        skAbsent = true;
-      } else if (skR.value.status === 200) {
-        try {
-          const parsed: unknown = await skR.value.json();
-          if (isSnapkey(parsed)) sk = parsed;
-        } catch {
-          unavailable = true;
-        }
-      } else {
-        unavailable = true;
-      }
-
-      // snapshots — ciphertext boxes; 503/network hides the trend.
-      let rawDays: { date: string; box_b64: string }[] = [];
-      if (snapR.status === "rejected") {
-        unavailable = true;
-      } else if (snapR.value.status === 200) {
-        try {
-          const body: unknown = await snapR.value.json();
-          const days = (body as { days?: unknown })?.days;
-          if (Array.isArray(days)) rawDays = days;
-        } catch {
-          unavailable = true;
-        }
-      } else {
-        unavailable = true;
-      }
-
-      // Open the sealed private half once, then each day's box. A per-day failure
-      // is skipped; a failure to open the PRIV itself means a stale cached key —
-      // the whole panel can't decrypt.
-      const boxes: SnapBoxPayload[] = [];
-      if (sk) {
-        let priv: CryptoKey;
-        try {
-          const { bytes } = await openItem(fromB64url(sk.sealed_priv_b64));
-          priv = await importBoxPriv(bytes);
-        } catch {
-          if (!cancelled) setDataErr("tamper");
-          return;
-        }
-        const pub = fromB64url(sk.pub_b64);
-        for (const day of rawDays) {
+      try {
+        const res = await fetch("/api/fin/config");
+        if (res.status === 404) {
+          config = { v: 2, entries: [], invested: [], portfolio: null };
+        } else if (res.status === 200) {
           try {
-            const plain = await boxOpen(priv, pub, fromB64url(day.box_b64));
-            const parsed: unknown = JSON.parse(new TextDecoder().decode(plain));
-            if (isSnapBoxPayload(parsed)) boxes.push(parsed);
-            else console.error("[fin] snapshot bad shape", day.date);
-          } catch (err) {
-            console.error("[fin] snapshot decrypt failed", day.date, err);
+            const envelope = new Uint8Array(await res.arrayBuffer());
+            const { bytes } = await openItem(envelope);
+            const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+            config = normalizeFinConfig(parsed);
+            if (!config) throw new Error("bad shape");
+            existed = true;
+          } catch {
+            if (!cancelled) setDataErr("tamper");
+            return;
           }
+        } else {
+          if (!cancelled) setDataErr("unreachable");
+          return;
         }
+      } catch {
+        if (!cancelled) setDataErr("unreachable");
+        return;
       }
 
       if (cancelled) return;
       setCfg(config);
       setConfigExisted(existed);
-      setSnapkeyAbsent(skAbsent);
-      setPayloads(boxes);
-      setTrendNote(unavailable ? "history unavailable" : null);
     })();
 
     return () => {
@@ -223,87 +141,70 @@ export function FinPanel({
 
   async function fetchConfigFresh(): Promise<FinConfig> {
     const res = await fetch("/api/fin/config");
-    if (res.status === 404) return { v: 1, entries: [] };
+    if (res.status === 404)
+      return { v: 2, entries: [], invested: [], portfolio: null };
     if (res.status !== 200) throw new Error("config refetch failed");
     const envelope = new Uint8Array(await res.arrayBuffer());
     const { bytes } = await openItem(envelope);
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    if (!isFinConfig(parsed)) throw new Error("config refetch: bad shape");
-    return parsed;
+    const config = normalizeFinConfig(parsed);
+    if (!config) throw new Error("config refetch: bad shape");
+    return config;
   }
 
-  // Upsert today's cash row, retrying once against a fresh config on a 409.
-  async function saveEntry(fields: {
-    cash: number;
-    hisa: number;
-    rate: number | null;
-  }): Promise<boolean> {
+  // Apply a pure config transform, seal, PUT — retrying once against a freshly
+  // fetched config on a 409 (another device may have written meanwhile).
+  async function saveConfig(
+    apply: (base: FinConfig) => FinConfig,
+  ): Promise<boolean> {
     if (!cfg) return false;
     try {
-      const entry: FinEntry = { date: sydneyToday(), ...fields };
       let base = cfg;
-      let result = await putConfig(upsertEntry(base, entry), configExisted);
+      let result = await putConfig(apply(base), configExisted);
       if (result === "conflict") {
         base = await fetchConfigFresh();
-        result = await putConfig(upsertEntry(base, entry), true);
+        result = await putConfig(apply(base), true);
       }
       if (result !== "ok") return false;
-      setCfg(upsertEntry(base, entry));
+      setCfg(apply(base));
       setConfigExisted(true);
-      setEditing(false);
       return true;
     } catch {
       return false;
     }
   }
 
-  // Mint the static box keypair, seal its private half under the MK, publish the
-  // public point. A 409 means one already exists — adopt it instead.
-  async function enableSnapshots() {
-    if (enabling) return;
-    setEnabling(true);
-    setEnableErr(false);
-    try {
-      const { pubRaw, privPkcs8 } = await generateBoxKeypair();
-      const sealed = await vault.sealItem(
-        { n: "snapkey", t: "application/octet-stream", s: privPkcs8.length },
-        privPkcs8,
-      );
-      const sk: Snapkey = {
-        v: 1,
-        alg: "ECDH-P256",
-        pub_b64: toB64url(pubRaw),
-        sealed_priv_b64: toB64url(sealed),
-      };
-      const res = await fetch("/api/fin/snapkey", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(sk),
-      });
-      if (res.status === 409) {
-        // A key already exists (a race, or another device). Adopt it: confirm a
-        // valid one is really there before clearing the absent flag.
-        const existing = await fetch("/api/fin/snapkey");
-        if (existing.status === 200 && isSnapkey(await existing.json()))
-          setSnapkeyAbsent(false);
-        return;
-      }
-      if (!res.ok) throw new Error("snapkey put failed");
-      setSnapkeyAbsent(false);
-      setJustEnabled(true);
-    } catch {
-      setEnableErr(true);
-    } finally {
-      setEnabling(false);
-    }
+  // Upsert today's cash row.
+  async function saveEntry(fields: {
+    cash: number;
+    hisa: number;
+    rate: number | null;
+  }): Promise<boolean> {
+    const entry: FinEntry = { date: sydneyToday(), ...fields };
+    const ok = await saveConfig((base) => upsertEntry(base, entry));
+    if (ok) setEditing(false);
+    return ok;
   }
 
-  // --- non-unlocked states: invested-only header, no sealed data revealed ---
+  // Parse a dropped CSV in-browser and seal the result. Parsing happens ONCE, up
+  // front — a malformed export errors here and nothing is written.
+  async function importCsv(text: string): Promise<"ok" | "bad-csv" | "failed"> {
+    if (!cfg) return "failed";
+    const opts = { today: sydneyToday(), asOf: importStamp() };
+    if (!importPortfolioCsv(cfg, text, opts)) return "bad-csv";
+    const ok = await saveConfig(
+      (base) => importPortfolioCsv(base, text, opts) as FinConfig,
+    );
+    return ok ? "ok" : "failed";
+  }
+
+  // --- non-unlocked states: placeholders only — nothing financial renders
+  // before the key does ---
   if (!unlocked) {
     return (
       <>
         <NetWorthHeader
-          figure={aud(invested)}
+          figure={null}
           sub={
             vault.status === "offline"
               ? "store offline — set the R2_* env vars"
@@ -312,7 +213,6 @@ export function FinPanel({
         >
           {vault.status === "locked" && <PlaceholderRows />}
         </NetWorthHeader>
-        {holdings}
         {vault.status === "setup" && (
           <div className="border-t border-hairline px-4 py-4 text-xs text-muted">
             set a vault passphrase in{" "}
@@ -336,8 +236,7 @@ export function FinPanel({
   if (dataErr) {
     return (
       <>
-        <NetWorthHeader figure={aud(invested)} />
-        {holdings}
+        <NetWorthHeader figure={null} />
         <div className="border-t border-hairline px-4 py-4 text-xs text-down">
           {dataErr === "unreachable" ? UNREACHABLE : TAMPER}
         </div>
@@ -345,20 +244,17 @@ export function FinPanel({
     );
   }
   if (!cfg) {
-    return (
-      <>
-        <NetWorthHeader figure={aud(invested)} sub="decrypting…" />
-        {holdings}
-      </>
-    );
+    return <NetWorthHeader figure={null} sub="decrypting…" />;
   }
 
   // --- unlocked, decrypted ---
+  const today = sydneyToday();
+  const invested = investedAt(cfg, today) / 100;
   const latest = latestEntry(cfg);
   const cash = latest?.cash ?? 0;
   const hisa = latest?.hisa ?? 0;
   const rate = latest?.rate ?? null;
-  const series = buildNetWorthSeries(payloads, cfg);
+  const series = buildStepSeries(cfg, 30, today);
 
   return (
     <>
@@ -368,36 +264,16 @@ export function FinPanel({
           hisa,
         )}${rate != null ? ` @ ${rate}%` : ""}`}
       >
-        {snapkeyAbsent ? (
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={enableSnapshots}
-              disabled={enabling}
-              className={btn}
-            >
-              {enabling ? "generating key…" : "enable snapshot history"}
-            </button>
-            {enableErr && (
-              <p className="mt-2 text-xs text-down">
-                couldn&apos;t enable — try again
-              </p>
-            )}
-          </div>
-        ) : trendNote ? (
-          <p className="mt-3 text-[11px] text-muted/60">{trendNote}</p>
-        ) : series.length >= 2 ? (
+        {series.length >= 2 ? (
           <TrendChart series={series} />
         ) : (
           <p className="mt-3 text-[11px] text-muted/60">
-            {justEnabled
-              ? "first point lands with tonight's snapshot"
-              : "trend builds as daily snapshots accrue"}
+            trend builds as imports and cash edits accrue
           </p>
         )}
       </NetWorthHeader>
 
-      {holdings}
+      <HoldingsSection cfg={cfg} onImport={importCsv} />
 
       <div className="border-t border-hairline px-4 py-4">
         <div className="mb-2 flex items-center justify-between">
@@ -439,14 +315,86 @@ export function FinPanel({
   );
 }
 
-/** The shared net-worth block: a label, the big figure, an optional sub-line, and
- *  whatever trend/placeholder content the state supplies. */
+/** Holdings from the decrypted snapshot, plus the in-browser CSV importer. */
+function HoldingsSection({
+  cfg,
+  onImport,
+}: {
+  cfg: FinConfig;
+  onImport: (text: string) => Promise<"ok" | "bad-csv" | "failed">;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleFile(file: File | undefined) {
+    if (!file || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const result = await onImport(await file.text());
+      if (result === "bad-csv")
+        setErr("not a recognizable CMC ProfitLoss export");
+      else if (result === "failed") setErr("import failed — try again");
+    } catch {
+      setErr("import failed — try again");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  return (
+    <>
+      {cfg.portfolio ? (
+        <PortfolioCard p={cfg.portfolio} />
+      ) : (
+        <div className="border-b border-hairline px-4 py-4">
+          <p className="mb-1 text-[11px] uppercase tracking-[0.2em] text-muted">
+            portfolio
+          </p>
+          <p className="text-xs text-muted">
+            no holdings yet — import a CMC ProfitLoss export below
+          </p>
+        </div>
+      )}
+      <div className="flex items-center gap-3 border-b border-hairline px-4 py-3 text-xs">
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          className={btn}
+        >
+          {busy ? "parsing + sealing…" : "import csv"}
+        </button>
+        <span className="text-muted/60">
+          parsed in your browser — the export never leaves this device
+        </span>
+      </div>
+      {err && (
+        <p className="border-b border-hairline px-4 py-2 text-xs text-down">
+          {err}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The shared net-worth block: a label, the big figure (dots until decrypted), an
+ *  optional sub-line, and whatever trend/placeholder content the state supplies. */
 function NetWorthHeader({
   figure,
   sub,
   children,
 }: {
-  figure: string;
+  figure: string | null;
   sub?: ReactNode;
   children?: ReactNode;
 }) {
@@ -455,7 +403,11 @@ function NetWorthHeader({
       <p className="mb-1 text-[11px] uppercase tracking-[0.2em] text-muted">
         net worth
       </p>
-      <span className="text-2xl tabular-nums text-fg">{figure}</span>
+      <span
+        className={`text-2xl tabular-nums ${figure === null ? "text-muted/40" : "text-fg"}`}
+      >
+        {figure ?? "·····"}
+      </span>
       {sub != null && (
         <span className="ml-3 text-xs tabular-nums text-muted">{sub}</span>
       )}
@@ -468,7 +420,7 @@ function NetWorthHeader({
 function PlaceholderRows() {
   return (
     <div className="mt-3 space-y-1.5 text-sm">
-      {["cash", "HISA", "total"].map((label) => (
+      {["invested", "cash", "HISA"].map((label) => (
         <div key={label} className="flex items-baseline justify-between">
           <span className="text-muted">{label}</span>
           <span className="tabular-nums text-muted/40">·····</span>
@@ -478,8 +430,8 @@ function PlaceholderRows() {
   );
 }
 
-/** The net-worth trend: the sealed daily snapshots, valued (cents → dollars) and
- *  drawn as the same sparkline the env-backed series used to feed. */
+/** The net-worth trend: the step-function series (invested + cash, ADR 0061),
+ *  valued (cents → dollars) and drawn as the same sparkline as always. */
 function TrendChart({ series }: { series: NetWorthPoint[] }) {
   const values = series.map((p) => p.totalCents / 100);
   const delta = values[values.length - 1] - values[0];
@@ -515,7 +467,7 @@ function UnlockBox({ vault }: { vault: Vault }) {
     <div className="border-t border-hairline px-4 py-4 text-xs">
       <p className="mb-2 text-muted">
         vault <span className="text-amber">locked</span> — enter the passphrase
-        to reveal cash + net worth.
+        to reveal the portfolio, cash + net worth.
       </p>
       <div className="flex items-center gap-2">
         <input

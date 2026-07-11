@@ -725,6 +725,15 @@ export const notes: Note[] = [
           Most apps never use the split. It’s sitting right there in the
           primitives.
         </p>
+        <p>
+          <em>Postscript, days later:</em> this mechanism is already retired —
+          the last server-side read of any financial figure went away, so
+          there’s nothing left for the box to hide. The figure only ever changed
+          when I recorded it, which means history reconstructs client-side from
+          dated entries, no nightly writer needed. The lesson stands; the
+          machinery it defended became unnecessary — which is the best outcome a
+          design can hope for.
+        </p>
       </>
     ),
   },

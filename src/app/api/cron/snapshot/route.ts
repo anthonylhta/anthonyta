@@ -1,45 +1,30 @@
-import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { authorizeCron } from "@/lib/cron-auth";
-import { boxSeal, fromB64url, isSnapkey } from "@/lib/crypto";
 import {
   isSnapIndex,
   sydneyToday,
   upsertIndexDay,
-  type SnapBoxPayload,
   type SnapIndex,
 } from "@/lib/fin";
-import {
-  getSnapIndex,
-  getSnapkey,
-  putSnapIndex,
-  writeSnapBox,
-} from "@/lib/finstore";
+import { getSnapIndex, putSnapIndex } from "@/lib/finstore";
 import { sweepExpiredShares } from "@/lib/shares";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Nightly snapshot cron (E2EE net worth, ADR: sealed net worth) — writes history it
- * can never read. The cron holds ONLY the owner's static PUBLIC key; each night it
- * seals the day's invested figure into an anonymous box (`boxSeal`, ephemeral-static
- * ECDH → AES-GCM) that opens solely behind the passphrase. The server stores the
- * ciphertext and stays blind to it; cash/HISA are absent from the box BY DESIGN — the
- * server never learns them, so a snapshot it writes reveals nothing if the store leaks.
+ * Nightly cron. Two jobs since ADR 0061 (the sealed-box net-worth snapshot is
+ * retired — history now reconstructs client-side from the fin envelope's step
+ * functions, so the server no longer touches an invested figure, even transiently):
  *
- * Three independent outcomes, none able to sink another:
- * - `box`   — the sealed invested figure. Needs a LIVE portfolio (a sample-fallback
- *             `null` is skipped, never sealed) and the owner's snapkey to seal to
- *             (absent → history not enabled yet → skipped; a store flake → failed, no
- *             write).
- * - `index` — the plaintext reading-day count (no secret, so it rides unsealed as the
- *             week-over-week baseline). A read-modify-write over ~400 days of history,
- *             so a flaky read is `failed`, NEVER mistaken for absent — overwriting the
- *             index off a transient error would erase the record (the keystore lesson).
+ * - `index` — the plaintext reading-day count (no secret, so it rides unsealed as
+ *             the week-over-week baseline; the deliberate E2EE boundary, ADR 0054).
+ *             A read-modify-write over ~400 days of history, so a flaky read is
+ *             `failed`, NEVER mistaken for absent — overwriting the index off a
+ *             transient error would erase the record (the keystore lesson).
  * - `swept` — the count of expired fragment-key share envelopes reaped (ADR 0058).
- *             It piggybacks on this already-authorized nightly run; `sweepExpiredShares`
- *             never throws, but a defensive `catch → -1` keeps a sweep hiccup from
- *             sinking the snapshot.
+ *             It piggybacks on this already-authorized nightly run;
+ *             `sweepExpiredShares` never throws, but a defensive `catch → -1`
+ *             keeps a sweep hiccup from sinking the snapshot.
  *
  * Runs late each Sydney evening via Vercel Cron (vercel.json). Vercel sends
  * `Authorization: Bearer <CRON_SECRET>`; required, fail-closed in production
@@ -47,39 +32,6 @@ export const dynamic = "force-dynamic";
  */
 
 type Outcome = "written" | "skipped" | "failed";
-
-/** Seal the invested figure to the owner's public key and store the box. */
-async function sealBox(
-  portfolio: Awaited<ReturnType<typeof getPortfolio>>,
-  snapkey: Awaited<ReturnType<typeof getSnapkey>>,
-  date: string,
-): Promise<Outcome> {
-  // Sample fallback / Drive off (null) — a demo figure would poison the trend.
-  if (!portfolio) return "skipped";
-  // Owner hasn't enabled history yet — normal, not an error.
-  if (snapkey.state === "absent") return "skipped";
-  // Store flake — do NOT seal to a key we couldn't read.
-  if (snapkey.state === "error") return "failed";
-
-  let box: Uint8Array;
-  try {
-    const parsed: unknown = JSON.parse(snapkey.value);
-    if (!isSnapkey(parsed)) throw new Error("snapkey: unrecognized shape");
-    const payload: SnapBoxPayload = {
-      v: 1,
-      date,
-      investedCents: Math.round(portfolio.totals.value * 100),
-    };
-    box = await boxSeal(
-      fromB64url(parsed.pub_b64),
-      new TextEncoder().encode(JSON.stringify(payload)),
-    );
-  } catch (err) {
-    console.error("[cron:snapshot] seal failed:", err);
-    return "failed";
-  }
-  return (await writeSnapBox(date, box)) ? "written" : "failed";
-}
 
 /** Merge today's reading count into the plaintext index (read-modify-write). */
 async function writeIndex(
@@ -119,15 +71,12 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const date = sydneyToday();
-  const [portfolio, reading, snapkey, snapIndex] = await Promise.all([
-    getPortfolio(),
+  const [reading, snapIndex] = await Promise.all([
     getCurrentlyReading(),
-    getSnapkey(),
     getSnapIndex(),
   ]);
 
-  const [box, index, swept] = await Promise.all([
-    sealBox(portfolio, snapkey, date),
+  const [index, swept] = await Promise.all([
     writeIndex(reading, snapIndex, date),
     // A sweep failure must never fail the snapshot (the sweep never throws anyway).
     sweepExpiredShares(Math.floor(Date.now() / 1000)).catch(() => -1),
@@ -135,7 +84,6 @@ export async function GET(req: Request) {
 
   return Response.json({
     date,
-    box,
     index,
     swept,
     at: new Date().toISOString(),
