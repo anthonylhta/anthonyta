@@ -306,7 +306,7 @@ export function FinPanel({
           figure={aud(invested)}
           sub={
             vault.status === "offline"
-              ? "store offline — set BLOB_READ_WRITE_TOKEN"
+              ? "store offline — set the R2_* env vars"
               : undefined
           }
         >

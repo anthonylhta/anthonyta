@@ -1,6 +1,5 @@
 "use client";
 
-import { upload } from "@vercel/blob/client";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -72,6 +71,41 @@ async function drainSharedCache(): Promise<File[]> {
   }
 }
 
+/**
+ * Send one sealed envelope to the store: mint a presigned PUT from the owner-gated
+ * route (which validates the pathname shape), then send the bytes straight to R2
+ * (ADR 0060). XHR rather than fetch so upload progress can drive the meter. The
+ * client-chosen pathname is stored EXACTLY — share links depend on that.
+ */
+async function uploadEnvelope(
+  pathname: string,
+  envelope: Uint8Array,
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  const mint = await fetch("/api/files/upload", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pathname, size: envelope.length }),
+  });
+  if (!mint.ok) throw new Error("mint failed");
+  const { url } = (await mint.json()) as { url: string };
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("content-type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress)
+        onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`upload failed: HTTP ${xhr.status}`));
+    xhr.onerror = () => reject(new Error("upload failed"));
+    xhr.send(new Blob([envelope as BlobPart]));
+  });
+}
+
 async function removeFile(pathname: string): Promise<boolean> {
   try {
     const res = await fetch("/api/files/delete", {
@@ -118,16 +152,10 @@ export function FilesInbox({
     ): Promise<boolean> => {
       try {
         const envelope = await vault.sealItem(meta, bytes);
-        await upload(
+        await uploadEnvelope(
           `${INBOX_PREFIX}e-${randomId()}.bin`,
-          new Blob([envelope as BlobPart]),
-          {
-            access: "private",
-            handleUploadUrl: "/api/files/upload",
-            contentType: "application/octet-stream",
-            onUploadProgress: (e) =>
-              setProgress({ name: label, pct: Math.round(e.percentage) }),
-          },
+          envelope,
+          (pct) => setProgress({ name: label, pct }),
         );
         return true;
       } catch {
@@ -763,15 +791,7 @@ function EncryptedRow({
       const rawKey = await exportKeyRaw(key);
       const expiry = Math.floor(Date.now() / 1000) + SHARE_TTL_DAYS * 86400;
       const seg = shareSegment(expiry, randomId());
-      await upload(
-        `${SHARE_PREFIX}${seg}.bin`,
-        new Blob([sealed as BlobPart]),
-        {
-          access: "private",
-          handleUploadUrl: "/api/files/upload",
-          contentType: "application/octet-stream",
-        },
-      );
+      await uploadEnvelope(`${SHARE_PREFIX}${seg}.bin`, sealed);
       const link = `${location.origin}/s/${seg}#${toB64url(rawKey)}`;
       await navigator.clipboard.writeText(link);
       setShareLabel(`copied · ${SHARE_TTL_DAYS}d`);

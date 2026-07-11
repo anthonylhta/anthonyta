@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { del, get, list } from "@vercel/blob";
+import { r2Delete, r2Get, r2List } from "./r2";
 import { readShareStream, sweepExpiredShares } from "./shares";
 import { shareSegment } from "./files";
 
-vi.mock("@vercel/blob", () => ({ get: vi.fn(), list: vi.fn(), del: vi.fn() }));
+vi.mock("./r2", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./r2")>()),
+  r2Get: vi.fn(),
+  r2List: vi.fn(),
+  r2Delete: vi.fn(),
+}));
 
-const mockGet = vi.mocked(get);
-const mockList = vi.mocked(list);
-const mockDel = vi.mocked(del);
+const mockGet = vi.mocked(r2Get);
+const mockList = vi.mocked(r2List);
+const mockDelete = vi.mocked(r2Delete);
 
 const ID22 = "mB4d5S3CkQxGxUKz2AkKfg"; // 22 chars of base64url
 const ID22B = "AbCdEfGhIjKlMnOpQrStUv";
@@ -16,23 +21,21 @@ const NOW = 1_800_000_000; // epoch seconds
 const FRESH = shareSegment(1_900_000_000, ID22); // expires after NOW
 const EXPIRED = shareSegment(1_700_000_000, ID22); // expired before NOW
 
-const getResult = (
-  over: Partial<{ statusCode: number; stream: ReadableStream | null }>,
-) =>
-  ({ statusCode: 200, stream: null, ...over }) as unknown as Awaited<
-    ReturnType<typeof get>
-  >;
+const stubR2Env = () => {
+  vi.stubEnv("R2_ACCOUNT_ID", "acct123");
+  vi.stubEnv("R2_ACCESS_KEY_ID", "AKIDEXAMPLE");
+  vi.stubEnv("R2_SECRET_ACCESS_KEY", "secret");
+  vi.stubEnv("R2_BUCKET", "hub");
+};
 
-const page = (pathnames: string[], cursor?: string) =>
-  ({
-    blobs: pathnames.map((pathname) => ({ pathname })),
-    hasMore: Boolean(cursor),
-    cursor,
-  }) as unknown as Awaited<ReturnType<typeof list>>;
+const page = (keys: string[], next?: string) => ({
+  objects: keys.map((key) => ({ key, size: 1, lastModified: "" })),
+  next,
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubEnv("BLOB_READ_WRITE_TOKEN", "test-token");
+  stubR2Env();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -42,12 +45,11 @@ afterEach(() => {
 
 describe("readShareStream", () => {
   it("streams the ciphertext for a fresh (future-expiry) segment", async () => {
-    const stream = new Response("ciphertext").body;
-    mockGet.mockResolvedValue(getResult({ stream }));
-    expect(await readShareStream(FRESH, NOW)).toBe(stream);
-    expect(mockGet).toHaveBeenCalledWith(`share/${FRESH}.bin`, {
-      access: "private",
-    });
+    const res = new Response("ciphertext");
+    const body = res.body;
+    mockGet.mockResolvedValue(res);
+    expect(await readShareStream(FRESH, NOW)).toBe(body);
+    expect(mockGet).toHaveBeenCalledWith(`share/${FRESH}.bin`);
   });
 
   it("is null for an expired segment — without ever reading the blob", async () => {
@@ -63,49 +65,39 @@ describe("readShareStream", () => {
     expect(mockGet).not.toHaveBeenCalled();
   });
 
-  it("is null on a non-200 status", async () => {
-    mockGet.mockResolvedValue(getResult({ statusCode: 404, stream: null }));
-    expect(await readShareStream(FRESH, NOW)).toBeNull();
-  });
-
-  it("is null on a missing blob or a throw", async () => {
-    mockGet.mockResolvedValue(
-      null as unknown as Awaited<ReturnType<typeof get>>,
-    );
+  it("is null on a non-200 status and on a throw", async () => {
+    mockGet.mockResolvedValue(new Response("gone", { status: 404 }));
     expect(await readShareStream(FRESH, NOW)).toBeNull();
     mockGet.mockRejectedValue(new Error("network"));
     expect(await readShareStream(FRESH, NOW)).toBeNull();
   });
 
   it("is null when the store is off — without reading the blob", async () => {
-    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("R2_BUCKET", "");
     expect(await readShareStream(FRESH, NOW)).toBeNull();
     expect(mockGet).not.toHaveBeenCalled();
   });
 });
 
 describe("sweepExpiredShares", () => {
-  it("dels only the expired leaves, paginating the cursor, and returns the count", async () => {
+  it("deletes only the expired leaves, paginating the token, and returns the count", async () => {
     const expired1 = `share/${shareSegment(1_700_000_000, ID22)}.bin`;
     const fresh1 = `share/${shareSegment(1_900_000_000, ID22B)}.bin`;
     const expired2 = `share/${shareSegment(1_650_000_000, ID22B)}.bin`;
     const junk = "share/leftover.json"; // not a share segment → skipped
     mockList
-      .mockResolvedValueOnce(page([expired1, fresh1], "cursor-2"))
+      .mockResolvedValueOnce(page([expired1, fresh1], "token-2"))
       .mockResolvedValueOnce(page([expired2, junk]));
-    mockDel.mockResolvedValue(undefined);
+    mockDelete.mockResolvedValue(new Response(null, { status: 204 }));
 
     expect(await sweepExpiredShares(NOW)).toBe(2);
     expect(mockList).toHaveBeenCalledTimes(2);
-    expect(mockList).toHaveBeenLastCalledWith({
-      prefix: "share/",
-      cursor: "cursor-2",
-    });
-    expect(mockDel).toHaveBeenCalledTimes(2);
-    expect(mockDel).toHaveBeenCalledWith(expired1);
-    expect(mockDel).toHaveBeenCalledWith(expired2);
-    expect(mockDel).not.toHaveBeenCalledWith(fresh1);
-    expect(mockDel).not.toHaveBeenCalledWith(junk);
+    expect(mockList).toHaveBeenLastCalledWith("share/", "token-2");
+    expect(mockDelete).toHaveBeenCalledTimes(2);
+    expect(mockDelete).toHaveBeenCalledWith(expired1);
+    expect(mockDelete).toHaveBeenCalledWith(expired2);
+    expect(mockDelete).not.toHaveBeenCalledWith(fresh1);
+    expect(mockDelete).not.toHaveBeenCalledWith(junk);
   });
 
   it("deletes nothing when every share is still fresh", async () => {
@@ -113,11 +105,11 @@ describe("sweepExpiredShares", () => {
       page([`share/${shareSegment(1_900_000_000, ID22)}.bin`]),
     );
     expect(await sweepExpiredShares(NOW)).toBe(0);
-    expect(mockDel).not.toHaveBeenCalled();
+    expect(mockDelete).not.toHaveBeenCalled();
   });
 
   it("returns 0 when the store is off, without listing", async () => {
-    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("R2_ACCOUNT_ID", "");
     expect(await sweepExpiredShares(NOW)).toBe(0);
     expect(mockList).not.toHaveBeenCalled();
   });

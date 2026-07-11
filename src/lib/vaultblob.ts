@@ -1,8 +1,8 @@
 /**
  * Pure identity/index/guard helpers + types for the E2EE vault — notes and images
- * sealed at rest under a `vault/` prefix in the private blob store, decrypted in the
- * browser (the connector wraps these around `@vercel/blob`, the bridge maps Drive
- * paths onto the ids). No `@vercel/blob` and no `next` import, no Node-only APIs, so
+ * sealed at rest under a `vault/` prefix in the private R2 bucket, decrypted in the
+ * browser (the connector wraps these around `lib/r2`, the vault-sync bridge maps
+ * local paths onto the ids). No store and no `next` import, no Node-only APIs, so
  * this layer runs unchanged in the window, a worker, and Node-vitest, and is
  * unit-testable on its own (mirrors lib/files + lib/crypto).
  */

@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { getPortfolio } from "@/lib/connectors/portfolio";
-import { blobEnabled } from "@/lib/finstore";
+import { r2Enabled } from "@/lib/r2";
 import { samplePortfolio } from "@/lib/sampleDashboard";
 import { FinPanel } from "./FinPanel";
 
@@ -44,7 +44,7 @@ export default async function PortfolioPage() {
             prop so the order (net worth → holdings → cash) is preserved. */}
         <FinPanel
           invested={portfolio.totals.value}
-          offline={!blobEnabled()}
+          offline={!r2Enabled()}
           holdings={<PortfolioCard p={portfolio} />}
         />
       </div>

@@ -285,8 +285,11 @@ test.describe("strict CSP (report-only)", () => {
         "base-uri 'none'",
         "frame-src 'none'",
         "worker-src 'self'",
-        "connect-src 'self' https://vercel.com/api/blob/",
-        "img-src 'self' data: blob: https://*.private.blob.vercel-storage.com",
+        // The e2e build runs with no R2 env, so the policy is the store-off shape;
+        // the with-R2 variant (endpoint origin in connect-src + img-src) is locked
+        // by the csp unit tests.
+        "connect-src 'self'",
+        "img-src 'self' data: blob:",
         "form-action 'self'",
       ]) {
         expect(csp, `${path} is missing \`${directive}\``).toContain(directive);

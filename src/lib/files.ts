@@ -1,7 +1,7 @@
 /**
  * Pure helpers + types for the owner-only files inbox — blobs stored under a flat
- * `inbox/` prefix in Vercel Blob (the connector, lib/inbox, wraps these around the
- * SDK). No `@vercel/blob` import and no Node-only APIs, so this layer is safe to
+ * `inbox/` prefix in the private R2 bucket (the connector, lib/inbox, wraps these
+ * around lib/r2). No store import and no Node-only APIs, so this layer is safe to
  * pull into a client component and unit-testable on its own (mirrors lib/github).
  */
 
@@ -17,7 +17,6 @@ export type FileKind =
 
 export interface InboxFile {
   pathname: string;
-  url: string;
   name: string;
   size: number;
   uploadedAt: string;
@@ -199,10 +198,9 @@ export function age(iso: string, now: number = Date.now()): string {
   return `${Math.floor(d / 7)}w ago`;
 }
 
-/** A raw blob listing entry → the normalized shape the inbox renders. */
+/** A raw store listing entry → the normalized shape the inbox renders. */
 export function toInboxFile(raw: {
   pathname: string;
-  url: string;
   size: number;
   uploadedAt: string | Date;
 }): InboxFile {
@@ -212,7 +210,6 @@ export function toInboxFile(raw: {
       : new Date(raw.uploadedAt).toISOString();
   return {
     pathname: raw.pathname,
-    url: raw.url,
     name: displayName(raw.pathname),
     size: raw.size,
     uploadedAt,

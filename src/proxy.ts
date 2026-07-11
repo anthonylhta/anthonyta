@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { buildCsp, cspHeaderName } from "@/lib/csp";
+import { r2Origin } from "@/lib/r2";
 
 /**
  * Per-request nonce + strict CSP, wired the way Next's own CSP guide prescribes
@@ -28,6 +29,7 @@ export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const policy = buildCsp(nonce, {
     dev: process.env.NODE_ENV === "development",
+    r2Origin: r2Origin(),
   });
 
   // Clone inbound headers, then overwrite ours so a spoofed x-nonce can't survive.

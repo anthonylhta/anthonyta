@@ -47,7 +47,7 @@ export default async function FilesPage({
 
         {offline && (
           <p className="border-b border-hairline px-4 py-2 text-xs text-muted">
-            store offline — set BLOB_READ_WRITE_TOKEN
+            store offline — set the R2_* env vars
           </p>
         )}
 

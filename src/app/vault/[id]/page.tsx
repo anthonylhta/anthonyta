@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { StatusBar } from "@/components/terminal/StatusBar";
-import { blobEnabled } from "@/lib/vaultstore";
+import { r2Enabled } from "@/lib/r2";
 import { NoteReader } from "./NoteReader";
 
 export const metadata = { title: "vault" };
@@ -39,7 +39,7 @@ export default async function NotePage({
           </span>
         </div>
 
-        <NoteReader id={id} offline={!blobEnabled()} />
+        <NoteReader id={id} offline={!r2Enabled()} />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
