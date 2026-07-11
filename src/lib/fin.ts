@@ -1,8 +1,8 @@
 /**
  * Pure helpers + types for the E2EE financial layer (ADR: sealed net worth) — the
  * cash/HISA config envelope and the sealed daily snapshot boxes both decrypt on the
- * client, so this layer only ever sees already-plaintext JSON. No `next`,
- * `@vercel/blob`, or `react` import and no Node-only APIs, so it's safe in a client
+ * client, so this layer only ever sees already-plaintext JSON. No `next`, store,
+ * or `react` import and no Node-only APIs, so it's safe in a client
  * component and unit-testable on its own (mirrors lib/files, lib/activity).
  *
  * The cash config supersedes the retired `CASH_AUD`/`HISA_AUD` env vars: a dated,

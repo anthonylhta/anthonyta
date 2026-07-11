@@ -10,8 +10,13 @@
 /**
  * The full policy for one request's `nonce`. Directives are `; `-joined, no trailing
  * semicolon. `dev` adds `'unsafe-eval'` to script-src only (Turbopack HMR needs it).
+ * `r2Origin` is the R2 endpoint origin when the store is configured (proxy.ts reads
+ * it off the env) — absent, the policy simply omits it (local dev, CI).
  */
-export function buildCsp(nonce: string, opts?: { dev?: boolean }): string {
+export function buildCsp(
+  nonce: string,
+  opts?: { dev?: boolean; r2Origin?: string | null },
+): string {
   // Nonce + strict-dynamic IS the XSS defense: only our own <script> tags (stamped
   // with this per-request nonce) execute, and anything they inject inherits trust —
   // an injected inline <script> without the nonce can't run.
@@ -22,6 +27,9 @@ export function buildCsp(nonce: string, opts?: { dev?: boolean }): string {
     ...(opts?.dev ? ["'unsafe-eval'"] : []),
   ].join(" ");
 
+  // The R2 endpoint origin joins the policy only when the store is configured.
+  const r2 = opts?.r2Origin ? ` ${opts.r2Origin}` : "";
+
   const directives = [
     "default-src 'self'",
     `script-src ${script}`,
@@ -29,13 +37,13 @@ export function buildCsp(nonce: string, opts?: { dev?: boolean }): string {
     // styles aren't the injection vector scripts are — the nonce guards the scripts.
     "style-src 'self' 'unsafe-inline'",
     // `blob:` for client-decrypted images (E2EE vault notes + inbox thumbnails render
-    // decrypted bytes as object URLs). The private blob host is named because CSP
-    // validates the REDIRECT TARGET of the legacy-thumbnail 302s, not only the URL.
-    "img-src 'self' data: blob: https://*.private.blob.vercel-storage.com",
+    // decrypted bytes as object URLs). The R2 origin is named because CSP validates
+    // the REDIRECT TARGET of the legacy-thumbnail 302s, not only the URL.
+    `img-src 'self' data: blob:${r2}`,
     "font-src 'self'",
-    // The @vercel/blob client uploads to vercel.com/api/blob/ (verified from dist —
-    // NOT the storage host), so client uploads need it in connect-src.
-    "connect-src 'self' https://vercel.com/api/blob/",
+    // Uploads PUT ciphertext straight to the bucket on presigned URLs (ADR 0060),
+    // so the R2 origin joins connect-src; reads stay same-origin via the raw proxies.
+    `connect-src 'self'${r2}`,
     "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'none'",

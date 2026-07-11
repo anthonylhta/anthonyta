@@ -92,7 +92,7 @@ export function VaultReader({ offline }: { offline: boolean }) {
 
   // --- non-unlocked states ---
   if (vault.status === "offline")
-    return <Notice>store offline — set BLOB_READ_WRITE_TOKEN</Notice>;
+    return <Notice>store offline — set the R2_* env vars</Notice>;
   if (vault.status === "setup")
     return (
       <Notice>

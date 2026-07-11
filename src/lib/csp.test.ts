@@ -18,15 +18,15 @@ describe("buildCsp", () => {
     expect(directiveMap(policy)["script-src"]).toContain("'nonce-abc123'");
   });
 
-  it("emits all 12 directives with their exact values", () => {
+  it("emits all 12 directives with their exact values (store off)", () => {
     const dirs = directiveMap(buildCsp("abc123"));
     const expected: Record<string, string> = {
       "default-src": "'self'",
       "script-src": "'self' 'nonce-abc123' 'strict-dynamic'",
       "style-src": "'self' 'unsafe-inline'",
-      "img-src": "'self' data: blob: https://*.private.blob.vercel-storage.com",
+      "img-src": "'self' data: blob:",
       "font-src": "'self'",
-      "connect-src": "'self' https://vercel.com/api/blob/",
+      "connect-src": "'self'",
       "worker-src": "'self'",
       "object-src": "'none'",
       "base-uri": "'none'",
@@ -38,6 +38,18 @@ describe("buildCsp", () => {
     for (const [name, value] of Object.entries(expected)) {
       expect(dirs[name]).toBe(value);
     }
+  });
+
+  it("admits the R2 origin into img-src and connect-src only, only when configured", () => {
+    const origin = "https://acct123.r2.cloudflarestorage.com";
+    const policy = buildCsp("abc123", { r2Origin: origin });
+    const dirs = directiveMap(policy);
+    expect(dirs["img-src"]).toBe(`'self' data: blob: ${origin}`);
+    expect(dirs["connect-src"]).toBe(`'self' ${origin}`);
+    // Nothing else picks the origin up.
+    expect(policy.match(/acct123/g)).toHaveLength(2);
+    // Null mirrors the store-off shape exactly.
+    expect(buildCsp("abc123", { r2Origin: null })).toBe(buildCsp("abc123"));
   });
 
   it("adds 'unsafe-eval' to script-src only in dev, and nowhere without it", () => {

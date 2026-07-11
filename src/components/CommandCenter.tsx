@@ -26,7 +26,7 @@ import {
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { samplePortfolio } from "@/lib/sampleDashboard";
-import { blobEnabled } from "@/lib/vaultstore";
+import { r2Enabled } from "@/lib/r2";
 
 /** Today's date in Sydney as YYYY-MM-DD (matches the vault's daily-note titles). */
 function sydneyISODate(): string {
@@ -179,13 +179,13 @@ export async function CommandCenter({ userName }: { userName: string }) {
               portfolio →
             </Link>
           </div>
-          <NetWorthGlance invested={t.value} offline={!blobEnabled()} />
+          <NetWorthGlance invested={t.value} offline={!r2Enabled()} />
         </div>
 
         {/* today's daily note, parsed: headline + planner + a journal peek. A
             client island — the note is sealed in the E2EE vault, so it's fetched +
             decrypted in the browser (unlock in files/), never server-rendered. */}
-        <VaultTodayGlance offline={!blobEnabled()} date={today} />
+        <VaultTodayGlance offline={!r2Enabled()} date={today} />
 
         <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
           <Module
@@ -242,7 +242,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
           ))}
           {/* journal — a client island (the count + trend come from the sealed
               vault index), always the final, borderless row. */}
-          <JournalActivityRow offline={!blobEnabled()} today={today} />
+          <JournalActivityRow offline={!r2Enabled()} today={today} />
         </div>
 
         {/* quick jumps */}

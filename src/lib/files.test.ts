@@ -255,21 +255,18 @@ describe("toInboxFile", () => {
   it("maps a raw entry, normalizing name, kind, and the date", () => {
     const f = toInboxFile({
       pathname: "inbox/report-aBcDeFgHiJkLmNoPqRsT.pdf",
-      url: "https://blob/report.pdf",
       size: 2048,
       uploadedAt: "2026-07-09T00:00:00.000Z",
     });
     expect(f.name).toBe("report.pdf");
     expect(f.kind).toBe("doc");
     expect(f.size).toBe(2048);
-    expect(f.url).toBe("https://blob/report.pdf");
     expect(f.pathname).toBe("inbox/report-aBcDeFgHiJkLmNoPqRsT.pdf");
     expect(f.uploadedAt).toBe("2026-07-09T00:00:00.000Z");
   });
   it("accepts a Date for uploadedAt", () => {
     const f = toInboxFile({
       pathname: "inbox/clip.mp4",
-      url: "u",
       size: 1,
       uploadedAt: new Date("2026-07-09T00:00:00.000Z"),
     });
@@ -279,14 +276,12 @@ describe("toInboxFile", () => {
   it("flags encrypted envelopes and leaves plaintext rows unflagged", () => {
     const enc = toInboxFile({
       pathname: "inbox/e-mB4d5S3CkQxGxUKz2AkKfg-aBcDeFgHiJkLmNoPqRsT.bin",
-      url: "u",
       size: 1,
       uploadedAt: "2026-07-09T00:00:00.000Z",
     });
     expect(enc.encrypted).toBe(true);
     const plain = toInboxFile({
       pathname: "inbox/photo.jpg",
-      url: "u",
       size: 1,
       uploadedAt: "2026-07-09T00:00:00.000Z",
     });
@@ -296,7 +291,7 @@ describe("toInboxFile", () => {
 
 describe("sortInbox", () => {
   const mk = (pathname: string, uploadedAt: string) =>
-    toInboxFile({ pathname, url: "u", size: 1, uploadedAt });
+    toInboxFile({ pathname, size: 1, uploadedAt });
 
   it("returns a new array, newest first", () => {
     const files = [

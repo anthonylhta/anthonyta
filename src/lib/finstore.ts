@@ -1,17 +1,24 @@
-import { get, list, put } from "@vercel/blob";
 import { sydneyDaysAgo } from "./fin";
 import { toB64url } from "./crypto";
+import {
+  r2Enabled,
+  r2Get,
+  r2List,
+  readKey,
+  writeKey,
+  type StoreRead,
+  type StoreWrite,
+} from "./r2";
 
 /**
- * finstore — the guarded Vercel Blob I/O layer for the E2EE financial layer (ADR:
- * sealed net worth). Kept apart from `inbox.ts`, which is scoped to the `inbox/`
- * files store; this module owns the `meta/fin*` + `meta/snap*` paths in that same
- * private store and speaks only to the crypto/route/cron plumbing.
+ * finstore — the guarded R2 I/O layer for the E2EE financial layer (ADR 0054,
+ * storage on R2 since ADR 0060). Kept apart from `inbox.ts`, which is scoped to
+ * the `inbox/` files paths; this module owns the `meta/fin*` + `meta/snap*` keys
+ * in the same private bucket and speaks only to the crypto/route/cron plumbing.
  *
- * Like every connector (ADR 0003) it degrades rather than throws: no
- * `BLOB_READ_WRITE_TOKEN` (local dev, CI) → the store is off, reads report "error",
- * and mutating calls no-op. The SDK reads the token straight off `process.env`, so
- * `blobEnabled()` only confirms it's present.
+ * Like every connector (ADR 0003) it degrades rather than throws: no `R2_*` env
+ * (local dev, CI) → the store is off, reads report "error", and mutating calls
+ * no-op.
  *
  * Four paths, three shapes of opacity:
  *   - `meta/fin` — the AEV1 config envelope, raw ciphertext bytes the server never
@@ -22,13 +29,12 @@ import { toB64url } from "./crypto";
  *     idempotently so a cron rerun is safe.
  *   - `meta/snap/index.json` — the plaintext reading index the cron read-modify-writes.
  *
- * Reads are three-state — "ok"/"absent"/"error" — because the distinction is
- * load-bearing: the cron does a read-modify-write of the reading index, so an "error"
- * misread as "absent" would rebuild an empty index and clobber ~400 days of history
- * (and, for `meta/fin`, orphan the sealed data). Writes mirror `inbox.ts` putKeystore:
- * the config/snapkey puts refuse to overwrite on first-run and re-check existence to
- * report "conflict" instead of silently winning a race; the single-writer index and
- * snapshot boxes always overwrite.
+ * The three-state reads and no-clobber first-run writes live in `r2.readKey` /
+ * `r2.writeKey`; the distinction stays load-bearing here — the cron's
+ * read-modify-write of the index would rebuild empty (clobbering ~400 days of
+ * history) if an "error" ever read as "absent", and a first-run misread would
+ * orphan the sealed data. This module only binds the fixed paths to those
+ * contracts.
  */
 
 export const FIN_PATH = "meta/fin";
@@ -41,63 +47,31 @@ const SNAP_BOX_RE = /^meta\/snap\/\d{4}-\d{2}-\d{2}\.bin$/;
 /** A bare Sydney calendar day, `YYYY-MM-DD`. */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-export type StoreRead<T> =
-  | { state: "ok"; value: T }
-  | { state: "absent" }
-  | { state: "error" };
-export type StoreWrite = "ok" | "conflict" | "failed";
-
-/** The Blob store is only reachable when a read-write token is configured; the SDK
- *  reads the token itself, so presence is all we check. */
-export function blobEnabled(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
+export type { StoreRead, StoreWrite };
 
 /**
- * Read the raw config envelope bytes. "absent" (a healthy read found none — first run,
- * before setup writes a fresh key) is kept strictly apart from "error" (store off /
- * bad status / read threw): setup keys off absence, so mistaking a flaky fetch for it
- * would orphan every sealed box. The `get` result carries content as a stream, drained
- * through a `Response` to bytes.
+ * Read the raw config envelope bytes. "absent" (a healthy read found none — first
+ * run, before setup writes a fresh key) stays strictly apart from "error": setup
+ * keys off absence, so mistaking a flaky fetch for it would orphan every sealed box.
  */
-export async function getFinConfig(): Promise<StoreRead<Uint8Array>> {
-  if (!blobEnabled()) return { state: "error" };
-  try {
-    const res = await get(FIN_PATH, { access: "private" });
-    if (!res) return { state: "absent" };
-    if (res.statusCode !== 200) return { state: "error" };
-    const buf = await new Response(res.stream).arrayBuffer();
-    return { state: "ok", value: new Uint8Array(buf) };
-  } catch (err) {
-    console.error("[finstore] fin read failed:", err);
-    return { state: "error" };
-  }
+export function getFinConfig(): Promise<StoreRead<Uint8Array>> {
+  return readKey(FIN_PATH);
 }
 
 /**
  * Write the config envelope at its fixed path. `overwrite` is false for first-run
  * setup (which mints a fresh master key), so a client that misread a flaky fetch as
- * "no config yet" physically cannot clobber an existing envelope — the put refuses and
- * the existence re-check reports "conflict". Only moves bytes; the caller validates.
+ * "no config yet" physically cannot clobber an existing envelope — the conditional
+ * put refuses and reports "conflict". Only moves bytes; the caller validates.
  */
-export async function putFinConfig(
+export function putFinConfig(
   bytes: Uint8Array,
   overwrite: boolean,
 ): Promise<StoreWrite> {
-  if (!blobEnabled()) return "failed";
-  try {
-    await put(FIN_PATH, new Blob([bytes as BlobPart]), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: overwrite,
-      contentType: "application/octet-stream",
-    });
-    return "ok";
-  } catch (err) {
-    if (!overwrite && (await getFinConfig()).state === "ok") return "conflict";
-    console.error("[finstore] fin write failed:", err);
-    return "failed";
-  }
+  return writeKey(FIN_PATH, bytes, {
+    overwrite,
+    contentType: "application/octet-stream",
+  });
 }
 
 /**
@@ -107,41 +81,24 @@ export async function putFinConfig(
  * touch it.
  */
 export async function getSnapkey(): Promise<StoreRead<string>> {
-  if (!blobEnabled()) return { state: "error" };
-  try {
-    const res = await get(SNAPKEY_PATH, { access: "private" });
-    if (!res) return { state: "absent" };
-    if (res.statusCode !== 200) return { state: "error" };
-    return { state: "ok", value: await new Response(res.stream).text() };
-  } catch (err) {
-    console.error("[finstore] snapkey read failed:", err);
-    return { state: "error" };
-  }
+  const read = await readKey(SNAPKEY_PATH);
+  if (read.state !== "ok") return read;
+  return { state: "ok", value: new TextDecoder().decode(read.value) };
 }
 
 /**
  * Write the snapkey JSON at its fixed path. Mirrors `putFinConfig`: first-run setup
- * writes with `overwrite` false so a misread can't clobber the sealed private half,
- * and the throw path re-checks existence to report "conflict". The caller validates.
+ * writes with `overwrite` false so a misread can't clobber the sealed private half.
+ * The caller validates.
  */
-export async function putSnapkey(
+export function putSnapkey(
   json: string,
   overwrite: boolean,
 ): Promise<StoreWrite> {
-  if (!blobEnabled()) return "failed";
-  try {
-    await put(SNAPKEY_PATH, json, {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: overwrite,
-      contentType: "application/json",
-    });
-    return "ok";
-  } catch (err) {
-    if (!overwrite && (await getSnapkey()).state === "ok") return "conflict";
-    console.error("[finstore] snapkey write failed:", err);
-    return "failed";
-  }
+  return writeKey(SNAPKEY_PATH, json, {
+    overwrite,
+    contentType: "application/json",
+  });
 }
 
 /**
@@ -151,76 +108,54 @@ export async function putSnapkey(
  * "absent" is only ever a genuine first-run empty store.
  */
 export async function getSnapIndex(): Promise<StoreRead<string>> {
-  if (!blobEnabled()) return { state: "error" };
-  try {
-    const res = await get(SNAP_INDEX_PATH, { access: "private" });
-    if (!res) return { state: "absent" };
-    if (res.statusCode !== 200) return { state: "error" };
-    return { state: "ok", value: await new Response(res.stream).text() };
-  } catch (err) {
-    console.error("[finstore] index read failed:", err);
-    return { state: "error" };
-  }
+  const read = await readKey(SNAP_INDEX_PATH);
+  if (read.state !== "ok") return read;
+  return { state: "ok", value: new TextDecoder().decode(read.value) };
 }
 
 /**
  * Overwrite the reading index (there is a single writer — the nightly cron — so no
  * conflict handling is needed). `true` on success, `false` when the store is off or
- * the write throws; never surfaces the error.
+ * the write fails; never surfaces the error.
  */
 export async function putSnapIndex(json: string): Promise<boolean> {
-  if (!blobEnabled()) return false;
-  try {
-    await put(SNAP_INDEX_PATH, json, {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: "application/json",
-    });
-    return true;
-  } catch (err) {
-    console.error("[finstore] index write failed:", err);
-    return false;
-  }
+  const wrote = await writeKey(SNAP_INDEX_PATH, json, {
+    overwrite: true,
+    contentType: "application/json",
+  });
+  return wrote === "ok";
 }
 
 /**
  * Write one day's sealed box at `meta/snap/<date>.bin`, always overwriting so a cron
  * rerun is idempotent. `false` when the store is off, `date` isn't a `YYYY-MM-DD` (so
- * a malformed date can never forge a stray pathname), or the write throws.
+ * a malformed date can never forge a stray key), or the write fails.
  */
 export async function writeSnapBox(
   date: string,
   box: Uint8Array,
 ): Promise<boolean> {
-  if (!blobEnabled() || !DATE_RE.test(date)) return false;
-  try {
-    await put(`${SNAP_PREFIX}${date}.bin`, new Blob([box as BlobPart]), {
-      access: "private",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      contentType: "application/octet-stream",
-    });
-    return true;
-  } catch (err) {
-    console.error("[finstore] snapshot write failed:", date, err);
-    return false;
-  }
+  if (!DATE_RE.test(date)) return false;
+  const wrote = await writeKey(`${SNAP_PREFIX}${date}.bin`, box, {
+    overwrite: true,
+    contentType: "application/octet-stream",
+  });
+  return wrote === "ok";
 }
 
-/** The `YYYY-MM-DD` day of a box pathname that already matched `SNAP_BOX_RE`
+/** The `YYYY-MM-DD` day of a box key that already matched `SNAP_BOX_RE`
  *  (strip the `meta/snap/` prefix and the `.bin` suffix). */
-function boxDate(pathname: string): string {
-  return pathname.slice(SNAP_PREFIX.length, -4);
+function boxDate(key: string): string {
+  return key.slice(SNAP_PREFIX.length, -4);
 }
 
 /**
  * The last `days` days of sealed boxes as base64url, newest window only. Lists the
- * whole `meta/snap/` prefix (paginating on the cursor), keeps only real box pathnames
- * (index.json is filtered out) whose date is >= today minus `days` by lexicographic
- * compare, then fetches each in parallel and drains its stream to bytes. A single
- * failed/missing box is logged and skipped — only a failed LIST fails the whole call,
- * since a partial series still renders while a bad list would silently look empty.
+ * whole `meta/snap/` prefix (paginating on the continuation token), keeps only real
+ * box keys (index.json is filtered out) whose date is >= today minus `days` by
+ * lexicographic compare, then fetches each in parallel. A single failed/missing box
+ * is logged and skipped — only a failed LIST fails the whole call, since a partial
+ * series still renders while a bad list would silently look empty.
  */
 export async function readSnapshots(
   days: number,
@@ -228,39 +163,41 @@ export async function readSnapshots(
   | { state: "ok"; days: { date: string; box_b64: string }[] }
   | { state: "error" }
 > {
-  if (!blobEnabled()) return { state: "error" };
+  if (!r2Enabled()) return { state: "error" };
 
-  const pathnames: string[] = [];
+  const keys: string[] = [];
   try {
-    let cursor: string | undefined;
+    let token: string | undefined;
     do {
-      const res = await list({ prefix: SNAP_PREFIX, cursor });
-      for (const b of res.blobs) pathnames.push(b.pathname);
-      cursor = res.hasMore ? res.cursor : undefined;
-    } while (cursor);
+      const page = await r2List(SNAP_PREFIX, token);
+      for (const o of page.objects) keys.push(o.key);
+      token = page.next;
+    } while (token);
   } catch (err) {
     console.error("[finstore] snapshot list failed:", err);
     return { state: "error" };
   }
 
   const cutoff = sydneyDaysAgo(days);
-  const wanted = pathnames.filter(
-    (p) => SNAP_BOX_RE.test(p) && boxDate(p) >= cutoff,
+  const wanted = keys.filter(
+    (k) => SNAP_BOX_RE.test(k) && boxDate(k) >= cutoff,
   );
 
   const boxes = await Promise.all(
-    wanted.map(async (pathname) => {
-      const date = boxDate(pathname);
+    wanted.map(async (key) => {
+      const date = boxDate(key);
       try {
-        const res = await get(pathname, { access: "private" });
-        if (!res || res.statusCode !== 200) {
-          console.error("[finstore] snapshot read missing:", pathname);
+        const res = await r2Get(key);
+        if (!res.ok) {
+          console.error("[finstore] snapshot read missing:", key);
           return null;
         }
-        const buf = await new Response(res.stream).arrayBuffer();
-        return { date, box_b64: toB64url(new Uint8Array(buf)) };
+        return {
+          date,
+          box_b64: toB64url(new Uint8Array(await res.arrayBuffer())),
+        };
       } catch (err) {
-        console.error("[finstore] snapshot read failed:", pathname, err);
+        console.error("[finstore] snapshot read failed:", key, err);
         return null;
       }
     }),
