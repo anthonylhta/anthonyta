@@ -1,20 +1,26 @@
+import { parseCmcCsv, type Portfolio } from "./portfolio";
+
 /**
- * Pure helpers + types for the E2EE financial layer (ADR: sealed net worth) — the
- * cash/HISA config envelope and the sealed daily snapshot boxes both decrypt on the
- * client, so this layer only ever sees already-plaintext JSON. No `next`, store,
- * or `react` import and no Node-only APIs, so it's safe in a client
- * component and unit-testable on its own (mirrors lib/files, lib/activity).
+ * Pure helpers + types for the E2EE financial layer (ADR 0054; holdings folded in
+ * by ADR 0061) — everything in the fin envelope decrypts on the client, so this
+ * layer only ever sees already-plaintext JSON. No `next`, store, or `react` import
+ * and no Node-only APIs, so it's safe in a client component and unit-testable on
+ * its own (mirrors lib/files, lib/activity).
  *
- * The cash config supersedes the retired `CASH_AUD`/`HISA_AUD` env vars: a dated,
- * ascending series of balances instead of a single current value, so a snapshot can
- * be valued with the cash that was true ON its day. Callers that find no entry on or
- * before a day treat it as 0 — the same "unset → 0" behavior the env had.
+ * The envelope holds three things, all owner-written from the unlocked panel:
+ *   - `entries` — dated cash/HISA balances (a step function, superseding the old
+ *     `CASH_AUD`/`HISA_AUD` env vars). No entry on or before a day reads as 0.
+ *   - `invested` — dated invested totals, one appended per CSV import (a step
+ *     function too: the figure only changes when a new export is uploaded, which
+ *     is exactly what the retired nightly sealed boxes were sampling daily).
+ *   - `portfolio` — the latest parsed CMC snapshot (holdings + totals), rendered
+ *     behind the unlock; the server never parses a CSV again.
+ *
+ * v1 envelopes (cash only) normalize on read; the first save writes v2.
  */
 
 /** fin-config envelope cap, enforced at the route before decryption. */
 export const FIN_MAX_BYTES = 32768;
-/** snapkey JSON cap (the wrapped per-box key material). */
-export const SNAPKEY_MAX_BYTES = 8192;
 /** How many days of the plaintext reading index we retain before trimming. */
 export const SNAP_INDEX_MAX_DAYS = 400;
 
@@ -25,16 +31,17 @@ export interface FinEntry {
   hisa: number;
   rate: number | null;
 }
-/** The cash/HISA config — entries ascending by date, one per day. */
-export interface FinConfig {
-  v: 1;
-  entries: FinEntry[];
-}
-/** The plaintext payload sealed inside one daily snapshot box. */
-export interface SnapBoxPayload {
-  v: 1;
+/** One dated invested total, appended at CSV import time. */
+export interface InvestedEntry {
   date: string;
   investedCents: number;
+}
+/** The fin config — both series ascending by date, one row per day. */
+export interface FinConfig {
+  v: 2;
+  entries: FinEntry[];
+  invested: InvestedEntry[];
+  portfolio: Portfolio | null;
 }
 /** One day of the (unsealed) reading index — the week-over-week baseline source. */
 export interface SnapIndexDay {
@@ -92,17 +99,11 @@ function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null;
 }
 
-/**
- * Strict runtime guard for a decrypted fin-config: `v === 1`, an entries array of at
- * most 4000 rows, each with a well-formed date, non-negative finite cash/HISA, a
- * rate that's a non-negative finite number or null, and dates strictly ascending
- * (which also forces them unique). Anything off that shape → false.
- */
-export function isFinConfig(x: unknown): x is FinConfig {
-  if (!isObj(x) || x.v !== 1 || !Array.isArray(x.entries)) return false;
-  if (x.entries.length > 4000) return false;
+/** A cash entries array: dated rows, non-negative balances, strictly ascending. */
+function isEntries(x: unknown): x is FinEntry[] {
+  if (!Array.isArray(x) || x.length > 4000) return false;
   let prev = "";
-  for (const e of x.entries) {
+  for (const e of x) {
     if (!isObj(e)) return false;
     if (!isYmd(e.date) || !isNonNegNum(e.cash) || !isNonNegNum(e.hisa))
       return false;
@@ -113,10 +114,80 @@ export function isFinConfig(x: unknown): x is FinConfig {
   return true;
 }
 
-/** Strict guard for a sealed-box payload: `v === 1`, a dated day, and a non-negative
- *  safe-integer cents amount. */
-export function isSnapBoxPayload(x: unknown): x is SnapBoxPayload {
-  return isObj(x) && x.v === 1 && isYmd(x.date) && isNonNegInt(x.investedCents);
+/** An invested series: dated rows, safe-integer cents, strictly ascending. */
+function isInvested(x: unknown): x is InvestedEntry[] {
+  if (!Array.isArray(x) || x.length > 4000) return false;
+  let prev = "";
+  for (const e of x) {
+    if (!isObj(e)) return false;
+    if (!isYmd(e.date) || !isNonNegInt(e.investedCents)) return false;
+    if (!(e.date > prev)) return false;
+    prev = e.date;
+  }
+  return true;
+}
+
+/** A finite number of either sign (gains and P&L go negative). */
+function isFiniteNum(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x);
+}
+
+/** A parsed CMC snapshot: bounded holdings with finite figures, plus totals.
+ *  Codes are display strings the panel renders — bounded, never trusted further. */
+export function isPortfolioSnapshot(x: unknown): x is Portfolio {
+  if (!isObj(x)) return false;
+  if (typeof x.asOf !== "string" || x.asOf.length > 100) return false;
+  if (!Array.isArray(x.holdings) || x.holdings.length > 500) return false;
+  for (const h of x.holdings) {
+    if (!isObj(h)) return false;
+    if (typeof h.code !== "string" || h.code.length === 0 || h.code.length > 20)
+      return false;
+    for (const k of [
+      "units",
+      "last",
+      "value",
+      "cost",
+      "dayGain",
+      "pnl",
+      "pnlPct",
+    ]) {
+      if (!isFiniteNum(h[k])) return false;
+    }
+  }
+  const t = x.totals;
+  if (!isObj(t)) return false;
+  for (const k of ["value", "cost", "dayGain", "pnl", "pnlPct"]) {
+    if (!isFiniteNum(t[k])) return false;
+  }
+  return true;
+}
+
+/**
+ * Strict runtime guard for a decrypted v2 fin-config. Anything off shape → false;
+ * v1 envelopes are handled by `normalizeFinConfig`, not here.
+ */
+export function isFinConfig(x: unknown): x is FinConfig {
+  return (
+    isObj(x) &&
+    x.v === 2 &&
+    isEntries(x.entries) &&
+    isInvested(x.invested) &&
+    (x.portfolio === null || isPortfolioSnapshot(x.portfolio))
+  );
+}
+
+/**
+ * A decrypted envelope of either vintage → a v2 config, or null when the shape is
+ * unrecognizable. v1 (the cash-only era, ADR 0054) carries no invested series and
+ * no holdings — both start empty and fill in from the first CSV import. Every
+ * caller reads through this; writes always produce v2.
+ */
+export function normalizeFinConfig(x: unknown): FinConfig | null {
+  if (isFinConfig(x)) return x;
+  if (isObj(x) && x.v === 1 && isEntries(x.entries)) {
+    return { v: 2, entries: x.entries, invested: [], portfolio: null };
+  }
+  return null;
 }
 
 /** Strict guard for the reading index: `v === 1`, a days array of at most 500 (the
@@ -142,12 +213,47 @@ function insertAt(dates: { date: string }[], date: string): number {
   return i < 0 ? dates.length : i;
 }
 
-/** A new config with `entry` merged in — replacing a same-day row, else inserted so
- *  the entries stay ascending. The input config is never mutated. */
+/** A new config with `entry` merged into the cash series — replacing a same-day
+ *  row, else inserted so the entries stay ascending. Never mutates the input. */
 export function upsertEntry(cfg: FinConfig, entry: FinEntry): FinConfig {
   const kept = cfg.entries.filter((e) => e.date !== entry.date);
   const at = insertAt(kept, entry.date);
-  return { v: 1, entries: [...kept.slice(0, at), entry, ...kept.slice(at)] };
+  return { ...cfg, entries: [...kept.slice(0, at), entry, ...kept.slice(at)] };
+}
+
+/** A new config with `entry` merged into the invested series (same replace-or-insert
+ *  discipline as the cash entries). Never mutates the input. */
+export function upsertInvested(
+  cfg: FinConfig,
+  entry: InvestedEntry,
+): FinConfig {
+  const kept = cfg.invested.filter((e) => e.date !== entry.date);
+  const at = insertAt(kept, entry.date);
+  return { ...cfg, invested: [...kept.slice(0, at), entry, ...kept.slice(at)] };
+}
+
+/**
+ * One CSV import, as a pure config transform: parse the CMC export, stamp it
+ * `asOf`, store it as the current snapshot, and upsert `today`'s invested total
+ * (dollars → cents, rounded, so float drift can't leak into the series). Null when
+ * the text isn't a recognizable ProfitLoss export — the caller shows the error and
+ * seals nothing.
+ */
+export function importPortfolioCsv(
+  cfg: FinConfig,
+  csvText: string,
+  opts: { today: string; asOf: string },
+): FinConfig | null {
+  const parsed = parseCmcCsv(csvText);
+  if (!parsed) return null;
+  const snapshot: Portfolio = { ...parsed, asOf: opts.asOf };
+  return {
+    ...upsertInvested(cfg, {
+      date: opts.today,
+      investedCents: Math.round(parsed.totals.value * 100),
+    }),
+    portfolio: snapshot,
+  };
 }
 
 /** The most recent entry (entries are ascending, so the last one); null if empty. */
@@ -194,27 +300,47 @@ export function indexBaseline(
   return found;
 }
 
+/** The invested cents in force on `date` — the most recent entry at or before it;
+ *  0 when the series doesn't reach back that far (mirrors the cash "unset → 0"). */
+export function investedAt(cfg: FinConfig, date: string): number {
+  let found = 0;
+  for (const e of cfg.invested) {
+    if (e.date <= date) found = e.investedCents;
+    else break; // ascending
+  }
+  return found;
+}
+
 /**
- * The net-worth trend series from the sealed boxes: boxes sorted ascending and
- * deduped by date (last box wins), each valued as
- * `investedCents + cash-in-cents + hisa-in-cents` using the cash config in force on
- * that day. Dollar balances round to cents so float drift can't leak (3317 → 331700).
- * A day with no cash entry yet contributes invested only.
+ * The net-worth trend series, reconstructed from the two step functions: one point
+ * per calendar day across the trailing `days`-day window ending at `today`, each
+ * valued as invested-in-force + cash-in-force + HISA-in-force (dollars rounded to
+ * cents so float drift can't leak; 3317 → 331700). Days before EITHER series has
+ * data are skipped, so a fresh config draws nothing rather than a flat zero line.
+ * This replaces the retired sealed-box series byte-for-byte in shape: the boxes
+ * only ever sampled a weekly-changing figure daily, which is exactly what this
+ * computes — without a server ever holding the figure (ADR 0061).
  */
-export function buildNetWorthSeries(
-  boxes: SnapBoxPayload[],
+export function buildStepSeries(
   cfg: FinConfig,
+  days: number,
+  today: string,
 ): NetWorthPoint[] {
-  const byDate = new Map<string, SnapBoxPayload>();
-  for (const b of boxes) byDate.set(b.date, b); // last write wins
-  return [...byDate.values()]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map((b) => {
-      const c = cashAt(cfg, b.date);
-      const cash = Math.round((c?.cash ?? 0) * 100);
-      const hisa = Math.round((c?.hisa ?? 0) * 100);
-      return { date: b.date, totalCents: b.investedCents + cash + hisa };
-    });
+  const firstData = [cfg.invested[0]?.date, cfg.entries[0]?.date]
+    .filter((d): d is string => d !== undefined)
+    .sort()[0];
+  if (!firstData || days <= 0) return [];
+
+  const windowStart = addDays(today, -(days - 1));
+  const start = firstData > windowStart ? firstData : windowStart;
+  const points: NetWorthPoint[] = [];
+  for (let d = start; d <= today; d = addDays(d, 1)) {
+    const c = cashAt(cfg, d);
+    const cash = Math.round((c?.cash ?? 0) * 100);
+    const hisa = Math.round((c?.hisa ?? 0) * 100);
+    points.push({ date: d, totalCents: investedAt(cfg, d) + cash + hisa });
+  }
+  return points;
 }
 
 /**

@@ -13,7 +13,6 @@ import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import { ACTIVITY_DAYS, dailyDeltas, toLevels } from "@/lib/activity";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
-import { getPortfolio } from "@/lib/connectors/portfolio";
 import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
@@ -25,7 +24,6 @@ import {
 } from "@/lib/fin";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
-import { samplePortfolio } from "@/lib/sampleDashboard";
 import { r2Enabled } from "@/lib/r2";
 
 /** Today's date in Sydney as YYYY-MM-DD (matches the vault's daily-note titles). */
@@ -66,19 +64,15 @@ function weekRange(): string {
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
-  const [portfolioData, briefing, lang, reading, gh, indexRead, riichi] =
-    await Promise.all([
-      getPortfolio(),
-      getBriefing(),
-      getLanguageStats(),
-      getCurrentlyReading(),
-      getGithub(),
-      getSnapIndex(),
-      getRiichiStats(),
-    ]);
-  const portfolio = portfolioData ?? samplePortfolio;
+  const [briefing, lang, reading, gh, indexRead, riichi] = await Promise.all([
+    getBriefing(),
+    getLanguageStats(),
+    getCurrentlyReading(),
+    getGithub(),
+    getSnapIndex(),
+    getRiichiStats(),
+  ]);
   const b = briefing ?? sampleBriefing;
-  const t = portfolio.totals;
 
   // Reading week-over-week + trend now ride the sealed reading index (the cron's
   // plaintext day series), not the retired snapshot store. A store miss or a bad
@@ -167,8 +161,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
         <Zone label="today" right={todayLabel()} />
 
         {/* net worth — a glance; full holdings + cash live on /portfolio. The
-            numbers are a client island: cash + the week Δ ride the E2EE fin layer
-            (unlock in the browser), while the invested figure is always live. */}
+            numbers are a client island: everything rides the E2EE fin envelope
+            (ADR 0061) and decrypts in the browser — sealed dots until unlocked. */}
         <div className="border-b border-hairline px-4 py-4">
           <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
             <span>net worth</span>
@@ -179,7 +173,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
               portfolio →
             </Link>
           </div>
-          <NetWorthGlance invested={t.value} offline={!r2Enabled()} />
+          <NetWorthGlance offline={!r2Enabled()} />
         </div>
 
         {/* today's daily note, parsed: headline + planner + a journal peek. A
