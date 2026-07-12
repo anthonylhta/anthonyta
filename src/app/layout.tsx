@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { AuthForm } from "@/components/auth-buttons";
+import { Beacon } from "@/components/Beacon";
 import { KeyShortcut } from "@/components/key-shortcut";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { CommandPaletteProvider } from "@/components/terminal/CommandPalette";
@@ -116,6 +117,9 @@ export default async function RootLayout({
         <KeyShortcut />
         {/* Self-hides unless the app is installable and not already installed. */}
         <InstallPrompt />
+        {/* Cookieless pageview beacon — same-origin POST; the route ignores bots,
+            DNT, and the owner's own traffic, so it's harmless everywhere. */}
+        <Beacon />
       </body>
     </html>
   );
