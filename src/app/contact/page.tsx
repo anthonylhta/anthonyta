@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SessionStatusBar } from "@/components/SessionStatusBar";
+import { DropBox } from "./DropBox";
 
 // Static page — no data, no auth. Public "how to reach me" links.
 const channels = [
@@ -78,6 +79,9 @@ export default function ContactPage() {
             <span className="text-fg/80">Sydney, Australia · AEST</span>
           </span>
         </div>
+
+        {/* encrypted drop box — a client island; hides itself when the box is off */}
+        <DropBox />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">

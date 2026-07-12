@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOX_MAGIC,
+  BOX_PUB_LEN,
+  boxOpen,
+  boxSeal,
   buildKeystore,
   deriveKek,
   exportKeyRaw,
   fromB64url,
+  generateBoxKeypair,
   generateMk,
   generateShareKey,
+  importBoxPriv,
   importShareKey,
   isKeystore,
   ITERATIONS,
@@ -258,5 +264,67 @@ describe("share keys", () => {
     expect(imported.extractable).toBe(false);
     expect(imported.usages).toEqual(["decrypt"]);
     await expect(crypto.subtle.exportKey("raw", imported)).rejects.toThrow();
+  });
+});
+
+describe("sealed box (ASB1)", () => {
+  it("pins the box constants", () => {
+    expect(BOX_MAGIC).toBe("ASB1");
+    expect(BOX_PUB_LEN).toBe(65);
+  });
+
+  it("seals to a public key so only the private half can open it", async () => {
+    const { pubRaw, privPkcs8 } = await generateBoxKeypair();
+    const msg = new TextEncoder().encode("a stranger's private note");
+    // The sender holds ONLY the public point.
+    const box = await boxSeal(pubRaw, msg);
+    const priv = await importBoxPriv(privPkcs8);
+    expect(await boxOpen(priv, pubRaw, box)).toEqual(msg);
+  });
+
+  it("a different recipient's key cannot open the box", async () => {
+    const a = await generateBoxKeypair();
+    const b = await generateBoxKeypair();
+    const box = await boxSeal(a.pubRaw, new Uint8Array([1, 2, 3]));
+    const bPriv = await importBoxPriv(b.privPkcs8);
+    await expect(boxOpen(bPriv, b.pubRaw, box)).rejects.toThrow();
+  });
+
+  it("the same plaintext yields a different envelope every time (fresh ephemeral)", async () => {
+    const { pubRaw } = await generateBoxKeypair();
+    const msg = new Uint8Array([9, 9, 9]);
+    const one = await boxSeal(pubRaw, msg);
+    const two = await boxSeal(pubRaw, msg);
+    expect(toB64url(one)).not.toBe(toB64url(two));
+  });
+
+  it("carries the magic + ephemeral point in the framing", async () => {
+    const { pubRaw } = await generateBoxKeypair();
+    const box = await boxSeal(pubRaw, new Uint8Array([0]));
+    expect(new TextDecoder().decode(box.subarray(0, 4))).toBe("ASB1");
+    expect(box.length).toBeGreaterThanOrEqual(4 + 65 + 12 + 16);
+  });
+
+  it("rejects a truncated envelope, bad magic, and a tampered body", async () => {
+    const { pubRaw, privPkcs8 } = await generateBoxKeypair();
+    const priv = await importBoxPriv(privPkcs8);
+    const box = await boxSeal(pubRaw, new Uint8Array([1, 2, 3, 4]));
+
+    await expect(boxOpen(priv, pubRaw, box.subarray(0, 20))).rejects.toThrow(
+      "truncated",
+    );
+    const badMagic = box.slice();
+    badMagic[0] ^= 0xff;
+    await expect(boxOpen(priv, pubRaw, badMagic)).rejects.toThrow("bad magic");
+    const tampered = box.slice();
+    tampered[tampered.length - 1] ^= 0xff;
+    await expect(boxOpen(priv, pubRaw, tampered)).rejects.toThrow();
+  });
+
+  it("an imported box private key is non-extractable", async () => {
+    const { privPkcs8 } = await generateBoxKeypair();
+    const priv = await importBoxPriv(privPkcs8);
+    expect(priv.extractable).toBe(false);
+    await expect(crypto.subtle.exportKey("pkcs8", priv)).rejects.toThrow();
   });
 });

@@ -26,6 +26,8 @@ test.describe("guest gating", () => {
     "/api/vault/raw?p=vault%2Fsearch-index.bin", // E2EE semantic search index
     "/api/vault/raw?p=vault%2Fn-AAAAAAAAAAAAAAAAAAAAAA.bin", // a vault note
     "/api/vault/raw?p=meta%2Fkeystore", // keystore exfil attempt via the vault route
+    "/api/dropbox/list", // owner-gated sealed drop-box listing (ADR: sealed box)
+    "/api/dropbox/key", // owner-gated box keypair record (holds the sealed priv)
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
@@ -91,6 +93,47 @@ test.describe("guest gating", () => {
   test("POST /files/share-target is 404 for a guest", async ({ request }) => {
     const res = await request.post("/files/share-target");
     expect(res.status()).toBe(404);
+  });
+
+  test("PUT /api/dropbox/key is 404 for a guest", async ({ request }) => {
+    const res = await request.put("/api/dropbox/key", {
+      data: { v: 1, alg: "ECDH-P256", pub_b64: "x", sealed_priv_b64: "y" },
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/dropbox/delete is 404 for a guest", async ({ request }) => {
+    const res = await request.post("/api/dropbox/delete", {
+      data: { path: "dropbox/AAAAAAAAAAAAAAAAAAAAAA.bin" },
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  // The drop box's two DELIBERATELY PUBLIC surfaces (ADR: sealed box). Unlike the
+  // owner routes above they are NOT guest-gated — a stranger is the expected caller.
+  // The pubkey read must never carry the sealed private half, and the ingest route
+  // answers a bot's junk with a generic 4xx/5xx, never a 404 (it isn't owner-gated).
+  test("GET /api/dropbox/pubkey never leaks the private half", async ({
+    request,
+  }) => {
+    const res = await request.get("/api/dropbox/pubkey");
+    // In the secretless e2e env the store is off, so the box reads as disabled and
+    // this 404s — but whatever it returns, the sealed private half is never in it.
+    const body = await res.text();
+    expect(body).not.toContain("sealed_priv");
+    expect(body).not.toContain("priv");
+  });
+
+  test("POST /api/dropbox does not 404 (public ingest, not owner-gated)", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/dropbox", {
+      data: { envelope_b64: "AAAA", nonce: 0 },
+    });
+    // Rejected on the proof-of-work (or the store being off), never as "not found":
+    // the route is public, so it must not answer with the owner-gate 404.
+    expect(res.status()).not.toBe(404);
+    expect([400, 429, 503]).toContain(res.status());
   });
 
   // Passkey enrollment is owner-gated: no unauthenticated path may exist to
