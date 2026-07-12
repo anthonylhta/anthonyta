@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
+import { DropInbox } from "@/components/DropInbox";
 import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
 import { PasskeyManager } from "@/components/PasskeyManager";
@@ -158,6 +159,10 @@ export async function CommandCenter({ userName }: { userName: string }) {
 
         <PasskeyManager />
         <RecoveryShares offline={!r2Enabled()} />
+
+        {/* encrypted drop box — a client island behind the vault unlock; sealed
+            messages left on /contact open here and nowhere else (ADR: sealed box). */}
+        <DropInbox offline={!r2Enabled()} />
 
         {/* ───────────── TODAY ───────────── */}
         <Zone label="today" right={todayLabel()} />
