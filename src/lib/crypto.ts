@@ -16,12 +16,13 @@
  * not just a string compare. A fresh random 96-bit IV per item is safe far past any
  * realistic item count under a single random key.
  *
- * Sealed box (ASB1): a write-only channel FOR the server. The nightly cron encrypts
- * snapshots to the owner's static public key and holds no key to reopen them — the
- * private half lives only behind the passphrase. Ephemeral-static ECDH on P-256
- * (chosen over X25519 for universal WebCrypto support): every message mints a fresh
- * ephemeral keypair, ECDHs it against the recipient's static public key, and HKDFs
- * the shared bits into a one-shot AES-256-GCM key.
+ * Sealed box (ASB1): a write-only channel TO the owner. A stranger's browser on the
+ * public contact page seals a drop-box message to the owner's published static public
+ * key and keeps nothing — the private half lives only behind the passphrase, so the
+ * server stores a message it can never read. Ephemeral-static ECDH on P-256 (chosen
+ * over X25519 for universal WebCrypto support): every message mints a fresh ephemeral
+ * keypair, ECDHs it against the recipient's static public key, and HKDFs the shared
+ * bits into a one-shot AES-256-GCM key.
  *
  * Box envelope: `"ASB1" + ephPubRaw(65) + IV(12) + AES-GCM(k, plaintext, aad="ASB1")`
  * where k = HKDF-SHA256(bits=ECDH(eph_priv, recipient_pub), salt=32 zero bytes,
@@ -36,9 +37,11 @@ export const MAGIC = "AEV1";
 export const ITERATIONS = 600_000; // OWASP floor for PBKDF2-SHA256 (2023+)
 export const IV_LEN = 12; // AES-GCM's standard 96-bit nonce
 export const SALT_LEN = 16;
-
+export const BOX_MAGIC = "ASB1"; // anonymous sealed box (ephemeral-static ECDH)
+export const BOX_PUB_LEN = 65; // uncompressed ("raw") P-256 point: 0x04 + X(32) + Y(32)
 
 const MAGIC_BYTES = new TextEncoder().encode(MAGIC);
+const BOX_MAGIC_BYTES = new TextEncoder().encode(BOX_MAGIC);
 
 /** Plaintext metadata sealed inside the envelope, invisible to the server. */
 export interface EnvelopeMeta {
@@ -331,5 +334,208 @@ export function importShareKey(raw: Uint8Array): Promise<CryptoKey> {
     { name: "AES-GCM" },
     false,
     ["decrypt"],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// anonymous sealed box (ASB1) — write-only encryption to a published public key
+// ---------------------------------------------------------------------------
+//
+// A sealed box lets ANYONE holding only the recipient's public point encrypt a
+// message the recipient alone can open — the sender keeps nothing, and two
+// encryptions of the same plaintext never collide. The financial-snapshot cron
+// used this to write history it couldn't read; the encrypted drop box uses the
+// same primitive so a stranger's browser can leave a message the server can't
+// read. The recipient's static keypair is generated in-browser: the public point
+// is published, the private half is sealed under the master key.
+
+/**
+ * A fresh ECDH P-256 keypair, extractable ONLY so both halves can be exported right
+ * here: the public point as raw bytes (65B, published) and the private key as PKCS#8
+ * (to be sealed under the MK before storage). The caller discards both handles after
+ * export and re-imports the private half non-extractable.
+ */
+export async function generateBoxKeypair(): Promise<{
+  pubRaw: Uint8Array;
+  privPkcs8: Uint8Array;
+}> {
+  const pair = (await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  )) as CryptoKeyPair;
+  const pubRaw = new Uint8Array(
+    await crypto.subtle.exportKey("raw", pair.publicKey),
+  );
+  const privPkcs8 = new Uint8Array(
+    await crypto.subtle.exportKey("pkcs8", pair.privateKey),
+  );
+  return { pubRaw, privPkcs8 };
+}
+
+/** Import a raw (65-byte uncompressed) P-256 point as an ECDH public key. */
+export function importBoxPub(pubRaw: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    pubRaw as BufferSource,
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    [],
+  );
+}
+
+/**
+ * Import a PKCS#8 private key as a NON-extractable ECDH key usable only to derive
+ * bits — the only form the app holds after unsealing. It can never be re-exported.
+ */
+export function importBoxPriv(privPkcs8: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "pkcs8",
+    privPkcs8 as BufferSource,
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    ["deriveBits"],
+  );
+}
+
+/**
+ * ECDH(priv, pub) → HKDF-SHA256 → one AES-256-GCM key. Both raw public points ride
+ * in the HKDF info (magic || eph || recipient): a swapped or tampered ephemeral, or
+ * a wrong recipient, derives a different key and the GCM tag fails closed — the info
+ * binding is what authenticates the handshake, since a sealed box has no signature.
+ * salt is 32 zero bytes: ECDH already gives fresh, unique input material per message,
+ * so HKDF needs no separate salt.
+ */
+async function deriveBoxKey(
+  priv: CryptoKey,
+  pub: CryptoKey,
+  info: Uint8Array,
+): Promise<CryptoKey> {
+  const bits = await crypto.subtle.deriveBits(
+    { name: "ECDH", public: pub },
+    priv,
+    256,
+  );
+  const hkdf = await crypto.subtle.importKey("raw", bits, "HKDF", false, [
+    "deriveKey",
+  ]);
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(32) as BufferSource,
+      info: info as BufferSource,
+    },
+    hkdf,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/** info = "ASB1" || ephPubRaw(65) || recipientPubRaw(65) — binds both points into the KDF. */
+function boxInfo(
+  ephPubRaw: Uint8Array,
+  recipientPubRaw: Uint8Array,
+): Uint8Array {
+  const info = new Uint8Array(BOX_MAGIC_BYTES.length + BOX_PUB_LEN * 2);
+  info.set(BOX_MAGIC_BYTES, 0);
+  info.set(ephPubRaw, BOX_MAGIC_BYTES.length);
+  info.set(recipientPubRaw, BOX_MAGIC_BYTES.length + BOX_PUB_LEN);
+  return info;
+}
+
+/**
+ * Encrypt `bytes` TO a recipient's public key with nothing to keep on the sender's
+ * side — the write-only channel a stranger's browser uses to seal a drop-box message
+ * it can never reopen. A fresh ephemeral keypair per call means the same plaintext
+ * never yields the same envelope, and the ephemeral private half is dropped once the
+ * key derives.
+ */
+export async function boxSeal(
+  recipientPubRaw: Uint8Array,
+  bytes: Uint8Array,
+): Promise<Uint8Array> {
+  const recipientPub = await importBoxPub(recipientPubRaw);
+  // extractable:false — only the PUBLIC half needs exporting (always allowed);
+  // the ephemeral private key never gets even the theoretical ability to leave.
+  const eph = (await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    ["deriveBits"],
+  )) as CryptoKeyPair;
+  const ephPubRaw = new Uint8Array(
+    await crypto.subtle.exportKey("raw", eph.publicKey),
+  );
+
+  const key = await deriveBoxKey(
+    eph.privateKey,
+    recipientPub,
+    boxInfo(ephPubRaw, recipientPubRaw),
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: iv as BufferSource,
+        additionalData: BOX_MAGIC_BYTES as BufferSource,
+      },
+      key,
+      bytes as BufferSource,
+    ),
+  );
+
+  const out = new Uint8Array(
+    BOX_MAGIC_BYTES.length + BOX_PUB_LEN + IV_LEN + ct.length,
+  );
+  out.set(BOX_MAGIC_BYTES, 0);
+  out.set(ephPubRaw, BOX_MAGIC_BYTES.length);
+  out.set(iv, BOX_MAGIC_BYTES.length + BOX_PUB_LEN);
+  out.set(ct, BOX_MAGIC_BYTES.length + BOX_PUB_LEN + IV_LEN);
+  return out;
+}
+
+/**
+ * Reopen a sealed box with the recipient's private key. Throws a plain Error on any
+ * malformation or tamper — short buffer, bad magic, an ephemeral point that isn't on
+ * the curve, or a failed GCM tag — and never reads past the declared regions. The
+ * recipient's own public point is passed back in to rebuild the exact HKDF info the
+ * sender used; a mismatch there fails the tag like any other tamper.
+ */
+export async function boxOpen(
+  priv: CryptoKey,
+  recipientPubRaw: Uint8Array,
+  envelope: Uint8Array,
+): Promise<Uint8Array> {
+  const minLen = BOX_MAGIC_BYTES.length + BOX_PUB_LEN + IV_LEN + 16; // + GCM tag
+  if (envelope.length < minLen) throw new Error("box: truncated");
+  for (let i = 0; i < BOX_MAGIC_BYTES.length; i++) {
+    if (envelope[i] !== BOX_MAGIC_BYTES[i]) throw new Error("box: bad magic");
+  }
+
+  const ephStart = BOX_MAGIC_BYTES.length;
+  const ivStart = ephStart + BOX_PUB_LEN;
+  const ctStart = ivStart + IV_LEN;
+  const ephPubRaw = envelope.subarray(ephStart, ivStart);
+  const iv = envelope.subarray(ivStart, ctStart);
+  const ct = envelope.subarray(ctStart);
+
+  const ephPub = await importBoxPub(ephPubRaw);
+  const key = await deriveBoxKey(
+    priv,
+    ephPub,
+    boxInfo(ephPubRaw, recipientPubRaw),
+  );
+  return new Uint8Array(
+    await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: iv as BufferSource,
+        additionalData: BOX_MAGIC_BYTES as BufferSource,
+      },
+      key,
+      ct as BufferSource,
+    ),
   );
 }
