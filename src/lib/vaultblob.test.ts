@@ -8,6 +8,7 @@ import {
   notePreview,
   parseVaultImgId,
   VAULT_INDEX_PATH,
+  VAULT_SEARCH_INDEX_PATH,
   type VaultIndex,
 } from "./vaultblob";
 
@@ -57,8 +58,10 @@ describe("noteBlob / imageBlob", () => {
 });
 
 describe("isValidVaultPath", () => {
-  it("accepts the index and both envelope shapes", () => {
+  it("accepts the index, the search index, and both envelope shapes", () => {
     expect(isValidVaultPath(VAULT_INDEX_PATH)).toBe(true);
+    expect(isValidVaultPath(VAULT_SEARCH_INDEX_PATH)).toBe(true);
+    expect(isValidVaultPath("vault/search-index.bin")).toBe(true);
     expect(isValidVaultPath(`vault/n-${ID}.bin`)).toBe(true);
     expect(isValidVaultPath(`vault/i-${ID}.bin`)).toBe(true);
   });
