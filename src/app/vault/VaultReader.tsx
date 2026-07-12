@@ -9,6 +9,7 @@ import {
   type VaultIndexNote,
 } from "@/lib/vaultblob";
 import { VaultList } from "./VaultList";
+import { VaultSearch } from "./VaultSearch";
 
 // Shared input/button idioms, lifted from FinPanel's LockedPanel.
 const input =
@@ -119,7 +120,12 @@ export function VaultReader({ offline }: { offline: boolean }) {
   if (notes.length === 0)
     return <Notice>no notes synced yet — run npm run vault-sync</Notice>;
 
-  return <VaultList notes={notes} />;
+  return (
+    <>
+      <VaultSearch openItem={openItem} notes={notes} />
+      <VaultList notes={notes} />
+    </>
+  );
 }
 
 /** A centered status line in the content region, matching the old empty state. */
