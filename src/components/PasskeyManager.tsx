@@ -168,6 +168,16 @@ async function fetchKeystore(): Promise<Keystore | null> {
 
 type EnrollState = "idle" | "busy" | "done" | "badpass" | "failed";
 
+/** A short, human device name for the enrolled passkey — the platform where
+ *  available, lowercased and bounded. Purely cosmetic; never trusted. */
+function deviceLabel(): string {
+  const nav = navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  };
+  const raw = nav.userAgentData?.platform || navigator.platform || "device";
+  return raw.toLowerCase().slice(0, 64);
+}
+
 function VaultUnlockManager() {
   const [wraps, setWraps] = useState<PrfWrap[] | null>(null);
   const [pass, setPass] = useState("");
@@ -243,6 +253,7 @@ function VaultUnlockManager() {
         credential_id_b64: prf.credentialIdB64,
         wrapped_mk_b64: toB64url(wrapped),
         iv_b64: toB64url(iv),
+        label: deviceLabel(),
       };
       // Read-modify-write: add this device's wrap without disturbing the others.
       const set = await fetchWrapSet();
@@ -292,13 +303,16 @@ function VaultUnlockManager() {
 
       {wraps && wraps.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1">
-          {wraps.map((w) => (
+          {wraps.map((w, i) => (
             <li
               key={w.credential_id_b64}
               className="flex items-center justify-between"
             >
-              <span className="font-mono text-muted">
-                {w.credential_id_b64.slice(0, 12)}… · passkey unlock
+              <span className="text-fg">
+                {w.label ?? `passkey ${i + 1}`}
+                <span className="ml-2 font-mono text-muted">
+                  #{w.credential_id_b64.slice(0, 6)}
+                </span>
               </span>
               <button
                 type="button"

@@ -79,8 +79,9 @@ const wrap = (id: string): PrfWrap => ({
 });
 
 describe("isPrfWrap / isPrfWrapSet", () => {
-  it("accepts well-formed wraps and sets", () => {
-    expect(isPrfWrap(wrap("cred1"))).toBe(true);
+  it("accepts well-formed wraps and sets, with or without a label", () => {
+    expect(isPrfWrap(wrap("cred1"))).toBe(true); // label absent — backward compatible
+    expect(isPrfWrap({ ...wrap("cred1"), label: "android" })).toBe(true);
     expect(isPrfWrapSet({ v: 1, wraps: [wrap("a"), wrap("b")] })).toBe(true);
     expect(isPrfWrapSet({ v: 1, wraps: [] })).toBe(true);
   });
@@ -90,6 +91,8 @@ describe("isPrfWrap / isPrfWrapSet", () => {
     expect(isPrfWrap({ ...wrap("a"), wrapped_mk_b64: "x".repeat(129) })).toBe(
       false,
     );
+    expect(isPrfWrap({ ...wrap("a"), label: 5 })).toBe(false); // non-string label
+    expect(isPrfWrap({ ...wrap("a"), label: "x".repeat(65) })).toBe(false); // too long
     expect(isPrfWrap(null)).toBe(false);
   });
   it("rejects duplicate credentials and oversized sets", () => {
