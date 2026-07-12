@@ -9,8 +9,16 @@ import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
+import { Sparkline } from "@/components/terminal/Sparkline";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import { ACTIVITY_DAYS, dailyDeltas, toLevels } from "@/lib/activity";
+import {
+  b64ToBytes,
+  hllEstimate,
+  topPaths,
+  type DayStats,
+} from "@/lib/analytics";
+import { mergeDays, readDays } from "@/lib/anastore";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getRiichiStats } from "@/lib/connectors/riichi";
@@ -64,14 +72,18 @@ function weekRange(): string {
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
-  const [briefing, lang, reading, gh, indexRead, riichi] = await Promise.all([
-    getBriefing(),
-    getLanguageStats(),
-    getCurrentlyReading(),
-    getGithub(),
-    getSnapIndex(),
-    getRiichiStats(),
-  ]);
+  const [briefing, lang, reading, gh, indexRead, riichi, anaDays] =
+    await Promise.all([
+      getBriefing(),
+      getLanguageStats(),
+      getCurrentlyReading(),
+      getGithub(),
+      getSnapIndex(),
+      getRiichiStats(),
+      // The one place traffic numbers surface — read-only, owner-side (this
+      // component never renders for a guest). Store off / no data → empty state.
+      readDays(today, 7),
+    ]);
   const b = briefing ?? sampleBriefing;
 
   // Reading week-over-week + trend now ride the sealed reading index (the cron's
@@ -239,6 +251,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
           <JournalActivityRow offline={!r2Enabled()} today={today} />
         </div>
 
+        {/* ──────────── TRAFFIC ──────────── */}
+        <Zone label="traffic" right="last 7 days" />
+        <div className="px-4 py-3">
+          <AnalyticsPanel today={today} days={anaDays} />
+        </div>
+
         {/* quick jumps */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
           <nav className="flex flex-wrap gap-x-4 gap-y-1">
@@ -281,6 +299,112 @@ export async function CommandCenter({ userName }: { userName: string }) {
         private command center · {userName}
       </p>
     </main>
+  );
+}
+
+/** Unique-visitor estimate for one (possibly empty) record. Empty sketch → 0. */
+function uniquesOf(day: DayStats): number {
+  return day.visitors_hll_b64
+    ? hllEstimate(b64ToBytes(day.visitors_hll_b64))
+    : 0;
+}
+
+/** Total pageviews across a record's paths. */
+function viewsOf(day: DayStats): number {
+  return Object.values(day.paths).reduce((sum, s) => sum + s.views, 0);
+}
+
+/**
+ * The private traffic panel — cookieless pageviews + HLL unique estimates for today
+ * and the trailing week, the top paths, and a uniques sparkline. Owner-only (it lives
+ * inside the never-guest-rendered command center) and read-only. Store off / no data
+ * → a quiet "no traffic yet". This is the ONLY place the numbers surface.
+ */
+function AnalyticsPanel({ today, days }: { today: string; days: DayStats[] }) {
+  if (days.length === 0) {
+    return <p className="text-muted">no traffic yet</p>;
+  }
+
+  const todayRec = days.find((d) => d.date === today);
+  const todayViews = todayRec ? viewsOf(todayRec) : 0;
+  const todayUniques = todayRec ? uniquesOf(todayRec) : 0;
+
+  // Week totals ride the merged sketch — register-max unions the daily uniques so a
+  // returning visitor isn't double-counted across days.
+  const weekAgg = mergeDays(days);
+  const weekViews = viewsOf(weekAgg);
+  const weekUniques = uniquesOf(weekAgg);
+  const top = topPaths(weekAgg).slice(0, 5);
+
+  const spark = days.map(uniquesOf);
+  const delta = spark.length >= 2 ? spark[spark.length - 1] - spark[0] : 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-px bg-hairline">
+        <Stat label="today" views={todayViews} uniques={todayUniques} />
+        <Stat label="this week" views={weekViews} uniques={weekUniques} />
+      </div>
+
+      {spark.length >= 2 && (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted">
+            daily uniques
+          </div>
+          <Sparkline values={spark} delta={delta} height={40} />
+        </div>
+      )}
+
+      {top.length > 0 && (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted">
+            top paths
+          </div>
+          <ul className="space-y-0.5">
+            {top.map((p) => (
+              <li
+                key={p.path}
+                className="flex items-baseline justify-between gap-3 text-sm"
+              >
+                <span className="truncate font-[family-name:var(--font-geist-mono)] text-fg/90">
+                  {p.path}
+                </span>
+                <span className="shrink-0 tabular-nums text-muted">
+                  <span className="text-amber">{p.views}</span> · {p.uniques}{" "}
+                  uniq
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One traffic stat cell — views over unique estimate, mono + lowercase. */
+function Stat({
+  label,
+  views,
+  uniques,
+}: {
+  label: string;
+  views: number;
+  uniques: number;
+}) {
+  return (
+    <div className="bg-surface/40 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted">
+        {label}
+      </div>
+      <div className="mt-0.5 tabular-nums">
+        <span className="text-lg text-amber">{views}</span>{" "}
+        <span className="text-xs text-muted">views</span>
+      </div>
+      <div className="text-xs tabular-nums text-muted">
+        {uniques} unique{uniques === 1 ? "" : "s"}
+      </div>
+    </div>
   );
 }
 

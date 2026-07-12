@@ -210,6 +210,29 @@ test.describe("guest gating", () => {
   }) => {
     expect((await request.get("/api/cron/snapshot")).status()).toBe(401);
   });
+
+  // The pageview recorder is the OTHER deliberately public surface (with share
+  // links): the beacon POSTs here without auth. It must NOT 404 — but it must also
+  // leak nothing, always answering an empty 204 whatever the input. There is no
+  // owner GET route for the stats (the dashboard reads the store inside the never-
+  // guest-rendered command center), so there's no new guest-404 route to add.
+  test("POST /api/hit is public and returns an empty 204", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/hit", { data: { path: "/" } });
+    expect(res.status()).toBe(204);
+    expect(await res.text()).toBe("");
+  });
+
+  test("POST /api/hit reveals no count even for junk input", async ({
+    request,
+  }) => {
+    for (const data of [{}, { path: "../etc/passwd" }, { path: 123 }]) {
+      const res = await request.post("/api/hit", { data });
+      expect(res.status()).toBe(204);
+      expect(await res.text()).toBe("");
+    }
+  });
 });
 
 /**
