@@ -11,6 +11,9 @@ import { toB64url } from "./crypto";
 
 export const VAULT_PREFIX = "vault/";
 export const VAULT_INDEX_PATH = "vault/index";
+/** The sealed vector search index (ADR: private semantic search) — just another
+ *  `vault/*` ciphertext blob served by the same owner-gated raw route. */
+export const VAULT_SEARCH_INDEX_PATH = "vault/search-index.bin";
 
 export interface VaultIndexNote {
   id: string;
@@ -58,9 +61,9 @@ export function imageBlob(id: string): string {
   return `${VAULT_PREFIX}i-${id}.bin`;
 }
 
-// The only leaf shapes the raw route + store ever serve: the sealed index, or an
-// `n-`/`i-` envelope named by a 22-char base64url id. Length is exact — nothing
-// here adds a random suffix, unlike the inbox.
+// The only leaf shapes the raw route + store ever serve: the sealed note index, the
+// sealed search index, or an `n-`/`i-` envelope named by a 22-char base64url id.
+// Length is exact — nothing here adds a random suffix, unlike the inbox.
 const VAULT_LEAF = /^[ni]-[A-Za-z0-9_-]{22}\.bin$/;
 
 /** Traversal/probe guard for a STORED vault pathname — the only shape we serve. */
@@ -68,7 +71,9 @@ export function isValidVaultPath(p: string): boolean {
   if (typeof p !== "string" || !p.startsWith(VAULT_PREFIX) || p.includes(".."))
     return false;
   const leaf = p.slice(VAULT_PREFIX.length);
-  return leaf === "index" || VAULT_LEAF.test(leaf);
+  return (
+    leaf === "index" || leaf === "search-index.bin" || VAULT_LEAF.test(leaf)
+  );
 }
 
 function isIndexNote(x: unknown): x is VaultIndexNote {
