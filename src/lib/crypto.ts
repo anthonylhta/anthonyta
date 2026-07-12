@@ -16,12 +16,13 @@
  * not just a string compare. A fresh random 96-bit IV per item is safe far past any
  * realistic item count under a single random key.
  *
- * Sealed box (ASB1): a write-only channel FOR the server. The nightly cron encrypts
- * snapshots to the owner's static public key and holds no key to reopen them — the
- * private half lives only behind the passphrase. Ephemeral-static ECDH on P-256
- * (chosen over X25519 for universal WebCrypto support): every message mints a fresh
- * ephemeral keypair, ECDHs it against the recipient's static public key, and HKDFs
- * the shared bits into a one-shot AES-256-GCM key.
+ * Sealed box (ASB1): a write-only channel TO the owner. A stranger's browser on the
+ * public contact page seals a drop-box message to the owner's published static public
+ * key and keeps nothing — the private half lives only behind the passphrase, so the
+ * server stores a message it can never read. Ephemeral-static ECDH on P-256 (chosen
+ * over X25519 for universal WebCrypto support): every message mints a fresh ephemeral
+ * keypair, ECDHs it against the recipient's static public key, and HKDFs the shared
+ * bits into a one-shot AES-256-GCM key.
  *
  * Box envelope: `"ASB1" + ephPubRaw(65) + IV(12) + AES-GCM(k, plaintext, aad="ASB1")`
  * where k = HKDF-SHA256(bits=ECDH(eph_priv, recipient_pub), salt=32 zero bytes,
