@@ -21,6 +21,7 @@ import {
   type InboxFile,
 } from "@/lib/files";
 import { SHARE_TTL_DAYS } from "@/lib/shares";
+import { RecoverWithShares } from "@/components/RecoveryShares";
 import { useVault, type Vault } from "./useVault";
 
 // Short type tags for the non-image thumbnail slot.
@@ -546,6 +547,7 @@ function LockedPanel({ vault }: { vault: Vault }) {
         </button>
       </div>
       {vault.error && <p className="mt-2 text-down">{vault.error}</p>}
+      <RecoverWithShares />
     </div>
   );
 }

@@ -57,3 +57,31 @@ body {
   color: var(--color-amber);
   animation: blink 1.1s step-end infinite;
 }
+
+/*
+  Recovery-share printing — one share per page. The classic "print only this
+  subtree" trick: hide every mark, re-show the print root, and pin it to the top.
+  Shares live only on paper/screen, so this is the only place they get inked.
+*/
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  [data-print-root],
+  [data-print-root] * {
+    visibility: visible;
+    /* warm tokens are for the dark UI; print black on white so a scan reads. */
+    color: #000 !important;
+  }
+  [data-print-root] {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+  }
+  .print-share {
+    break-after: page;
+  }
+  .print-share:last-child {
+    break-after: auto;
+  }
+}

@@ -4,6 +4,7 @@ import { SignOut } from "@/components/auth-buttons";
 import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
 import { PasskeyManager } from "@/components/PasskeyManager";
+import { RecoveryShares } from "@/components/RecoveryShares";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
@@ -156,6 +157,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
         </div>
 
         <PasskeyManager />
+        <RecoveryShares offline={!r2Enabled()} />
 
         {/* ───────────── TODAY ───────────── */}
         <Zone label="today" right={todayLabel()} />
