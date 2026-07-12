@@ -5,6 +5,7 @@ import { DropInbox } from "@/components/DropInbox";
 import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
 import { PasskeyManager } from "@/components/PasskeyManager";
+import { RecoveryShares } from "@/components/RecoveryShares";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
@@ -157,6 +158,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
         </div>
 
         <PasskeyManager />
+        <RecoveryShares offline={!r2Enabled()} />
 
         {/* encrypted drop box — a client island behind the vault unlock; sealed
             messages left on /contact open here and nowhere else (ADR: sealed box). */}
