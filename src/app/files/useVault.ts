@@ -30,7 +30,9 @@ import {
   type EnvelopeMeta,
   type Keystore,
 } from "@/lib/crypto";
+import { deriveKekFromPrf, findWrap, isPrfWrapSet } from "@/lib/prf";
 import { clearCachedKey, getCachedKey, setCachedKey } from "@/lib/keycache";
+import { runPrfCeremony } from "./prfCeremony";
 import type { WorkerRequest, WorkerResponse } from "./crypto.worker";
 
 export type VaultStatus =
@@ -175,6 +177,19 @@ async function putKeystore(
   }
 }
 
+/**
+ * Fetch the PRF wrap set for a passkey unlock. A healthy 404 (no device enrolled)
+ * and any hiccup both collapse to `null` — passkey unlock is convenience layered
+ * on the passphrase, so "no usable wrap" always just falls back to the box; there
+ * is no fresh-key path here to protect, unlike the keystore fetch.
+ */
+async function fetchPrfWrapSet() {
+  const res = await fetch("/api/prf/wrap");
+  if (!res.ok) return null;
+  const parsed: unknown = await res.json();
+  return isPrfWrapSet(parsed) ? parsed : null;
+}
+
 // ---------------------------------------------------------------------------
 // the hook
 // ---------------------------------------------------------------------------
@@ -189,6 +204,9 @@ export interface Vault {
   unlock: (passphrase: string) => Promise<void>;
   lock: () => Promise<void>;
   changePassphrase: (oldPass: string, newPass: string) => Promise<boolean>;
+  /** Unlock via a passkey's PRF secret instead of the passphrase. A missing or
+   *  wrong wrap surfaces an error and stays locked — the passphrase box remains. */
+  unlockWithPasskey: () => Promise<void>;
   /** Encrypt one item under the unlocked MK. Throws when locked. */
   sealItem: (meta: EnvelopeMeta, bytes: Uint8Array) => Promise<Uint8Array>;
   /** Decrypt one envelope. Throws on tamper/garbage or when locked. */
@@ -304,6 +322,38 @@ export function useVault(offline: boolean): Vault {
     }
   }, []);
 
+  const unlockWithPasskey = useCallback(async () => {
+    if (!ksRef.current) return;
+    setWorking(true);
+    setError(null);
+    try {
+      // Ceremony FIRST, right off the click: no await before it so the transient
+      // user-activation window from the gesture is spent on the credential prompt.
+      const prf = await runPrfCeremony();
+      if (!prf) throw new Error("no prf secret");
+      const set = await fetchPrfWrapSet();
+      const wrap = set ? findWrap(set, prf.credentialIdB64) : null;
+      if (!wrap) throw new Error("no wrap for this passkey");
+      const kek = await deriveKekFromPrf(prf.secret);
+      // A wrong/rotated wrap fails this unwrap's GCM auth check — that throw drops
+      // us back to the passphrase, exactly like a wrong passphrase would.
+      const mk = await unwrapMk(
+        fromB64url(wrap.wrapped_mk_b64),
+        fromB64url(wrap.iv_b64),
+        kek,
+      );
+      // Leaves the vault exactly as the passphrase path does: the SAME
+      // non-extractable MK in memory and the IDB keycache.
+      mkRef.current = mk;
+      await setCachedKey(mk);
+      setStatus("unlocked");
+    } catch {
+      setError("passkey unlock unavailable — use your passphrase");
+    } finally {
+      setWorking(false);
+    }
+  }, []);
+
   const lock = useCallback(async () => {
     mkRef.current = null;
     await clearCachedKey();
@@ -376,6 +426,7 @@ export function useVault(offline: boolean): Vault {
       working,
       setup,
       unlock,
+      unlockWithPasskey,
       lock,
       changePassphrase,
       sealItem,
@@ -387,6 +438,7 @@ export function useVault(offline: boolean): Vault {
       working,
       setup,
       unlock,
+      unlockWithPasskey,
       lock,
       changePassphrase,
       sealItem,

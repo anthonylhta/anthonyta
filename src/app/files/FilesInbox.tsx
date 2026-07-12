@@ -22,6 +22,7 @@ import {
 } from "@/lib/files";
 import { SHARE_TTL_DAYS } from "@/lib/shares";
 import { RecoverWithShares } from "@/components/RecoveryShares";
+import { usePrfCeremonySupported } from "./prfCeremony";
 import { useVault, type Vault } from "./useVault";
 
 // Short type tags for the non-image thumbnail slot.
@@ -510,9 +511,12 @@ function SetupPanel({ vault }: { vault: Vault }) {
   );
 }
 
-/** Keystore exists, no cached key: prompt and derive. */
+/** Keystore exists, no cached key: prompt and derive — passphrase or passkey. */
 function LockedPanel({ vault }: { vault: Vault }) {
   const [pass, setPass] = useState("");
+  // Client-only capability probe: only offer the passkey path where WebAuthn PRF
+  // can even be attempted. The passphrase box is always the fallback.
+  const passkeyCapable = usePrfCeremonySupported();
 
   async function submit() {
     if (!pass || vault.working) return;
@@ -546,6 +550,16 @@ function LockedPanel({ vault }: { vault: Vault }) {
           {vault.working ? "deriving key…" : "unlock"}
         </button>
       </div>
+      {passkeyCapable && (
+        <button
+          type="button"
+          onClick={() => vault.unlockWithPasskey()}
+          disabled={vault.working}
+          className="mt-2 text-muted transition-colors hover:text-amber disabled:opacity-30"
+        >
+          unlock with passkey
+        </button>
+      )}
       {vault.error && <p className="mt-2 text-down">{vault.error}</p>}
       <RecoverWithShares />
     </div>
