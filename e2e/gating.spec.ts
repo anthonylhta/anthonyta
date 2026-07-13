@@ -285,6 +285,38 @@ test.describe("guest gating", () => {
       expect(await res.text()).toBe("");
     }
   });
+
+  // The CSP violation collector is the OTHER public recorder (roadmap 37e): the policy
+  // points browsers here without auth. Like /api/hit it must NOT 404 and must leak
+  // nothing — always the same empty 204 whether the report is valid, junk, or oversized
+  // — so a probe can't turn it into an oracle. There is no owner GET route (the panel
+  // reads the store inside the never-guest-rendered command center).
+  test("POST /api/csp-report always returns an empty 204, no oracle", async ({
+    request,
+  }) => {
+    const legacy = {
+      "csp-report": {
+        "effective-directive": "script-src-elem",
+        "blocked-uri": "https://evil.example/x.js",
+        "document-uri": "https://localhost/notes",
+      },
+    };
+    const cases: unknown[] = [
+      legacy, // a valid-looking legacy report
+      [{ type: "csp-violation", body: { effectiveDirective: "img-src" } }], // Reporting API
+      {}, // junk
+      { "csp-report": 123 }, // malformed
+      "not json at all", // unparseable
+      { big: "x".repeat(64 * 1024) }, // oversized (> 32KB cap)
+    ];
+    for (const data of cases) {
+      const res = await request.post("/api/csp-report", { data });
+      expect(res.status(), `body ${JSON.stringify(data).slice(0, 40)}`).toBe(
+        204,
+      );
+      expect(await res.text()).toBe("");
+    }
+  });
 });
 
 /**
@@ -361,11 +393,22 @@ test.describe("strict CSP (report-only)", () => {
         "connect-src 'self'",
         "img-src 'self' data: blob:",
         "form-action 'self'",
+        // First-party violation reporting (roadmap 37e): both directives, same
+        // same-origin endpoint — no third-party collector.
+        "report-uri /api/csp-report",
+        "report-to csp",
       ]) {
         expect(csp, `${path} is missing \`${directive}\``).toContain(directive);
       }
     });
   }
+
+  test("the Reporting-Endpoints header names the first-party csp group", async ({
+    request,
+  }) => {
+    const h = (await request.get("/")).headers();
+    expect(h["reporting-endpoints"]).toBe('csp="/api/csp-report"');
+  });
 
   test("two requests mint different nonces", async ({ request }) => {
     const mint = async () =>

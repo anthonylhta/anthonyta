@@ -21,6 +21,8 @@ import {
   type DayStats,
 } from "@/lib/analytics";
 import { mergeDays, readDays } from "@/lib/anastore";
+import { summarizeCsp } from "@/lib/cspreport";
+import { readCspDays } from "@/lib/cspstore";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getRiichiStats } from "@/lib/connectors/riichi";
@@ -262,6 +264,9 @@ export async function CommandCenter({ userName }: { userName: string }) {
         <Zone label="traffic" right="last 7 days" />
         <div className="px-4 py-3">
           <AnalyticsPanel today={today} days={anaDays} />
+          {/* First-party CSP violation counts (roadmap 37e) — self-contained: it
+              reads its own week of fold records so nothing joins the Promise.all. */}
+          <CspPanel today={today} />
         </div>
 
         {/* quick jumps */}
@@ -385,6 +390,54 @@ function AnalyticsPanel({ today, days }: { today: string; days: DayStats[] }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The private CSP-violation panel — last 7 days of first-party violation reports
+ * (roadmap 37e), grouped by directive → blocked origin. Self-contained: it reads its
+ * own week from cspstore (owner-only, inside the never-guest-rendered command center)
+ * so it never touches CommandCenter's top-level Promise.all. Store off / no reports →
+ * the quiet "0 violations" line, which is itself the good news.
+ */
+async function CspPanel({ today }: { today: string }) {
+  const { total, groups } = summarizeCsp(await readCspDays(today, 7));
+
+  if (total === 0) {
+    return <p className="mt-4 text-muted">csp: 0 violations this week</p>;
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted">
+        csp violations · <span className="text-amber">{total}</span>
+      </div>
+      <ul className="space-y-1.5">
+        {groups.slice(0, 5).map((g) => (
+          <li key={g.directive}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="truncate font-[family-name:var(--font-geist-mono)] text-fg/90">
+                {g.directive}
+              </span>
+              <span className="shrink-0 tabular-nums text-amber">
+                {g.total}
+              </span>
+            </div>
+            <ul className="mt-0.5 space-y-0.5 pl-3">
+              {g.origins.slice(0, 3).map((o) => (
+                <li
+                  key={o.origin}
+                  className="flex items-baseline justify-between gap-3 text-xs text-muted"
+                >
+                  <span className="truncate">{o.origin}</span>
+                  <span className="shrink-0 tabular-nums">{o.count}</span>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
