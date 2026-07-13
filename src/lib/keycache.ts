@@ -11,9 +11,23 @@
  * treat "no cached key" and "IDB broken" identically.
  */
 
+/** Idle window: a cached key untouched this long is dropped, so a stolen
+ *  unlocked device stops reading the vault after a week. */
+export const IDLE_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Whether a last-activity stamp is old enough to force a re-unlock. A
+ *  non-finite stamp counts as stale — a corrupted stamp fails toward locked,
+ *  never unlocked-forever. A future stamp (clock skew/rollback) is NOT stale: a
+ *  skewed clock shouldn't lock the owner out, and it self-heals on the next touch. */
+export function isIdleStale(lastMs: number, nowMs: number): boolean {
+  if (!Number.isFinite(lastMs)) return true;
+  return nowMs - lastMs > IDLE_LOCK_MS;
+}
+
 const DB_NAME = "inbox-vault";
 const STORE = "keys";
 const ROW = "mk";
+const ACTIVITY_ROW = "activity";
 
 function withStore(
   mode: IDBTransactionMode,
@@ -60,7 +74,20 @@ export async function setCachedKey(key: CryptoKey): Promise<void> {
   await withStore("readwrite", (s) => s.put(key, ROW));
 }
 
-/** Forget the cached key — the storage half of the lock button. */
+/** The last-activity stamp (ms), or null when absent/garbage/IDB-broken. */
+export async function getActivityStamp(): Promise<number | null> {
+  const v = await withStore("readonly", (s) => s.get(ACTIVITY_ROW));
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Stamp "the vault was used just now", rolling the idle window. Best-effort. */
+export async function touchActivityStamp(now = Date.now()): Promise<void> {
+  await withStore("readwrite", (s) => s.put(now, ACTIVITY_ROW));
+}
+
+/** Forget the cached key and its activity stamp — the storage half of the lock
+ *  button; the stamp is meaningless without a key. */
 export async function clearCachedKey(): Promise<void> {
   await withStore("readwrite", (s) => s.delete(ROW));
+  await withStore("readwrite", (s) => s.delete(ACTIVITY_ROW));
 }

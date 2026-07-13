@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCsp, cspHeaderName } from "./csp";
+import { buildCsp, cspHeaderName, reportingEndpointsHeader } from "./csp";
 
 // name → exact value, split back out of a built policy for table-driven assertions.
 const directiveMap = (policy: string): Record<string, string> =>
@@ -18,7 +18,7 @@ describe("buildCsp", () => {
     expect(directiveMap(policy)["script-src"]).toContain("'nonce-abc123'");
   });
 
-  it("emits all 12 directives with their exact values (store off)", () => {
+  it("emits all 14 directives with their exact values (store off)", () => {
     const dirs = directiveMap(buildCsp("abc123"));
     const expected: Record<string, string> = {
       "default-src": "'self'",
@@ -33,6 +33,8 @@ describe("buildCsp", () => {
       "frame-src": "'none'",
       "frame-ancestors": "'none'",
       "form-action": "'self'",
+      "report-uri": "/api/csp-report",
+      "report-to": "csp",
     };
     expect(Object.keys(dirs)).toEqual(Object.keys(expected));
     for (const [name, value] of Object.entries(expected)) {
@@ -78,5 +80,16 @@ describe("cspHeaderName", () => {
   it("flips on the enforce flag", () => {
     expect(cspHeaderName(true)).toBe("Content-Security-Policy");
     expect(cspHeaderName(false)).toBe("Content-Security-Policy-Report-Only");
+  });
+});
+
+describe("reportingEndpointsHeader", () => {
+  it("names the same same-origin endpoint the report-to group points at", () => {
+    expect(reportingEndpointsHeader()).toBe('csp="/api/csp-report"');
+    // The `report-to csp` directive references this header's `csp` group, and both
+    // land on the endpoint `report-uri` also names — one first-party route.
+    const policy = buildCsp("abc123");
+    expect(policy).toContain("report-to csp");
+    expect(policy).toContain("report-uri /api/csp-report");
   });
 });

@@ -19,6 +19,9 @@ import { verifyDoor } from "@/lib/webauthn/verify";
  */
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
+  // Re-auth is one biometric tap now that passkeys are the sole door — 30d was
+  // the pre-passkey window.
+  session: { maxAge: 7 * 24 * 60 * 60 },
   providers: [
     Credentials({
       // The client never renders a credentials form (ADR 0022) — the hidden

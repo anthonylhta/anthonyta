@@ -1,13 +1,17 @@
 import { unstable_cache } from "next/cache";
+import { getStoredBriefing } from "@/lib/briefingstore";
 import { driveToken } from "@/lib/google";
 import type { Briefing } from "@/lib/sampleBriefing";
 
 /**
- * briefing connector — reads the daily markets briefing from Google Drive
- * (ADR 0009). A scheduled task writes a new dated doc into a shared folder each
- * morning; this reads the NEWEST doc, extracts the JSON block, and renders it.
+ * briefing connector — reads the daily markets briefing (ADR 0009). R2-FIRST since
+ * roadmap item 35 Phase A: the daily pipeline POSTs the briefing to
+ * /api/briefing/ingest, which stores it at `meta/briefing/latest.json`; this reads
+ * that first. Google Drive stays as a transitional fallback (below) until the pipeline
+ * has switched — a scheduled task writes a new dated doc into a shared folder each
+ * morning, and this reads the NEWEST doc, extracts the JSON block, and renders it.
  *
- * Auth: a read-only service account (Drive shared the folder with its email).
+ * Drive auth: a read-only service account (Drive shared the folder with its email).
  * READ-ONLY. Fully guarded — missing creds (CI) or any failure returns `null`
  * so the page falls back to the sample. Only PUBLIC market content is in the
  * doc; portfolio relevance stays out until the hub has auth.
@@ -84,6 +88,13 @@ export function parseBriefing(text: string): Briefing | null {
  */
 const loadBriefing = unstable_cache(
   async (): Promise<Briefing | null> => {
+    // R2-first (roadmap item 35 Phase A): the pipeline's POSTed briefing wins.
+    const stored = await getStoredBriefing();
+    if (stored.state === "ok") return stored.value;
+    // TRANSITIONAL FALLBACK — "absent"/"error" falls through to the Google Drive read so
+    // nothing breaks whether or not the external pipeline has switched over yet. The Drive
+    // leg + lib/google.ts die in a follow-up PR once the pipeline POSTs to the ingest
+    // route (ADR 0009's transport changes, not its shape).
     const text = await fetchNewestDoc();
     if (!text) return null;
     return parseBriefing(text);
