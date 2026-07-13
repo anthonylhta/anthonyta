@@ -16,6 +16,7 @@ import {
   isKeystore,
   ITERATIONS,
   IV_LEN,
+  MAGIC_V2,
   open,
   randomId,
   randomSalt,
@@ -166,6 +167,130 @@ describe("envelope seal/open", () => {
     const e1 = await seal(mk, META, bytes);
     const e2 = await seal(mk, META, bytes);
     expect(toB64url(e1)).not.toBe(toB64url(e2));
+  });
+});
+
+describe("envelope context binding (AEV2)", () => {
+  const PATH = "vault/note-A.bin";
+
+  it("round-trips meta and bytes under the right path", async () => {
+    const { mk } = await setupKeys();
+    const bytes = crypto.getRandomValues(new Uint8Array(3000));
+    const env = await seal(mk, META, bytes, PATH);
+    const { meta, bytes: out } = await open(mk, env, PATH);
+    expect(out).toEqual(bytes);
+    expect(meta).toEqual(META);
+  });
+
+  it("a context makes an AEV2 envelope; its absence stays AEV1", async () => {
+    const { mk } = await setupKeys();
+    const v1 = await seal(mk, META, new Uint8Array([1]));
+    const v2 = await seal(mk, META, new Uint8Array([1]), PATH);
+    expect(new TextDecoder().decode(v1.subarray(0, 4))).toBe("AEV1");
+    expect(new TextDecoder().decode(v2.subarray(0, 4))).toBe(MAGIC_V2);
+    expect(MAGIC_V2).toBe("AEV2");
+  });
+
+  it("THE SWAP TEST: sealed at path A, refuses to open as path B", async () => {
+    const { mk } = await setupKeys();
+    const env = await seal(mk, META, new Uint8Array([7]), "vault/note-A.bin");
+    await expect(open(mk, env, "vault/note-B.bin")).rejects.toThrow();
+  });
+
+  it("cross-purpose refusal: a vault blob cannot open as meta/fin", async () => {
+    const { mk } = await setupKeys();
+    const env = await seal(mk, META, new Uint8Array([7]), "vault/x.bin");
+    await expect(open(mk, env, "meta/fin")).rejects.toThrow();
+  });
+
+  it("a v2 envelope opened without a path throws before any crypto", async () => {
+    const { mk } = await setupKeys();
+    const env = await seal(mk, META, new Uint8Array([7]), PATH);
+    await expect(open(mk, env)).rejects.toThrow(/storage path/);
+  });
+
+  it("a v1 envelope opens with AND without a context (context ignored)", async () => {
+    const { mk } = await setupKeys();
+    const bytes = new TextEncoder().encode("legacy blob");
+    const env = await seal(mk, META, bytes); // no context → AEV1
+    expect((await open(mk, env)).bytes).toEqual(bytes);
+    // A v1 blob predates contexts; a supplied path must not break it.
+    const { meta, bytes: out } = await open(mk, env, "any/path/at/all");
+    expect(out).toEqual(bytes);
+    expect(meta).toEqual(META);
+  });
+
+  it("the empty string is a real context, distinct from no context", async () => {
+    const { mk } = await setupKeys();
+    const env = await seal(mk, META, new Uint8Array([9]), "");
+    // "" seals a v2 envelope (explicit is explicit)…
+    expect(new TextDecoder().decode(env.subarray(0, 4))).toBe(MAGIC_V2);
+    // …so it opens only under "" — not under a missing path, not under another one.
+    expect((await open(mk, env, "")).bytes).toEqual(new Uint8Array([9]));
+    await expect(open(mk, env)).rejects.toThrow(/storage path/);
+    await expect(open(mk, env, "x")).rejects.toThrow();
+  });
+
+  it("length-boundary injectivity: (meta, path) pairs that naively collide stay apart", async () => {
+    const { mk } = await setupKeys();
+    // A naive `name‖path` AAD would fuse these two pairs — both spell "abcd/e.bin":
+    //   {n:"ab"} + "cd/e.bin"  ===  {n:"a"} + "bcd/e.bin"
+    // AEV2 keeps them apart: the path is the sole AAD field (domain-separated), and
+    // the name is bound through the encrypted payload, never concatenated with it.
+    const metaA = { n: "ab", t: "text/plain", s: 2 };
+    const pathA = "cd/e.bin";
+    const metaB = { n: "a", t: "text/plain", s: 1 };
+    const pathB = "bcd/e.bin";
+    expect(metaA.n + pathA).toBe(metaB.n + pathB); // the naive collision, made explicit
+
+    const envA = await seal(mk, metaA, new Uint8Array([1]), pathA);
+    const envB = await seal(mk, metaB, new Uint8Array([2]), pathB);
+
+    expect((await open(mk, envA, pathA)).meta).toEqual(metaA);
+    expect((await open(mk, envB, pathB)).meta).toEqual(metaB);
+    // Each opens ONLY under its own pair — swapping paths fails the tag.
+    await expect(open(mk, envA, pathB)).rejects.toThrow();
+    await expect(open(mk, envB, pathA)).rejects.toThrow();
+  });
+
+  it("v2 tamper: any flipped ciphertext byte fails the auth tag", async () => {
+    const { mk } = await setupKeys();
+    const env = await seal(mk, META, new TextEncoder().encode("tamper"), PATH);
+    const bent = new Uint8Array(env);
+    bent[bent.length - 1] ^= 0x01;
+    await expect(open(mk, bent, PATH)).rejects.toThrow();
+  });
+
+  it("v2 truncation and a tampered magic reject cleanly", async () => {
+    const { mk } = await setupKeys();
+    const env = await seal(mk, META, new Uint8Array([1]), PATH);
+    await expect(open(mk, env.subarray(0, 20), PATH)).rejects.toThrow(
+      /truncated/,
+    );
+    const bent = new Uint8Array(env);
+    bent[3] = "9".charCodeAt(0); // "AEV2" → "AEV9": neither magic
+    await expect(open(mk, bent, PATH)).rejects.toThrow(/magic/);
+  });
+
+  it("a v2 envelope does not open under a different MK", async () => {
+    const a = await setupKeys("pass-a");
+    const b = await setupKeys("pass-b");
+    const env = await seal(a.mk, META, new Uint8Array([7]), PATH);
+    await expect(open(b.mk, env, PATH)).rejects.toThrow();
+  });
+
+  it("version confusion fails: a flipped magic can't cross v1/v2", async () => {
+    const { mk } = await setupKeys();
+    // v1 blob relabelled as v2: the tag was over aad "AEV1", not "aev2\0<path>".
+    const v1 = await seal(mk, META, new Uint8Array([1]));
+    const asV2 = new Uint8Array(v1);
+    asV2.set(new TextEncoder().encode("AEV2"), 0);
+    await expect(open(mk, asV2, PATH)).rejects.toThrow();
+    // v2 blob relabelled as v1: now open ignores the path and authenticates "AEV1".
+    const v2 = await seal(mk, META, new Uint8Array([1]), PATH);
+    const asV1 = new Uint8Array(v2);
+    asV1.set(new TextEncoder().encode("AEV1"), 0);
+    await expect(open(mk, asV1)).rejects.toThrow();
   });
 });
 

@@ -16,6 +16,17 @@
  * not just a string compare. A fresh random 96-bit IV per item is safe far past any
  * realistic item count under a single random key.
  *
+ * AEV2 (context binding): the same frame with magic "AEV2", but the AAD is no longer
+ * the bare magic — it's the domain-separated storage path `"aev2\0" || path`. The path
+ * never travels with the envelope; it's re-derived from wherever the blob was fetched,
+ * so a ciphertext served from the wrong address (a swapped `vault/a.bin`, last month's
+ * `meta/fin`) fails the tag exactly like a bit flip. The meta still rides sealed in the
+ * payload under that same tag, so a valid AEV2 open proves the bytes, the meta, AND the
+ * address together — the (meta, path) pair, not either half alone. Migration is lazy:
+ * `seal` without a context still emits AEV1 byte-for-byte, `open` dispatches on the
+ * magic, and only v2 requires (and re-checks) the path — so a half-v1/half-v2 store is
+ * a fully working store.
+ *
  * Sealed box (ASB1): a write-only channel TO the owner. A stranger's browser on the
  * public contact page seals a drop-box message to the owner's published static public
  * key and keeps nothing — the private half lives only behind the passphrase, so the
@@ -34,6 +45,7 @@
  */
 
 export const MAGIC = "AEV1";
+export const MAGIC_V2 = "AEV2"; // context-bound envelope: the storage path rides as AAD
 export const ITERATIONS = 600_000; // OWASP floor for PBKDF2-SHA256 (2023+)
 export const IV_LEN = 12; // AES-GCM's standard 96-bit nonce
 export const SALT_LEN = 16;
@@ -41,6 +53,7 @@ export const BOX_MAGIC = "ASB1"; // anonymous sealed box (ephemeral-static ECDH)
 export const BOX_PUB_LEN = 65; // uncompressed ("raw") P-256 point: 0x04 + X(32) + Y(32)
 
 const MAGIC_BYTES = new TextEncoder().encode(MAGIC);
+const MAGIC_V2_BYTES = new TextEncoder().encode(MAGIC_V2);
 const BOX_MAGIC_BYTES = new TextEncoder().encode(BOX_MAGIC);
 
 /** Plaintext metadata sealed inside the envelope, invisible to the server. */
@@ -224,11 +237,48 @@ export function isKeystore(x: unknown): x is Keystore {
 // envelope seal / open
 // ---------------------------------------------------------------------------
 
-/** meta + plaintext → one self-describing ciphertext envelope (the stored blob). */
+/**
+ * The AEV2 additional-authenticated-data: the domain-separated storage path a v2
+ * envelope binds. `"aev2\0" || path`, where the `"aev2"` label pins the version into
+ * the tag (a v1 AAD is the four bytes `"AEV1"`, which these bytes can never equal) and
+ * the NUL delimiter can't occur in a storage path — so the label is unambiguously
+ * fenced off from the path, and no other (label, path) split can forge these bytes
+ * (`"aev2" + "\0x"` can never equal `"aev2x" + "…"` once the NUL fixes the boundary,
+ * so a path that merely starts with the label can't masquerade as the label itself).
+ * The map path → these bytes is therefore injective: a fixed prefix followed by the
+ * raw path, so distinct paths yield distinct AAD and a blob sealed for one address
+ * fails the tag at any other. The meta isn't in the AAD (it stays sealed in the
+ * payload and authenticated as plaintext under the same tag) because it isn't known
+ * until after decryption, so it can't be a reconstructible input to open's AAD; the
+ * envelope still binds the (meta, path) pair — meta through the payload, path through
+ * here, both under one GCM tag.
+ */
+function contextBytes(context: string): Uint8Array {
+  return new TextEncoder().encode("aev2\0" + context);
+}
+
+/** True iff `bytes` begins with every byte of `prefix`. */
+function startsWith(bytes: Uint8Array, prefix: Uint8Array): boolean {
+  for (let i = 0; i < prefix.length; i++) {
+    if (bytes[i] !== prefix[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * meta + plaintext → one self-describing ciphertext envelope (the stored blob).
+ *
+ * With no `context`, this is AEV1 byte-for-byte — the magic is the only AAD — so every
+ * existing caller and every stored blob is untouched. Pass the storage path as
+ * `context` (including `""`, an explicit empty context) and it becomes an AEV2
+ * envelope: the AAD is the domain-separated path, so the tag also proves WHERE the blob
+ * lives and a swapped or relocated ciphertext fails to open like a tampered one.
+ */
 export async function seal(
   mk: CryptoKey,
   meta: EnvelopeMeta,
   bytes: Uint8Array,
+  context?: string,
 ): Promise<Uint8Array> {
   const header = new TextEncoder().encode(JSON.stringify(meta));
   const payload = new Uint8Array(4 + header.length + bytes.length);
@@ -236,39 +286,62 @@ export async function seal(
   payload.set(header, 4);
   payload.set(bytes, 4 + header.length);
 
+  // context omitted → v1 (aad = the bare magic); context given → v2 (aad = the
+  // domain-separated path). Both magics are 4 bytes, so the frame offsets are shared.
+  const v2 = context !== undefined;
+  const magicBytes = v2 ? MAGIC_V2_BYTES : MAGIC_BYTES;
+  const aad = v2 ? contextBytes(context) : MAGIC_BYTES;
+
   const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
   const ct = new Uint8Array(
     await crypto.subtle.encrypt(
       {
         name: "AES-GCM",
         iv: iv as BufferSource,
-        additionalData: MAGIC_BYTES as BufferSource,
+        additionalData: aad as BufferSource,
       },
       mk,
       payload as BufferSource,
     ),
   );
 
-  const out = new Uint8Array(MAGIC_BYTES.length + IV_LEN + ct.length);
-  out.set(MAGIC_BYTES, 0);
-  out.set(iv, MAGIC_BYTES.length);
-  out.set(ct, MAGIC_BYTES.length + IV_LEN);
+  const out = new Uint8Array(magicBytes.length + IV_LEN + ct.length);
+  out.set(magicBytes, 0);
+  out.set(iv, magicBytes.length);
+  out.set(ct, magicBytes.length + IV_LEN);
   return out;
 }
 
 /**
- * envelope → { meta, bytes }. Throws on anything that isn't a well-formed AEV1
- * envelope sealed under `mk`: bad magic, truncation, a flipped ciphertext byte,
- * or a header that doesn't parse. Callers treat any throw as "not decryptable".
+ * envelope → { meta, bytes }. Throws on anything that isn't a well-formed envelope
+ * sealed under `mk`: bad magic, truncation, a flipped ciphertext byte, or a header
+ * that doesn't parse. Callers treat any throw as "not decryptable".
+ *
+ * Dispatches on the magic. AEV1 authenticates the magic alone, so `context` is IGNORED
+ * for a v1 blob — it predates contexts, and demanding one would break every stored
+ * envelope. AEV2 binds the storage path, so the caller MUST re-supply the path the blob
+ * was fetched from: a missing path is a programming error thrown before any crypto, and
+ * a WRONG path fails the tag exactly like a tampered byte.
  */
 export async function open(
   mk: CryptoKey,
   envelope: Uint8Array,
+  context?: string,
 ): Promise<{ meta: EnvelopeMeta; bytes: Uint8Array }> {
-  const minLen = MAGIC_BYTES.length + IV_LEN + 16; // + GCM tag
+  const minLen = MAGIC_BYTES.length + IV_LEN + 16; // + GCM tag (both magics are 4 bytes)
   if (envelope.length < minLen) throw new Error("envelope: truncated");
-  for (let i = 0; i < MAGIC_BYTES.length; i++) {
-    if (envelope[i] !== MAGIC_BYTES[i]) throw new Error("envelope: bad magic");
+
+  const v2 = startsWith(envelope, MAGIC_V2_BYTES);
+  if (!v2 && !startsWith(envelope, MAGIC_BYTES))
+    throw new Error("envelope: bad magic");
+
+  let aad: Uint8Array;
+  if (v2) {
+    if (context === undefined)
+      throw new Error("envelope: v2 envelope needs its storage path");
+    aad = contextBytes(context);
+  } else {
+    aad = MAGIC_BYTES;
   }
 
   const iv = envelope.subarray(MAGIC_BYTES.length, MAGIC_BYTES.length + IV_LEN);
@@ -279,7 +352,7 @@ export async function open(
       {
         name: "AES-GCM",
         iv: iv as BufferSource,
-        additionalData: MAGIC_BYTES as BufferSource,
+        additionalData: aad as BufferSource,
       },
       mk,
       ct as BufferSource,
