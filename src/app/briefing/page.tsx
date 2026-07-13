@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { auth } from "@/auth";
+import { BriefingRelevance } from "@/components/BriefingRelevance";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { getBriefing } from "@/lib/connectors/briefing";
+import { r2Enabled } from "@/lib/r2";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 
 // Public market briefing for everyone; the owner also sees the private "portfolio
@@ -114,6 +116,9 @@ export default async function BriefingPage() {
                 {"No portfolio note in today's briefing yet."}
               </div>
             )}
+            {/* browser-computed relevance — matches today's briefing against the
+                decrypted holdings; the server never holds both (roadmap item 35B). */}
+            <BriefingRelevance briefing={b} offline={!r2Enabled()} />
           </div>
         )}
 
