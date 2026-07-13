@@ -144,6 +144,48 @@ test.describe("guest gating", () => {
     expect([400, 429, 503]).toContain(res.status());
   });
 
+  // Briefing ingest (roadmap item 35 Phase A) is a hidden owner surface behind the 404
+  // wall (ADR 0022): the daily pipeline POSTs the briefing JSON with a bearer secret. The
+  // e2e app boots as a production build with throwaway env — no BRIEFING_INGEST_SECRET —
+  // so the gate fails CLOSED and EVERY call 404s: no token, a junk token, even a
+  // perfectly-shaped body. A prober must not learn the route exists, nor get a validation
+  // oracle for well-formed content.
+  test("POST /api/briefing/ingest with no auth is 404 for a guest", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/briefing/ingest", { data: {} });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/briefing/ingest with a junk bearer is 404", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/briefing/ingest", {
+      headers: { authorization: "Bearer not-the-secret" },
+      data: {},
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/briefing/ingest 404s even for a valid-shaped body (the wall holds)", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/briefing/ingest", {
+      data: {
+        date: "2026-07-13",
+        weekday: "Mon",
+        generated: "06:30 AEST",
+        driver: "test",
+        summary: "test",
+        tape: [],
+        bottomLine: [],
+        watch: [],
+        sections: [],
+      },
+    });
+    expect(res.status()).toBe(404);
+  });
+
   // Passkey enrollment is owner-gated: no unauthenticated path may exist to
   // plant a credential, and the endpoints must be invisible (ADR 0022).
   for (const path of [
