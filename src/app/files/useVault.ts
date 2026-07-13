@@ -11,7 +11,8 @@
  *
  * The unlock screen IS the security boundary — everything below it (seal/open,
  * the worker, the raw route) only ever sees the non-extractable master key.
- * Lock wipes both the in-memory handle and the IndexedDB cache.
+ * Lock wipes both the in-memory handle and the IndexedDB cache; boot also drops
+ * a cache left idle past IDLE_LOCK_MS so a stolen unlocked device can't read on.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,7 +32,14 @@ import {
   type Keystore,
 } from "@/lib/crypto";
 import { deriveKekFromPrf, findWrap, isPrfWrapSet } from "@/lib/prf";
-import { clearCachedKey, getCachedKey, setCachedKey } from "@/lib/keycache";
+import {
+  clearCachedKey,
+  getActivityStamp,
+  getCachedKey,
+  isIdleStale,
+  setCachedKey,
+  touchActivityStamp,
+} from "@/lib/keycache";
 import { runPrfCeremony } from "./prfCeremony";
 import type { WorkerRequest, WorkerResponse } from "./crypto.worker";
 
@@ -229,8 +237,9 @@ export function useVault(offline: boolean): Vault {
     let cancelled = false;
     (async () => {
       try {
-        const [cached, ks] = await Promise.all([
+        const [cached, stamp, ks] = await Promise.all([
           getCachedKey(),
+          getActivityStamp(),
           fetchKeystore(),
         ]);
         if (cancelled) return;
@@ -243,6 +252,18 @@ export function useVault(offline: boolean): Vault {
         }
         ksRef.current = ks;
         if (cached) {
+          // Idle auto-lock: a cache untouched past IDLE_LOCK_MS is a known-stale
+          // key, not an error — drop it and land locked.
+          if (stamp !== null && isIdleStale(stamp, Date.now())) {
+            await clearCachedKey();
+            if (!cancelled) setStatus("locked");
+            return;
+          }
+          // Fresh, or an absent stamp (a pre-feature device with a key but no
+          // stamp): roll the window forward now — locking every old device out
+          // on deploy would be a surprise. This boot touch IS the rolling signal.
+          await touchActivityStamp();
+          if (cancelled) return;
           // Known limitation: nothing binds the cached key to THIS keystore. If
           // the vault was reset on another device, decrypts fail row-by-row
           // until a lock/unlock refreshes the key — the keystore carries no key
@@ -286,6 +307,7 @@ export function useVault(offline: boolean): Vault {
       ksRef.current = ks;
       mkRef.current = mk;
       await setCachedKey(mk);
+      await touchActivityStamp();
       setStatus("unlocked");
     } catch {
       setError("setup failed — try again");
@@ -314,6 +336,7 @@ export function useVault(offline: boolean): Vault {
       );
       mkRef.current = mk;
       await setCachedKey(mk);
+      await touchActivityStamp();
       setStatus("unlocked");
     } catch {
       setError("wrong passphrase");
@@ -346,6 +369,7 @@ export function useVault(offline: boolean): Vault {
       // non-extractable MK in memory and the IDB keycache.
       mkRef.current = mk;
       await setCachedKey(mk);
+      await touchActivityStamp();
       setStatus("unlocked");
     } catch {
       setError("passkey unlock unavailable — use your passphrase");
@@ -392,6 +416,7 @@ export function useVault(offline: boolean): Vault {
         ksRef.current = next;
         mkRef.current = mk;
         await setCachedKey(mk);
+        await touchActivityStamp();
         setStatus("unlocked");
         return true;
       } catch {
