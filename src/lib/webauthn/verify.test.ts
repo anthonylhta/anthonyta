@@ -124,20 +124,22 @@ describe("verifyDoor — assertion path", () => {
     ).toBeNull();
   });
 
-  it("stores an advanced counter, best-effort", async () => {
+  it("stamps the sign-in and stores an advanced counter, best-effort", async () => {
     await verifyDoor({ assertion: assertion() }, req(authCookie()));
     expect(mockPut).toHaveBeenCalledTimes(1);
     const [json, overwrite] = mockPut.mock.calls[0];
     expect(overwrite).toBe(true);
-    expect(JSON.parse(json).creds[0].counter).toBe(6);
-    // a failed counter write must not block the sign-in
+    const stored = JSON.parse(json).creds[0];
+    expect(stored.counter).toBe(6);
+    expect(typeof stored.lastUsedAt).toBe("string");
+    // a failed stamp write must not block the sign-in
     mockPut.mockResolvedValue("failed");
     expect(
       await verifyDoor({ assertion: assertion() }, req(authCookie())),
     ).toEqual({ id: "owner", name: "anthonylhta" });
   });
 
-  it("NEVER denies a 0 or regressed counter (synced passkeys)", async () => {
+  it("stamps a synced passkey's sign-in without regressing its counter", async () => {
     mockVerify.mockResolvedValue({
       verified: true,
       authenticationInfo: { newCounter: 0 },
@@ -147,7 +149,13 @@ describe("verifyDoor — assertion path", () => {
       req(authCookie()),
     );
     expect(user).toEqual({ id: "owner", name: "anthonylhta" });
-    expect(mockPut).not.toHaveBeenCalled(); // no write for a non-advancing counter
+    // The sign-in is still stamped (a phone passkey reports 0 forever, and the
+    // "last sign-in" line needs the timestamp), but the counter must never roll
+    // back from 5 and read as a cloned authenticator.
+    expect(mockPut).toHaveBeenCalledTimes(1);
+    const stored = JSON.parse(mockPut.mock.calls[0][0]).creds[0];
+    expect(stored.counter).toBe(5);
+    expect(typeof stored.lastUsedAt).toBe("string");
   });
 });
 

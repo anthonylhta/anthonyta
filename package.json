@@ -12,7 +12,8 @@
     "test:e2e": "playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "vault-sync": "node --dns-result-order=ipv4first --no-network-family-autoselection --env-file=.env.local --import tsx scripts/vault-sync.ts"
+    "vault-sync": "node --dns-result-order=ipv4first --no-network-family-autoselection --env-file=.env.local --import tsx scripts/vault-sync.ts",
+    "hub-backup": "node --dns-result-order=ipv4first --no-network-family-autoselection --env-file=.env.local --import tsx scripts/hub-backup.ts"
   },
   "dependencies": {
     "@simplewebauthn/browser": "13.3.0",
