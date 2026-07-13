@@ -1,5 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { notFound } from "next/navigation";
+import { auth } from "@/auth";
 import { SessionStatusBar } from "@/components/SessionStatusBar";
 
 export const metadata = {
@@ -24,7 +26,13 @@ const drivers = [
   },
 ];
 
-export default function UsesPage() {
+export default async function UsesPage() {
+  // Pulled from the public face for now (owner call, 2026-07-14) — guests get
+  // the same 404 wall as every private page; the content stays reachable
+  // signed-in until it's reworked or reinstated.
+  const session = await auth();
+  if (!session?.user) notFound();
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">

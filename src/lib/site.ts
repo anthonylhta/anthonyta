@@ -27,6 +27,5 @@ export const PUBLIC_ROUTES = [
   "/projects/tone-translator",
   "/novels",
   "/notes",
-  "/uses",
   "/contact",
 ] as const;
