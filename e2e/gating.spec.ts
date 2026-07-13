@@ -16,6 +16,7 @@ test.describe("guest gating", () => {
     "/vault/abc123XYZ",
     "/vault/img/abc123XYZ", // the owner-gated image route (ADR 0048)
     "/files", // the owner-only files inbox
+    "/system", // the owner-only system page (access / traffic / csp)
     "/api/files/dl?p=inbox%2Fx.jpg", // inbox download
     "/api/files/raw?p=inbox%2Fe-abc.bin", // E2EE ciphertext stream (ADR 0053)
     "/api/files/raw?p=meta%2Fkeystore", // keystore exfil attempt via raw
@@ -296,6 +297,7 @@ test.describe("guest gating", () => {
       expect(body, `${path} leaks /vault`).not.toContain("/vault");
       expect(body, `${path} leaks /portfolio`).not.toContain("/portfolio");
       expect(body, `${path} leaks /files`).not.toContain("/files");
+      expect(body, `${path} leaks /system`).not.toContain("/system");
     }
   });
 
