@@ -1,6 +1,8 @@
 {
   "crons": [
-    { "path": "/api/cron/refresh-briefing", "schedule": "30 22 * * *" },
-    { "path": "/api/cron/snapshot", "schedule": "0 13 * * *" }
+    {
+      "path": "/api/cron/snapshot",
+      "schedule": "0 13 * * *"
+    }
   ]
 }
