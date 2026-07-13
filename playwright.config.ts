@@ -33,6 +33,18 @@ export default defineConfig({
       AUTH_SECRET: "e2e-throwaway-secret-not-a-real-credential",
       AUTH_GITHUB_ID: "e2e",
       AUTH_GITHUB_SECRET: "e2e",
+      // Pin the WRITE-capable stores OFF so a local run matches secretless CI.
+      // `next start` loads the developer's .env/.env.local, and the suite POSTs
+      // fixture bodies at the public recorders (/api/hit, /api/csp-report) — with
+      // real R2 creds in scope those folded a fake "evil.example" violation into
+      // LIVE telemetry. Empty strings win over .env values (Next never overrides
+      // an existing env var), and empty reads as unconfigured everywhere
+      // (r2Enabled, the ingest gate).
+      R2_ACCOUNT_ID: "",
+      R2_ACCESS_KEY_ID: "",
+      R2_SECRET_ACCESS_KEY: "",
+      R2_BUCKET: "",
+      BRIEFING_INGEST_SECRET: "",
     },
   },
 });
