@@ -840,6 +840,224 @@ export const notes: Note[] = [
       </>
     ),
   },
+  {
+    slug: "right-bytes-wrong-address",
+    title: "right bytes, wrong address",
+    oneLiner:
+      "A valid auth tag proves the ciphertext is intact — not that it’s the one you asked for.",
+    updated: "2026-07-14",
+    related: [
+      "one-store-every-door",
+      "absent-and-error-are-different-nothings",
+    ],
+    body: (
+      <>
+        <p>
+          The private side of this site seals everything into authenticated
+          envelopes: if the tag verifies, the bytes are exactly what was sealed.
+          For a long time I read that as “the store can’t lie to me,” and it’s
+          not quite true. The tag answers <em>were these bytes tampered?</em> —
+          it says nothing about whether they’re the bytes that belong at the
+          address I fetched. A compromised store, or an ordinary bug, could
+          serve note B where note A should be, or last month’s financial config
+          at today’s address, and every check would pass silently. Same key,
+          valid tag, wrong data — substitution is a whole attack class the
+          envelope was silent about.
+        </p>
+        <p>
+          The fix costs zero bytes, because AES-GCM has a slot built for exactly
+          this: additional authenticated data — input that must be presented
+          identically at open time or the tag fails, but that never travels with
+          the ciphertext. So new envelopes bind their own storage path,
+          re-derived at read time from wherever the blob was actually fetched. A
+          swapped, relocated, or cross-purpose ciphertext now fails exactly like
+          a flipped bit. The binding is fenced with a separator that can’t
+          appear in a path, so no creative re-splitting of label and address can
+          forge it — distinct addresses give distinct bindings, always.
+        </p>
+        <p>
+          The part that made it shippable is that nothing already stored had to
+          move. Old envelopes keep opening as before; every new write carries
+          the binding; the reader dispatches on a version marker whose bytes
+          can’t collide with any bound address, so even flipping the marker
+          between formats just fails the tag. A store that’s half old, half new,
+          is a fully working store — no flag day, no bulk re-encryption, and the
+          migration finishes itself as blobs get rewritten in the course of
+          normal life.
+        </p>
+        <p>
+          <strong>Integrity of bytes is not integrity of context.</strong> When
+          the storage is part of your threat model, it isn’t enough that a blob
+          is untampered — it has to be untampered <em>and yours and here</em>.
+          Authenticate the address too; the primitive has had a slot for it all
+          along.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "when-my-test-suite-showed-up-in-my-analytics",
+    title: "when my test suite showed up in my analytics",
+    oneLiner:
+      "A test that exercises a public recorder is a write — local runs must be forced secretless, not merely tolerated-with-secrets.",
+    updated: "2026-07-14",
+    related: [
+      "graceful-degradation-is-an-invariant",
+      "absent-and-error-are-different-nothings",
+    ],
+    body: (
+      <>
+        <p>
+          The day I shipped a first-party collector for content-security-policy
+          violations, its owner panel showed its first entry:{" "}
+          <em>script-src-elem · https://evil.example</em>. Reads exactly like an
+          injection attempt against production. It was my own test suite. The
+          suite deliberately POSTs a valid-looking violation report at the
+          public collector to prove the endpoint never leaks anything — always
+          the same empty 204, junk or genuine — and the fixture’s blocked URL
+          was <em>evil.example</em>.
+        </p>
+        <p>
+          The mechanism took a minute to see. In CI the pipeline runs with zero
+          secrets, the store is off, and folding the report is a no-op — the
+          whole design leans on that. But locally, the test runner boots the
+          real production server, and that server loads the developer’s{" "}
+          <em>own env files</em>. My machine has the real storage credentials,
+          because it has to. So every local test pass — including the gate that
+          runs before every pull request — quietly folded fixture data into live
+          telemetry. The analytics side had the same hole: the test runner’s
+          user-agent isn’t on anyone’s crawler deny-list, so each run also
+          counted as a visitor.
+        </p>
+        <p>
+          The fix is one block of configuration: the test server’s environment
+          now pins the store credentials to empty strings, which beat the env
+          file’s values, so a local run is exactly as secretless as CI — forced,
+          not assumed. Deleting the polluted record was the easy half; the
+          interesting half was noticing that “the pipeline must pass with zero
+          secrets” has a mirror clause nobody had written down:{" "}
+          <strong>the pipeline must also run with zero secrets</strong>, even on
+          a machine that has them.
+        </p>
+        <p>
+          Two lessons worth keeping. A test that exercises a public recorder is
+          a <em>write</em>, however read-only the suite feels — assume the
+          developer machine has real keys in scope and fence them in the runner
+          itself. And distinctive fixture values are a gift:{" "}
+          <em>evil.example</em> confessed on sight. A realistic-looking fixture
+          would still be sitting in my counts, lying.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "the-backup-that-needed-no-encryption",
+    title: "the backup that needed no encryption",
+    oneLiner:
+      "When everything is ciphertext, a backup is the server’s own bytes on a different disk — safe anywhere, by construction.",
+    updated: "2026-07-14",
+    related: [
+      "one-store-every-door",
+      "a-cron-that-writes-secrets-it-cant-read",
+    ],
+    body: (
+      <>
+        <p>
+          After a storage suspension took every private surface down at once, I
+          owed this site a backup: the key material, the financials, the file
+          inbox, the vault — all single-copy in one bucket. Instinct says
+          backing up encrypted data multiplies the key handling: export flows,
+          re-encryption, another place for a passphrase to travel. It’s the
+          opposite. The blobs are ciphertext already, so the backup is the
+          server’s own bytes, verbatim, plus a manifest. No passphrase enters
+          the flow at any point, and the copy is exactly as safe on a spare USB
+          stick as it is in the cloud — the location of ciphertext was never
+          part of its security story.
+        </p>
+        <p>
+          With cryptography off the table, all the design lives in failure
+          shapes. The manifest — key, size, and hash for every object — is
+          written <em>last</em>, so a run that dies halfway leaves a folder that
+          is visibly incomplete rather than a snapshot that quietly lies. A
+          failed listing aborts the run instead of reading as an empty store.
+          And the restore path treats its own manifest as hostile input:
+          shape-guarded, hash-verified per file, paths fenced so a hand-edited
+          manifest can’t steer a write outside the folders it came from — and it
+          refuses to touch the live store without an explicit flag, because
+          restore overwrites.
+        </p>
+        <p>
+          Restore shipped in the same change as backup, on the theory that a
+          restore you’ve never run is a rumour, not a capability. The first real
+          backup got spot-verified against its own manifest the same day —
+          hundreds of objects, hashes matching — which is the difference between
+          owning a backup and owning a folder.
+        </p>
+        <p>
+          <strong>
+            If your data is worth encrypting end-to-end, its backup comes free
+          </strong>{" "}
+          — the design finally pays rent on the operations side. The craft isn’t
+          in protecting the copy; the bytes do that themselves. It’s in making
+          sure a partial copy can’t impersonate a complete one.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "the-counter-that-never-counts",
+    title: "the counter that never counts",
+    oneLiner:
+      "Synced passkeys report signature counter 0 forever — design for the credential that lies.",
+    updated: "2026-07-14",
+    related: [
+      "prove-the-new-door-before-closing-the-old",
+      "safe-by-construction-not-by-runbook",
+    ],
+    body: (
+      <>
+        <p>
+          WebAuthn credentials carry a signature counter that increments on
+          every use. The spec’s intent is clone detection: if the server ever
+          sees a counter go backwards, someone copied the authenticator. That
+          picture quietly died when passkeys started syncing — iCloud Keychain
+          and Google Password Manager report zero, forever, because syncing{" "}
+          <em>is</em> cloning, done benignly and on purpose. The signal designed
+          to catch the attack is permanently indistinguishable from the most
+          common legitimate setup.
+        </p>
+        <p>
+          That kills two designs, one obvious and one subtle. The obvious one:
+          treating a regressed counter as a cloned authenticator and locking the
+          credential. Against a synced passkey that “protection” can only ever
+          fire on the owner — the attacker it imagines is unaffected. The subtle
+          one bit me while building a <em>last signed in</em> line: stamping the
+          timestamp only when the counter advances means the primary phone — the
+          device the feature exists to make visible — never gets a stamp at all.
+          So the stamp lands on every successful assertion, the counter only
+          ever moves forward via a max (a lying zero can’t roll it back), and
+          the counter itself is demoted to telemetry: recorded, displayed, never
+          a gate.
+        </p>
+        <p>
+          The same inventory grew a remove button, with exactly one refusal in
+          it: the removal that would strand the owner — deleting the last
+          credential while no recovery path exists. Everything else is the
+          owner’s call, including removing the passkey of the machine you’re
+          sitting at. I tested that one the honest way, by doing it, and walking
+          back in through another device’s credential before re-enrolling. The
+          refusal isn’t there to prevent mistakes; it’s there to make the one
+          unrecoverable mistake unrepresentable.
+        </p>
+        <p>
+          <strong>Design for the credential that lies.</strong> A signal that
+          can be legitimately wrong can never be a gate — demote it to
+          telemetry, stamp facts you control instead, and reserve hard refusals
+          for the single action that would lock the owner out of everything.
+        </p>
+      </>
+    ),
+  },
 ];
 
 export function getNote(slug: string): Note | undefined {
