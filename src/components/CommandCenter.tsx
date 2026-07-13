@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
+import { BriefingRelevance } from "@/components/BriefingRelevance";
 import { DropInbox } from "@/components/DropInbox";
 import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
@@ -264,6 +265,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
           >
             <p className="text-fg">{b.driver}</p>
             <Tape items={ticks} className="mt-2" />
+            <BriefingRelevance briefing={b} offline={!r2Enabled()} />
           </Module>
 
           <Module
