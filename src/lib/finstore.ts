@@ -29,9 +29,6 @@ import { readKey, writeKey, type StoreRead, type StoreWrite } from "./r2";
 export const FIN_PATH = "meta/fin";
 export const SNAP_INDEX_PATH = "meta/snap/index.json";
 
-/** A bare Sydney calendar day, `YYYY-MM-DD`. */
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
 export type { StoreRead, StoreWrite };
 
 /**

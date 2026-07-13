@@ -29,6 +29,12 @@ export interface WebauthnCred {
   /** Owner-facing device name, lowercase ("iphone", "yubikey"). */
   label: string;
   createdAt: string;
+  /**
+   * ISO instant of the most recent successful sign-in with this credential —
+   * telemetry that powers the command center's "last sign-in" line. Optional
+   * and backward-compatible: a record written before this field stays valid.
+   */
+  lastUsedAt?: string;
 }
 
 export interface WebauthnRecord {
@@ -61,7 +67,9 @@ function isCred(x: unknown): x is WebauthnCred {
     c.label.length > 0 &&
     c.label.length <= 64 &&
     typeof c.createdAt === "string" &&
-    c.createdAt.length <= 40
+    c.createdAt.length <= 40 &&
+    (c.lastUsedAt === undefined ||
+      (typeof c.lastUsedAt === "string" && c.lastUsedAt.length <= 40))
   );
 }
 
@@ -102,16 +110,46 @@ export function appendCred(
   return { ...rec, creds: [...rec.creds, cred] };
 }
 
-/** Store a new counter on the matching credential (no-op on unknown id). */
+/**
+ * Store a new counter on the matching credential (no-op on unknown id). When
+ * `usedAt` is given it also stamps `lastUsedAt` — a successful sign-in advances
+ * both in the one write, so the "last sign-in" line has a timestamp even for
+ * synced passkeys whose counter never moves off 0.
+ */
 export function withCounter(
   rec: WebauthnRecord,
   credId: string,
   counter: number,
+  usedAt?: string,
 ): WebauthnRecord {
   return {
     ...rec,
-    creds: rec.creds.map((c) => (c.id === credId ? { ...c, counter } : c)),
+    creds: rec.creds.map((c) =>
+      c.id === credId
+        ? {
+            ...c,
+            counter,
+            ...(usedAt !== undefined ? { lastUsedAt: usedAt } : {}),
+          }
+        : c,
+    ),
   };
+}
+
+/**
+ * Remove a credential by id. null on an unknown id — AND null when it would strip
+ * the LAST credential from a record with no recovery code: that leaves a
+ * locked-out owner (zero creds, no break-glass), so the refusal IS the feature.
+ * Removing the final credential is allowed once a recovery code is present.
+ */
+export function removeCred(
+  rec: WebauthnRecord,
+  credId: string,
+): WebauthnRecord | null {
+  if (!rec.creds.some((c) => c.id === credId)) return null;
+  const creds = rec.creds.filter((c) => c.id !== credId);
+  if (creds.length === 0 && rec.recovery === undefined) return null;
+  return { ...rec, creds };
 }
 
 export function withRecovery(

@@ -144,6 +144,48 @@ test.describe("guest gating", () => {
     expect([400, 429, 503]).toContain(res.status());
   });
 
+  // Briefing ingest (roadmap item 35 Phase A) is a hidden owner surface behind the 404
+  // wall (ADR 0022): the daily pipeline POSTs the briefing JSON with a bearer secret. The
+  // e2e app boots as a production build with throwaway env — no BRIEFING_INGEST_SECRET —
+  // so the gate fails CLOSED and EVERY call 404s: no token, a junk token, even a
+  // perfectly-shaped body. A prober must not learn the route exists, nor get a validation
+  // oracle for well-formed content.
+  test("POST /api/briefing/ingest with no auth is 404 for a guest", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/briefing/ingest", { data: {} });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/briefing/ingest with a junk bearer is 404", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/briefing/ingest", {
+      headers: { authorization: "Bearer not-the-secret" },
+      data: {},
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/briefing/ingest 404s even for a valid-shaped body (the wall holds)", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/briefing/ingest", {
+      data: {
+        date: "2026-07-13",
+        weekday: "Mon",
+        generated: "06:30 AEST",
+        driver: "test",
+        summary: "test",
+        tape: [],
+        bottomLine: [],
+        watch: [],
+        sections: [],
+      },
+    });
+    expect(res.status()).toBe(404);
+  });
+
   // Passkey enrollment is owner-gated: no unauthenticated path may exist to
   // plant a credential, and the endpoints must be invisible (ADR 0022).
   for (const path of [
@@ -155,6 +197,23 @@ test.describe("guest gating", () => {
       expect(res.status()).toBe(404);
     });
   }
+
+  // The sign-in passkey inventory is owner-only on BOTH methods: listing or
+  // revoking a credential must be invisible to a guest (roadmap item 37 b/c).
+  test("GET /api/auth/webauthn/creds is 404 for a guest", async ({
+    request,
+  }) => {
+    expect((await request.get("/api/auth/webauthn/creds")).status()).toBe(404);
+  });
+
+  test("DELETE /api/auth/webauthn/creds is 404 for a guest", async ({
+    request,
+  }) => {
+    const res = await request.delete("/api/auth/webauthn/creds", {
+      data: { id: "credential-id" },
+    });
+    expect(res.status()).toBe(404);
+  });
 
   test("passkey auth-options are public, silent, and fresh per call", async ({
     request,
@@ -285,6 +344,38 @@ test.describe("guest gating", () => {
       expect(await res.text()).toBe("");
     }
   });
+
+  // The CSP violation collector is the OTHER public recorder (roadmap 37e): the policy
+  // points browsers here without auth. Like /api/hit it must NOT 404 and must leak
+  // nothing — always the same empty 204 whether the report is valid, junk, or oversized
+  // — so a probe can't turn it into an oracle. There is no owner GET route (the panel
+  // reads the store inside the never-guest-rendered command center).
+  test("POST /api/csp-report always returns an empty 204, no oracle", async ({
+    request,
+  }) => {
+    const legacy = {
+      "csp-report": {
+        "effective-directive": "script-src-elem",
+        "blocked-uri": "https://evil.example/x.js",
+        "document-uri": "https://localhost/notes",
+      },
+    };
+    const cases: unknown[] = [
+      legacy, // a valid-looking legacy report
+      [{ type: "csp-violation", body: { effectiveDirective: "img-src" } }], // Reporting API
+      {}, // junk
+      { "csp-report": 123 }, // malformed
+      "not json at all", // unparseable
+      { big: "x".repeat(64 * 1024) }, // oversized (> 32KB cap)
+    ];
+    for (const data of cases) {
+      const res = await request.post("/api/csp-report", { data });
+      expect(res.status(), `body ${JSON.stringify(data).slice(0, 40)}`).toBe(
+        204,
+      );
+      expect(await res.text()).toBe("");
+    }
+  });
 });
 
 /**
@@ -361,11 +452,22 @@ test.describe("strict CSP (report-only)", () => {
         "connect-src 'self'",
         "img-src 'self' data: blob:",
         "form-action 'self'",
+        // First-party violation reporting (roadmap 37e): both directives, same
+        // same-origin endpoint — no third-party collector.
+        "report-uri /api/csp-report",
+        "report-to csp",
       ]) {
         expect(csp, `${path} is missing \`${directive}\``).toContain(directive);
       }
     });
   }
+
+  test("the Reporting-Endpoints header names the first-party csp group", async ({
+    request,
+  }) => {
+    const h = (await request.get("/")).headers();
+    expect(h["reporting-endpoints"]).toBe('csp="/api/csp-report"');
+  });
 
   test("two requests mint different nonces", async ({ request }) => {
     const mint = async () =>

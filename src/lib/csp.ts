@@ -7,6 +7,9 @@
  * it to enforce.
  */
 
+/** The same-origin route both reporting directives point at (roadmap 37e). */
+const REPORT_ENDPOINT = "/api/csp-report";
+
 /**
  * The full policy for one request's `nonce`. Directives are `; `-joined, no trailing
  * semicolon. `dev` adds `'unsafe-eval'` to script-src only (Turbopack HMR needs it).
@@ -52,9 +55,25 @@ export function buildCsp(
     // standalone-complete — it doesn't lean on a header merged in elsewhere.
     "frame-ancestors 'none'",
     "form-action 'self'",
+    // First-party violation reporting (roadmap 37e): both directives name the SAME
+    // same-origin endpoint — `report-uri` for browsers that only speak the legacy
+    // form, `report-to csp` for the Reporting API (its `csp` group is defined by the
+    // `Reporting-Endpoints` response header, see `reportingEndpointsHeader`). No
+    // third-party collector — the site's one telemetry consumer stays its owner.
+    `report-uri ${REPORT_ENDPOINT}`,
+    "report-to csp",
   ];
 
   return directives.join("; ");
+}
+
+/**
+ * The `Reporting-Endpoints` response header value, defining the `csp` group that the
+ * policy's `report-to csp` directive references (Reporting API). Same-origin by
+ * design — a first-party endpoint, never a third-party collector.
+ */
+export function reportingEndpointsHeader(): string {
+  return `csp="${REPORT_ENDPOINT}"`;
 }
 
 /** The header name to emit under: enforce → blocking, else Report-Only (the default). */

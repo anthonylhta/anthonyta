@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
+import { BriefingRelevance } from "@/components/BriefingRelevance";
 import { DropInbox } from "@/components/DropInbox";
 import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
@@ -21,6 +22,8 @@ import {
   type DayStats,
 } from "@/lib/analytics";
 import { mergeDays, readDays } from "@/lib/anastore";
+import { summarizeCsp } from "@/lib/cspreport";
+import { readCspDays } from "@/lib/cspstore";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getRiichiStats } from "@/lib/connectors/riichi";
@@ -35,6 +38,8 @@ import {
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { r2Enabled } from "@/lib/r2";
+import { isWebauthnRecord, type WebauthnCred } from "@/lib/webauthn/record";
+import { getWebauthnRecord } from "@/lib/webauthn/store";
 
 /** Today's date in Sydney as YYYY-MM-DD (matches the vault's daily-note titles). */
 function sydneyISODate(): string {
@@ -51,6 +56,43 @@ function todayLabel(): string {
     day: "numeric",
     month: "short",
   }).format(new Date());
+}
+
+/** An ISO instant as a Sydney "13 Jul, 14:32" — the "last sign-in" timestamp. */
+function sydneyDateTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Australia/Sydney",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(iso));
+}
+
+/**
+ * The most recent successful sign-in across every enrolled passkey — the record's
+ * max `lastUsedAt` and the credential that carried it (roadmap item 37c). Read
+ * server-side, best-effort: a store miss or an unstamped record → null, and the
+ * line is omitted. Surfacing it makes unauthorized door use visible. ISO stamps
+ * are Z-suffixed (`toISOString`), so a lexicographic max is the chronological max.
+ */
+async function lastSignIn(): Promise<{ at: string; label: string } | null> {
+  const read = await getWebauthnRecord();
+  if (read.state !== "ok") return null;
+  let record: unknown;
+  try {
+    record = JSON.parse(read.value);
+  } catch {
+    return null;
+  }
+  if (!isWebauthnRecord(record)) return null;
+  let best: WebauthnCred | null = null;
+  for (const c of record.creds) {
+    if (c.lastUsedAt && (!best?.lastUsedAt || c.lastUsedAt > best.lastUsedAt))
+      best = c;
+  }
+  return best?.lastUsedAt ? { at: best.lastUsedAt, label: best.label } : null;
 }
 
 /** A "15 Jun – 21 Jun" label for the trailing week. */
@@ -74,7 +116,7 @@ function weekRange(): string {
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
-  const [briefing, lang, reading, gh, indexRead, riichi, anaDays] =
+  const [briefing, lang, reading, gh, indexRead, riichi, anaDays, signIn] =
     await Promise.all([
       getBriefing(),
       getLanguageStats(),
@@ -85,6 +127,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
       // The one place traffic numbers surface — read-only, owner-side (this
       // component never renders for a guest). Store off / no data → empty state.
       readDays(today, 7),
+      lastSignIn(),
     ]);
   const b = briefing ?? sampleBriefing;
 
@@ -170,6 +213,13 @@ export async function CommandCenter({ userName }: { userName: string }) {
         </div>
 
         <PasskeyManager />
+        {/* when the door was last opened — a stamp on every passkey sign-in
+            (roadmap item 37c); omitted until the first stamp exists. */}
+        {signIn && (
+          <div className="border-b border-hairline px-4 py-2 text-xs text-muted">
+            last sign-in: {sydneyDateTime(signIn.at)} · {signIn.label}
+          </div>
+        )}
         <RecoveryShares offline={!r2Enabled()} />
 
         {/* encrypted drop box — a client island behind the vault unlock; sealed
@@ -215,6 +265,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
           >
             <p className="text-fg">{b.driver}</p>
             <Tape items={ticks} className="mt-2" />
+            <BriefingRelevance briefing={b} offline={!r2Enabled()} />
           </Module>
 
           <Module
@@ -262,6 +313,9 @@ export async function CommandCenter({ userName }: { userName: string }) {
         <Zone label="traffic" right="last 7 days" />
         <div className="px-4 py-3">
           <AnalyticsPanel today={today} days={anaDays} />
+          {/* First-party CSP violation counts (roadmap 37e) — self-contained: it
+              reads its own week of fold records so nothing joins the Promise.all. */}
+          <CspPanel today={today} />
         </div>
 
         {/* quick jumps */}
@@ -385,6 +439,54 @@ function AnalyticsPanel({ today, days }: { today: string; days: DayStats[] }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The private CSP-violation panel — last 7 days of first-party violation reports
+ * (roadmap 37e), grouped by directive → blocked origin. Self-contained: it reads its
+ * own week from cspstore (owner-only, inside the never-guest-rendered command center)
+ * so it never touches CommandCenter's top-level Promise.all. Store off / no reports →
+ * the quiet "0 violations" line, which is itself the good news.
+ */
+async function CspPanel({ today }: { today: string }) {
+  const { total, groups } = summarizeCsp(await readCspDays(today, 7));
+
+  if (total === 0) {
+    return <p className="mt-4 text-muted">csp: 0 violations this week</p>;
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted">
+        csp violations · <span className="text-amber">{total}</span>
+      </div>
+      <ul className="space-y-1.5">
+        {groups.slice(0, 5).map((g) => (
+          <li key={g.directive}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="truncate font-[family-name:var(--font-geist-mono)] text-fg/90">
+                {g.directive}
+              </span>
+              <span className="shrink-0 tabular-nums text-amber">
+                {g.total}
+              </span>
+            </div>
+            <ul className="mt-0.5 space-y-0.5 pl-3">
+              {g.origins.slice(0, 3).map((o) => (
+                <li
+                  key={o.origin}
+                  className="flex items-baseline justify-between gap-3 text-xs text-muted"
+                >
+                  <span className="truncate">{o.origin}</span>
+                  <span className="shrink-0 tabular-nums">{o.count}</span>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

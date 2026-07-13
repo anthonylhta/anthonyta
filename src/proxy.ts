@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { buildCsp, cspHeaderName } from "@/lib/csp";
+import { buildCsp, cspHeaderName, reportingEndpointsHeader } from "@/lib/csp";
 import { r2Origin } from "@/lib/r2";
 
 /**
@@ -47,6 +47,9 @@ export function proxy(request: NextRequest) {
 
   // The one line the env flag touches: Report-Only by default, blocking at CSP_ENFORCE=1.
   response.headers.set(cspHeaderName(process.env.CSP_ENFORCE === "1"), policy);
+  // Defines the same-origin `csp` group the policy's `report-to` directive names, so
+  // Reporting-API browsers deliver violations first-party (roadmap 37e).
+  response.headers.set("Reporting-Endpoints", reportingEndpointsHeader());
 
   return response;
 }
