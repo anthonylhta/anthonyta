@@ -12,6 +12,7 @@ test.describe("guest gating", () => {
   for (const path of [
     "/vault",
     "/portfolio",
+    "/uses", // pulled from the public face 2026-07-14; owner-only until reworked
     "/vault/abc123XYZ",
     "/vault/img/abc123XYZ", // the owner-gated image route (ADR 0048)
     "/files", // the owner-only files inbox
