@@ -47,14 +47,82 @@ export function PasskeyManager() {
 }
 
 // ---------------------------------------------------------------------------
-// passkey sign-in enrollment (unchanged behaviour)
+// passkey sign-in enrollment + the enrolled-credential inventory
 // ---------------------------------------------------------------------------
+
+/** The sanitized sign-in credential the inventory route returns (no public key). */
+interface SignInCred {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  counter: number;
+}
+
+/** An ISO instant as a short Sydney date ("13 Jul"); "—" when absent or unparseable. */
+function shortDate(iso?: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Australia/Sydney",
+    day: "numeric",
+    month: "short",
+  }).format(d);
+}
 
 function PasskeyEnroll() {
   const [state, setState] = useState<
     "idle" | "busy" | "done" | "failed" | "unavailable"
   >("idle");
   const [recovery, setRecovery] = useState<string | null>(null);
+  const [creds, setCreds] = useState<SignInCred[] | null>(null);
+  const [kept, setKept] = useState(false);
+
+  // Load the inventory best-effort: a flaky read stays `null` (renders nothing),
+  // never an error banner. Returns the list so callers can refresh after a
+  // mutation without a second round-trip.
+  const loadCreds = useCallback(async (): Promise<SignInCred[] | null> => {
+    try {
+      const res = await fetch("/api/auth/webauthn/creds");
+      if (!res.ok) return null;
+      const parsed: unknown = await res.json();
+      const list = (parsed as { creds?: unknown })?.creds;
+      return Array.isArray(list) ? (list as SignInCred[]) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const next = await loadCreds();
+      if (!cancelled) setCreds(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCreds]);
+
+  async function remove(id: string) {
+    setKept(false);
+    try {
+      const res = await fetch("/api/auth/webauthn/creds", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      // 409 = the server refused to strip the last passkey with no recovery code.
+      if (res.status === 409) {
+        setKept(true);
+        return;
+      }
+      if (res.ok) setCreds(await loadCreds());
+    } catch {
+      // leave the list as-is; a passkey can only be removed by a clean round-trip
+    }
+  }
 
   async function enroll() {
     if (state === "busy") return;
@@ -84,6 +152,7 @@ function PasskeyEnroll() {
       const body = (await verifyRes.json()) as { recovery?: string };
       if (body.recovery) setRecovery(body.recovery);
       setState("done");
+      setCreds(await loadCreds());
     } catch {
       // user cancel, no authenticator, verify failure — all the same shrug
       setState("failed");
@@ -116,6 +185,36 @@ function PasskeyEnroll() {
           add passkey
         </button>
       </div>
+      {creds && creds.length > 0 && (
+        <ul className="flex flex-col gap-1 border-b border-hairline px-4 py-2 text-xs">
+          {creds.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-fg">
+                {c.label}
+                <span className="ml-2 font-mono text-muted">
+                  #{c.id.slice(0, 6)}
+                </span>
+                <span className="ml-2 text-muted">
+                  · added {shortDate(c.createdAt)} · last used{" "}
+                  {shortDate(c.lastUsedAt)}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => remove(c.id)}
+                className="shrink-0 text-muted transition-colors hover:text-down"
+              >
+                remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {kept && (
+        <div className="border-b border-hairline px-4 py-2 text-xs text-muted">
+          kept — last passkey with no recovery code
+        </div>
+      )}
       {recovery ? (
         <div className="border-b border-hairline px-4 py-3 text-xs">
           <p className="text-muted">

@@ -4,6 +4,7 @@ import {
   isWebauthnRecord,
   MAX_CREDS,
   newRecord,
+  removeCred,
   WEBAUTHN_MAX_BYTES,
   withCounter,
   withoutRecovery,
@@ -32,6 +33,20 @@ describe("isWebauthnRecord", () => {
   it("accepts a record carrying a recovery hash", () => {
     const r = withRecovery(record(), "h".repeat(43), "2026-07-10");
     expect(isWebauthnRecord(r)).toBe(true);
+  });
+
+  it("accepts an optional lastUsedAt and rejects a malformed one", () => {
+    expect(
+      isWebauthnRecord({
+        v: 1,
+        creds: [cred({ lastUsedAt: "2026-07-13T00:00:00.000Z" })],
+      }),
+    ).toBe(true);
+    for (const bad of [5, "x".repeat(41)]) {
+      expect(
+        isWebauthnRecord({ v: 1, creds: [{ ...cred(), lastUsedAt: bad }] }),
+      ).toBe(false);
+    }
   });
 
   it("rejects non-objects and wrong versions", () => {
@@ -104,6 +119,44 @@ describe("mutations", () => {
     expect(next.creds.find((c) => c.id !== "other")?.counter).toBe(0);
     // unknown id is a no-op, not a throw
     expect(withCounter(r, "missing", 99)).toEqual(r);
+  });
+
+  it("withCounter stamps lastUsedAt only when given, on the matching cred", () => {
+    let r = record();
+    r = appendCred(r, cred({ id: "other" }))!;
+    const stamped = withCounter(r, "other", 3, "2026-07-13T01:00:00.000Z");
+    expect(stamped.creds.find((c) => c.id === "other")?.lastUsedAt).toBe(
+      "2026-07-13T01:00:00.000Z",
+    );
+    // the untouched cred keeps no stamp
+    expect(
+      stamped.creds.find((c) => c.id !== "other")?.lastUsedAt,
+    ).toBeUndefined();
+    // omitting usedAt leaves the field absent (a bare counter bump)
+    expect(withCounter(r, "other", 3).creds[1].lastUsedAt).toBeUndefined();
+  });
+
+  it("removeCred: unknown id, last-cred refusal, and the allowed removals", () => {
+    // unknown id → null
+    expect(removeCred(record(), "missing")).toBeNull();
+
+    // removing the LAST credential with no recovery code is refused (lockout)
+    expect(removeCred(record(), cred().id)).toBeNull();
+
+    // …but allowed once a recovery code is present
+    const armed = withRecovery(record(), "h".repeat(43), "2026-07-13");
+    const emptied = removeCred(armed, cred().id);
+    expect(emptied?.creds).toEqual([]);
+    expect(emptied?.recovery).toBeDefined();
+
+    // a middle credential comes out, the rest stay
+    let three = newRecord();
+    for (const id of ["a", "b", "c"]) three = appendCred(three, cred({ id }))!;
+    const without = removeCred(three, "b");
+    expect(without?.creds.map((c) => c.id)).toEqual(["a", "c"]);
+
+    // immutability — the source record is untouched
+    expect(three.creds.map((c) => c.id)).toEqual(["a", "b", "c"]);
   });
 
   it("recovery add / consume round-trip", () => {

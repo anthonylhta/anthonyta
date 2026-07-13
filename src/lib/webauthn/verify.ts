@@ -99,15 +99,23 @@ async function verifyAssertion(
   });
   if (!verified) return null;
 
-  // Counter is telemetry, never a gate: synced passkeys (iCloud Keychain,
-  // Google Password Manager) report 0 forever, so a 0 or regressed counter
-  // must not read as a cloned authenticator — that "protection" would only
-  // ever lock the owner out. Store it when it advances, best-effort.
-  if (authenticationInfo.newCounter > cred.counter) {
-    const bumped = withCounter(record, cred.id, authenticationInfo.newCounter);
-    const wrote = await putWebauthnRecord(JSON.stringify(bumped), true);
-    if (wrote !== "ok") console.error("[webauthn] counter update failed");
-  }
+  // Stamp the sign-in — and advance the counter when it moved — in ONE
+  // best-effort write. The stamp lands on EVERY successful assertion, not only
+  // when the counter advances: synced passkeys (iCloud Keychain, Google Password
+  // Manager) report 0 forever, so gating the write on the counter would never
+  // record a sign-in for a phone credential — the exact device the "last sign-in"
+  // line exists to surface. Counter stays telemetry, never a gate: take the max
+  // so a 0 or regressed report never rolls it back and reads as a cloned
+  // authenticator (that "protection" would only ever lock the owner out).
+  const nextCounter = Math.max(cred.counter, authenticationInfo.newCounter);
+  const stamped = withCounter(
+    record,
+    cred.id,
+    nextCounter,
+    new Date().toISOString(),
+  );
+  const wrote = await putWebauthnRecord(JSON.stringify(stamped), true);
+  if (wrote !== "ok") console.error("[webauthn] sign-in stamp failed");
 
   return owner();
 }

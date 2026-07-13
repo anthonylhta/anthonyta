@@ -156,6 +156,23 @@ test.describe("guest gating", () => {
     });
   }
 
+  // The sign-in passkey inventory is owner-only on BOTH methods: listing or
+  // revoking a credential must be invisible to a guest (roadmap item 37 b/c).
+  test("GET /api/auth/webauthn/creds is 404 for a guest", async ({
+    request,
+  }) => {
+    expect((await request.get("/api/auth/webauthn/creds")).status()).toBe(404);
+  });
+
+  test("DELETE /api/auth/webauthn/creds is 404 for a guest", async ({
+    request,
+  }) => {
+    const res = await request.delete("/api/auth/webauthn/creds", {
+      data: { id: "credential-id" },
+    });
+    expect(res.status()).toBe(404);
+  });
+
   test("passkey auth-options are public, silent, and fresh per call", async ({
     request,
   }) => {
