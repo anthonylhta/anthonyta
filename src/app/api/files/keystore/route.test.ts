@@ -82,6 +82,15 @@ describe("keystore route", () => {
     expect(stored).toEqual(KEYSTORE);
   });
 
+  it("PUT stores a v2 keystore's canary alongside the validated shape", async () => {
+    vi.mocked(putKeystore).mockResolvedValue("ok");
+    const v2 = { ...KEYSTORE, v: 2, canary_b64: "Y2FuYXJ5ZW52ZWxvcGU" };
+    const res = await putReq(JSON.stringify({ ...v2, evil: "extra" }));
+    expect(res.status).toBe(200);
+    const stored = JSON.parse(vi.mocked(putKeystore).mock.calls[0][0]);
+    expect(stored).toEqual(v2);
+  });
+
   it("PUT without the overwrite header writes no-overwrite (setup can't clobber)", async () => {
     vi.mocked(putKeystore).mockResolvedValue("ok");
     await putReq(JSON.stringify(KEYSTORE));
