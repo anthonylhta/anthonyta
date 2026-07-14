@@ -40,9 +40,13 @@ import {
   toB64url,
   unwrapMk,
 } from "../src/lib/crypto";
-import { getEmbedder } from "../src/lib/embedder";
 import { r2Delete, r2Enabled, r2List, r2Put, readKey } from "../src/lib/r2";
-import { buildSearchIndex, groupByNote } from "../src/lib/searchindex";
+import {
+  buildIndex,
+  indexStats,
+  serializeIndex,
+  type IndexDoc,
+} from "../src/lib/searchidx";
 import {
   deriveId,
   imageBlob,
@@ -56,11 +60,6 @@ import {
   type VaultIndexImage,
   type VaultIndexNote,
 } from "../src/lib/vaultblob";
-import {
-  parseIndex,
-  serializeIndex,
-  type IndexEntry,
-} from "../src/lib/vectorsearch";
 
 // Image extensions the vault reader knows how to render, → their MIME type. Any
 // other extension (and anything without one) is ignored by the walk.
@@ -314,50 +313,26 @@ async function readPassphrase(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// semantic search index
+// full-text search index (character trigrams)
 // ---------------------------------------------------------------------------
 
 /**
- * Build (incrementally) and upload the sealed vector search index. A note whose bytes
- * are unchanged (its hash matches the prior manifest) reuses its prior vectors —
- * embedding is skipped for it — as long as the prior index shares the embedder's
- * dimension; a corrupt, absent, or differently-dimensioned prior index just triggers a
- * full re-embed. The bytes are sealed under the MK exactly like every other blob.
+ * Build and upload the sealed trigram full-text index. Tokenizing the whole vault is
+ * near-instant (no model), so this rebuilds from scratch every run — no reuse map, no
+ * drift class — and seals the opaque bytes under the MK exactly like every other blob.
+ * The browser decrypts + queries it entirely client-side.
  */
 async function buildAndUploadSearchIndex(
   mk: CryptoKey,
   notes: WalkedNote[],
-  priorH: Map<string, string>,
 ): Promise<void> {
-  const embedder = await getEmbedder();
-
-  const changed = new Set<string>();
-  for (const note of notes)
-    if (priorH.get(note.id) !== note.h) changed.add(note.id);
-
-  // Reuse the prior vectors for unchanged notes — but only when the dimensions match,
-  // otherwise the int8 codes belong to a different embedder and can't be mixed.
-  let reuse: Map<string, IndexEntry[]> | undefined;
-  const priorSearch = await getBytes(VAULT_SEARCH_INDEX_PATH);
-  if (priorSearch) {
-    try {
-      const { bytes } = await open(mk, priorSearch);
-      const parsed = parseIndex(bytes);
-      if (parsed.dim === embedder.dim) reuse = groupByNote(parsed);
-    } catch {
-      // corrupt/foreign search index → full rebuild
-    }
-  }
-
-  const buildNotes = notes.map((note) => ({
+  const docs: IndexDoc[] = notes.map((note) => ({
     id: note.id,
+    title: note.name.replace(/\.md$/i, ""),
     text: new TextDecoder().decode(note.bytes),
   }));
-  const searchIndex = await buildSearchIndex(buildNotes, embedder, {
-    reuse,
-    changed,
-  });
-  const searchBytes = serializeIndex(searchIndex);
+  const index = buildIndex(docs);
+  const searchBytes = serializeIndex(index);
   const envelope = await seal(
     mk,
     {
@@ -367,8 +342,9 @@ async function buildAndUploadSearchIndex(
     },
     searchBytes,
   );
+  const stats = indexStats(index);
   console.error(
-    `· writing the search index (${searchIndex.entries.length} chunks, ${embedder.kind})…`,
+    `· writing the search index (${stats.docs} notes, ${stats.tokens} trigrams, ${searchBytes.length} bytes)…`,
   );
   await putEnvelope(VAULT_SEARCH_INDEX_PATH, envelope);
 }
@@ -472,11 +448,9 @@ async function main(): Promise<void> {
   console.error("· writing the index…");
   await putEnvelope(VAULT_INDEX_PATH, indexEnvelope);
 
-  // 5b. build + seal the semantic search index (ADR: private semantic search). Same
-  // embedder the browser uses, so the index and a future query share a vector space.
-  // Incremental: reuse a prior entry for any note whose bytes didn't change, and only
-  // when the prior index shares the current embedder's dimension.
-  await buildAndUploadSearchIndex(mk, notes, priorH);
+  // 5b. build + seal the trigram full-text index. Rebuilt from scratch each run
+  // (tokenizing the vault is cheap) and decrypted + queried entirely in the browser.
+  await buildAndUploadSearchIndex(mk, notes);
 
   console.error("· pruning stale blobs…");
 
