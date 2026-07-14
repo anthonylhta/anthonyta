@@ -6,8 +6,27 @@ export const metadata = {
   title: "notes",
 };
 
-export default function NotesPage() {
+const PER_PAGE = 10;
+
+/** Page 1 is canonical at /notes — only deeper pages carry the query. */
+function pageHref(page: number) {
+  return page <= 1 ? "/notes" : `/notes?page=${page}`;
+}
+
+export default async function NotesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const { page } = await searchParams;
   const sorted = [...notes].sort((a, b) => b.updated.localeCompare(a.updated));
+
+  const pages = Math.max(1, Math.ceil(sorted.length / PER_PAGE));
+  const requested = Number.parseInt(typeof page === "string" ? page : "", 10);
+  const cur = Number.isNaN(requested)
+    ? 1
+    : Math.min(Math.max(1, requested), pages);
+  const slice = sorted.slice((cur - 1) * PER_PAGE, cur * PER_PAGE);
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -36,7 +55,7 @@ export default function NotesPage() {
 
         {/* list */}
         <div className="divide-y divide-hairline">
-          {sorted.map((n) => (
+          {slice.map((n) => (
             <Link
               key={n.slug}
               href={`/notes/${n.slug}`}
@@ -54,6 +73,49 @@ export default function NotesPage() {
             </Link>
           ))}
         </div>
+
+        {/* pager */}
+        {pages > 1 && (
+          <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-[11px] text-muted">
+            {cur > 1 ? (
+              <Link
+                href={pageHref(cur - 1)}
+                className="transition-colors hover:text-amber"
+              >
+                ← prev
+              </Link>
+            ) : (
+              <span className="opacity-30">← prev</span>
+            )}
+            <span className="flex items-center gap-3 tabular-nums">
+              {Array.from({ length: pages }, (_, i) => i + 1).map((p) =>
+                p === cur ? (
+                  <span key={p} className="text-amber">
+                    {p}
+                  </span>
+                ) : (
+                  <Link
+                    key={p}
+                    href={pageHref(p)}
+                    className="transition-colors hover:text-amber"
+                  >
+                    {p}
+                  </Link>
+                ),
+              )}
+            </span>
+            {cur < pages ? (
+              <Link
+                href={pageHref(cur + 1)}
+                className="transition-colors hover:text-amber"
+              >
+                next →
+              </Link>
+            ) : (
+              <span className="opacity-30">next →</span>
+            )}
+          </div>
+        )}
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">

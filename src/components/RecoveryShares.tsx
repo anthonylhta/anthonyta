@@ -25,6 +25,7 @@ import {
   ITERATIONS,
   open,
   randomSalt,
+  sealCanary,
   wrapMk,
   type Keystore,
 } from "@/lib/crypto";
@@ -411,7 +412,14 @@ export function RecoverWithShares() {
       const salt = randomSalt();
       const kek = await deriveKek(newPass, salt);
       const { wrapped, iv } = await wrapMk(mk, kek);
-      const ks = buildKeystore(salt, ITERATIONS, wrapped, iv);
+      // Refresh the canary under the recovered MK so recovery lands a v2 keystore.
+      const ks = buildKeystore(
+        salt,
+        ITERATIONS,
+        wrapped,
+        iv,
+        await sealCanary(mk),
+      );
       // The one legitimate overwrite: recovery means the old passphrase is gone.
       const res = await fetch("/api/files/keystore", {
         method: "PUT",

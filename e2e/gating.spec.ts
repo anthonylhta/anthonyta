@@ -509,7 +509,7 @@ test.describe("strict CSP (report-only)", () => {
       "camera=(), microphone=(), geolocation=(), browsing-topics=()",
     );
     expect(h["strict-transport-security"]).toBe(
-      "max-age=63072000; includeSubDomains",
+      "max-age=63072000; includeSubDomains; preload",
     );
     expect(h["x-powered-by"]).toBeUndefined();
   });

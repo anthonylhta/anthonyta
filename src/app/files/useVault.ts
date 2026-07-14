@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildKeystore,
+  checkCanary,
   deriveKek,
   fromB64url,
   generateMk,
@@ -26,6 +27,7 @@ import {
   open,
   randomSalt,
   seal,
+  sealCanary,
   unwrapMk,
   wrapMk,
   type EnvelopeMeta,
@@ -186,6 +188,24 @@ async function putKeystore(
 }
 
 /**
+ * Opportunistic v1 → v2 heal: a keystore with no canary gets one sealed under the
+ * just-unlocked MK and written back (the one legitimate overwrite — the same MK,
+ * one added field). Best-effort: a v2 keystore or any write failure returns the
+ * input untouched and it simply heals on the next unlock. Returns whatever
+ * keystore is now at rest.
+ */
+async function healCanary(mk: CryptoKey, ks: Keystore): Promise<Keystore> {
+  if (ks.v === 2) return ks;
+  try {
+    const next: Keystore = { ...ks, v: 2, canary_b64: await sealCanary(mk) };
+    if ((await putKeystore(next, true)) === "ok") return next;
+  } catch {
+    // best-effort — leave the v1 keystore in place, heal later
+  }
+  return ks;
+}
+
+/**
  * Fetch the PRF wrap set for a passkey unlock. A healthy 404 (no device enrolled)
  * and any hiccup both collapse to `null` — passkey unlock is convenience layered
  * on the passphrase, so "no usable wrap" always just falls back to the box; there
@@ -259,15 +279,23 @@ export function useVault(offline: boolean): Vault {
             if (!cancelled) setStatus("locked");
             return;
           }
+          // Canary: prove the cached key still belongs to THIS keystore before
+          // trusting it. A vault reset on another device mints a fresh MK the
+          // stale cache can't open — a KNOWN-stale key, so drop it and land
+          // locked (never `error`: that's for a flaky fetch, and misreading a
+          // stale key as one would leave a broken cache in place). A v1 keystore
+          // has no canary ("absent") → skip and behave exactly as before.
+          if ((await checkCanary(cached, ks)) === false) {
+            await clearCachedKey();
+            if (!cancelled) setStatus("locked");
+            return;
+          }
+          if (cancelled) return;
           // Fresh, or an absent stamp (a pre-feature device with a key but no
           // stamp): roll the window forward now — locking every old device out
           // on deploy would be a surprise. This boot touch IS the rolling signal.
           await touchActivityStamp();
           if (cancelled) return;
-          // Known limitation: nothing binds the cached key to THIS keystore. If
-          // the vault was reset on another device, decrypts fail row-by-row
-          // until a lock/unlock refreshes the key — the keystore carries no key
-          // id to compare against.
           mkRef.current = cached;
           setStatus("unlocked");
         } else {
@@ -292,7 +320,14 @@ export function useVault(offline: boolean): Vault {
       const kek = await deriveKek(passphrase, salt);
       const mk0 = await generateMk();
       const { wrapped, iv } = await wrapMk(mk0, kek);
-      const ks = buildKeystore(salt, ITERATIONS, wrapped, iv);
+      // Seal the canary under the fresh MK so the very first keystore is v2.
+      const ks = buildKeystore(
+        salt,
+        ITERATIONS,
+        wrapped,
+        iv,
+        await sealCanary(mk0),
+      );
       // No-overwrite write: if a vault already exists (this state was reached
       // by mistake), the server refuses rather than orphaning its data.
       const wrote = await putKeystore(ks, false);
@@ -337,6 +372,8 @@ export function useVault(offline: boolean): Vault {
       mkRef.current = mk;
       await setCachedKey(mk);
       await touchActivityStamp();
+      // Heal a legacy v1 keystore now that the MK is in hand.
+      ksRef.current = await healCanary(mk, ks);
       setStatus("unlocked");
     } catch {
       setError("wrong passphrase");
@@ -346,7 +383,8 @@ export function useVault(offline: boolean): Vault {
   }, []);
 
   const unlockWithPasskey = useCallback(async () => {
-    if (!ksRef.current) return;
+    const ks = ksRef.current;
+    if (!ks) return;
     setWorking(true);
     setError(null);
     try {
@@ -370,6 +408,8 @@ export function useVault(offline: boolean): Vault {
       mkRef.current = mk;
       await setCachedKey(mk);
       await touchActivityStamp();
+      // Same MK as the keystore wraps — heal a legacy v1 keystore here too.
+      ksRef.current = await healCanary(mk, ks);
       setStatus("unlocked");
     } catch {
       setError("passkey unlock unavailable — use your passphrase");
@@ -408,7 +448,15 @@ export function useVault(offline: boolean): Vault {
         const salt = randomSalt();
         const newKek = await deriveKek(newPass, salt);
         const { wrapped, iv } = await wrapMk(tempMk, newKek);
-        const next = buildKeystore(salt, ITERATIONS, wrapped, iv);
+        // Refresh the canary under the SAME MK — it stays valid on every other
+        // device (they still hold this MK), and a v1 keystore heals to v2 here.
+        const next = buildKeystore(
+          salt,
+          ITERATIONS,
+          wrapped,
+          iv,
+          await sealCanary(tempMk),
+        );
         // The one legitimate overwrite: same MK, new wrapping.
         if ((await putKeystore(next, true)) !== "ok")
           throw new Error("keystore write failed");

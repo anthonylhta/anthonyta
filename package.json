@@ -19,7 +19,7 @@
     "@simplewebauthn/browser": "13.3.0",
     "@simplewebauthn/server": "13.3.2",
     "aws4fetch": "^1.0.20",
-    "next": "16.2.9",
+    "next": "16.2.10",
     "next-auth": "^5.0.0-beta.31",
     "postgres": "^3.4.9",
     "react": "19.2.4",
@@ -34,7 +34,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "16.2.10",
     "prettier": "^3.8.4",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
@@ -42,6 +42,9 @@
     "vitest": "^4.1.9"
   },
   "overrides": {
+    "next": {
+      "postcss": "^8.5.19"
+    },
     "next-auth": {
       "@simplewebauthn/browser": "$@simplewebauthn/browser",
       "@simplewebauthn/server": "$@simplewebauthn/server"
