@@ -13,8 +13,7 @@ import type { NextConfig } from "next";
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
-    value:
-      "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    value: "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -24,8 +23,13 @@ const securityHeaders = [
     value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
   },
   {
+    // `preload` opts anthonyta.dev into browser HSTS preload lists: serving the
+    // token is itself consent (third parties can submit it), and removal from
+    // the list takes months — a deliberate one-way door. The hstspreload.org
+    // submission stays a manual owner step. Requires includeSubDomains, so
+    // every *.anthonyta.dev must stay HTTPS-only (all subdomains are on Vercel).
     key: "Strict-Transport-Security",
-    value: "max-age=63072000; includeSubDomains",
+    value: "max-age=63072000; includeSubDomains; preload",
   },
 ];
 
