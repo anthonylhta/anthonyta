@@ -12,6 +12,7 @@ import {
 } from "@/lib/crypto";
 import {
   age,
+  fileKind,
   formatSize,
   INBOX_PREFIX,
   noteName,
@@ -20,6 +21,7 @@ import {
   type FileKind,
   type InboxFile,
 } from "@/lib/files";
+import { inspect, sniff, strip, type MetaFindings } from "@/lib/exif";
 import { SHARE_TTL_DAYS } from "@/lib/shares";
 import { RecoverWithShares } from "@/components/RecoveryShares";
 import { usePrfCeremonySupported } from "./prfCeremony";
@@ -49,6 +51,58 @@ async function toEnvelopeInput(
   // The real name and type ride INSIDE the ciphertext — the server only ever
   // sees `e-<random>.bin`.
   return { meta: { n: file.name, t: file.type || "", s: bytes.length }, bytes };
+}
+
+/** True when this envelope looks like an image — by MIME first, extension as backup. */
+function isImageMeta(meta: EnvelopeMeta): boolean {
+  return meta.t.startsWith("image/") || fileKind(meta.n) === "image";
+}
+
+/** Any identifying metadata at all? */
+function hasMeta(f: MetaFindings): boolean {
+  return f.gps || f.make || f.model || f.dates || f.comments;
+}
+
+/** A lowercase, human summary of what was found: "gps + device + timestamps". */
+function summarize(f: MetaFindings): string {
+  const bits: string[] = [];
+  if (f.gps) bits.push("gps");
+  if (f.make || f.model) bits.push("device");
+  if (f.dates) bits.push("timestamps");
+  if (f.comments) bits.push("comments");
+  return bits.join(" + ");
+}
+
+/**
+ * Strip identifying metadata from an image before it's sealed, and report honestly what
+ * happened. Non-images never reach here. An unsupported image format (HEIC/AVIF) passes
+ * through with its metadata intact — said so plainly rather than pretending to have cleaned it.
+ */
+function stripForUpload(
+  meta: EnvelopeMeta,
+  bytes: Uint8Array,
+): { meta: EnvelopeMeta; bytes: Uint8Array; notice: string } {
+  if (sniff(bytes) === "unknown")
+    return {
+      meta,
+      bytes,
+      notice: `${meta.n} · unsupported image · metadata left intact`,
+    };
+  const found = inspect(bytes);
+  if (!hasMeta(found))
+    return { meta, bytes, notice: `${meta.n} · no identifying metadata` };
+  const cleaned = strip(bytes);
+  if (cleaned.length === bytes.length)
+    return {
+      meta,
+      bytes,
+      notice: `${meta.n} · metadata present · could not strip`,
+    };
+  return {
+    meta: { ...meta, s: cleaned.length },
+    bytes: cleaned,
+    notice: `${meta.n} · metadata removed · ${summarize(found)} present`,
+  };
 }
 
 /** Drain the SW share stash (populated by sw.js on a share-sheet POST). */
@@ -137,11 +191,13 @@ export function FilesInbox({
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState("");
+  const [stripMeta, setStripMeta] = useState(true);
   const [progress, setProgress] = useState<{
     name: string;
     pct: number;
   } | null>(null);
   const [failed, setFailed] = useState<string[]>([]);
+  const [notices, setNotices] = useState<string[]>([]);
   const consumedShare = useRef(false);
 
   const unlocked = vault.status === "unlocked";
@@ -173,11 +229,19 @@ export function FilesInbox({
       const chosen = Array.from(list);
       setBusy(true);
       setFailed([]);
+      setNotices([]);
       const errored: string[] = [];
+      const noted: string[] = [];
       for (const file of chosen) {
         setProgress({ name: file.name, pct: 0 });
         try {
-          const { meta, bytes } = await toEnvelopeInput(file);
+          let { meta, bytes } = await toEnvelopeInput(file);
+          if (stripMeta && isImageMeta(meta)) {
+            const r = stripForUpload(meta, bytes);
+            meta = r.meta;
+            bytes = r.bytes;
+            noted.push(r.notice);
+          }
           if (!(await sealAndUpload(meta, bytes, file.name)))
             errored.push(file.name);
         } catch {
@@ -186,11 +250,12 @@ export function FilesInbox({
       }
       setProgress(null);
       setFailed(errored);
+      setNotices(noted);
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
       router.refresh();
     },
-    [busy, unlocked, sealAndUpload, router],
+    [busy, unlocked, stripMeta, sealAndUpload, router],
   );
 
   async function sendNote() {
@@ -297,6 +362,22 @@ export function FilesInbox({
               before upload
             </span>
           </label>
+
+          <button
+            type="button"
+            onClick={() => setStripMeta((v) => !v)}
+            disabled={busy}
+            className="mt-2 font-mono text-xs text-muted transition-colors hover:text-amber disabled:opacity-50"
+          >
+            <span className="text-amber">{stripMeta ? "[x]" : "[ ]"}</span>{" "}
+            strip photo metadata before upload
+          </button>
+
+          {notices.map((n, i) => (
+            <p key={`${i}-${n}`} className="mt-1 font-mono text-xs text-muted">
+              {n}
+            </p>
+          ))}
 
           {progress && (
             <p className="mt-2 font-mono text-xs text-muted">
@@ -706,6 +787,13 @@ function EncryptedRow({
   const [copyLabel, setCopyLabel] = useState("copy");
   const [shareLabel, setShareLabel] = useState("share");
   const [sharing, setSharing] = useState(false);
+  // A pre-strip image about to be shared: the decrypted bytes + what they carry,
+  // held only until the owner picks strip-or-keep, then dropped.
+  const [shareChoice, setShareChoice] = useState<{
+    meta: EnvelopeMeta;
+    bytes: Uint8Array;
+    found: MetaFindings;
+  } | null>(null);
   const urlRef = useRef<string | null>(null);
   const inflight = useRef(false);
 
@@ -789,19 +877,13 @@ function EncryptedRow({
     }
   }
 
-  // Share = re-seal this item under a FRESH one-time key, upload the ciphertext to
-  // `share/`, and hand back a link whose fragment carries that key. The server only
-  // ever holds the re-encrypted bytes; the key travels in the URL, never to us.
-  async function share() {
-    if (sharing) return;
+  // Re-seal these bytes under a FRESH one-time key, upload the ciphertext to `share/`,
+  // and hand back a link whose fragment carries that key. The server only ever holds the
+  // re-encrypted bytes; the key travels in the URL, never to us.
+  async function doShare(meta: EnvelopeMeta, bytes: Uint8Array) {
+    setShareChoice(null);
     setSharing(true);
     try {
-      const res = await fetch(
-        `/api/files/raw?p=${encodeURIComponent(f.pathname)}`,
-      );
-      if (!res.ok) throw new Error("fetch failed");
-      const envelope = new Uint8Array(await res.arrayBuffer());
-      const { meta, bytes } = await vault.openItem(envelope);
       const key = await generateShareKey();
       const sealed = await seal(key, meta, bytes);
       const rawKey = await exportKeyRaw(key);
@@ -817,6 +899,42 @@ function EncryptedRow({
       setSharing(false);
       setTimeout(() => setShareLabel("share"), 2000);
     }
+  }
+
+  // Share is the last line of defense: an image sealed before this feature (or with the
+  // strip toggle off) still carries GPS/EXIF inside its envelope, and a share hands the
+  // decrypted bytes to a recipient. So decrypt, re-inspect, and OFFER a strip before
+  // re-sealing — anything clean (or a non-image) shares straight through.
+  async function share() {
+    if (sharing || shareChoice) return;
+    setSharing(true);
+    try {
+      const res = await fetch(
+        `/api/files/raw?p=${encodeURIComponent(f.pathname)}`,
+      );
+      if (!res.ok) throw new Error("fetch failed");
+      const envelope = new Uint8Array(await res.arrayBuffer());
+      const { meta, bytes } = await vault.openItem(envelope);
+      if (sniff(bytes) !== "unknown") {
+        const found = inspect(bytes);
+        if (hasMeta(found)) {
+          setSharing(false);
+          setShareChoice({ meta, bytes, found });
+          return;
+        }
+      }
+      await doShare(meta, bytes);
+    } catch {
+      setShareLabel("error");
+      setSharing(false);
+      setTimeout(() => setShareLabel("share"), 2000);
+    }
+  }
+
+  function stripAndShare() {
+    if (!shareChoice) return;
+    const cleaned = strip(shareChoice.bytes);
+    void doShare({ ...shareChoice.meta, s: cleaned.length }, cleaned);
   }
 
   return (
@@ -892,6 +1010,35 @@ function EncryptedRow({
           <DelButton pathname={f.pathname} onChanged={onChanged} />
         </div>
       </div>
+
+      {shareChoice && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 border-l border-hairline pl-3 font-mono text-xs">
+          <span className="text-muted">
+            this share carries {summarize(shareChoice.found)}
+          </span>
+          <button
+            type="button"
+            onClick={stripAndShare}
+            className="text-amber transition-colors hover:underline"
+          >
+            strip + share
+          </button>
+          <button
+            type="button"
+            onClick={() => doShare(shareChoice.meta, shareChoice.bytes)}
+            className="text-muted transition-colors hover:text-amber"
+          >
+            keep + share
+          </button>
+          <button
+            type="button"
+            onClick={() => setShareChoice(null)}
+            className="text-muted transition-colors hover:text-amber"
+          >
+            cancel
+          </button>
+        </div>
+      )}
     </li>
   );
 }
