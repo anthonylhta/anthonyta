@@ -5,6 +5,7 @@ import {
   boxOpen,
   boxSeal,
   buildKeystore,
+  checkCanary,
   deriveKek,
   exportKeyRaw,
   fromB64url,
@@ -22,6 +23,7 @@ import {
   randomSalt,
   SALT_LEN,
   seal,
+  sealCanary,
   toB64url,
   unwrapMk,
   wrapMk,
@@ -352,6 +354,117 @@ describe("keystore", () => {
     expect(
       isKeystore({ ...good, kdf: { salt_b64: 1, iterations: ITERATIONS } }),
     ).toBe(false);
+  });
+
+  it("isKeystore accepts v1 and v2, gating on the canary field", () => {
+    const v1 = {
+      v: 1,
+      kdf: { salt_b64: "abc", iterations: ITERATIONS },
+      wrapped_mk_b64: "abc",
+      iv_b64: "abc",
+    };
+    expect(isKeystore(v1)).toBe(true);
+    // v2 REQUIRES a sealed canary…
+    expect(isKeystore({ ...v1, v: 2 })).toBe(false);
+    expect(isKeystore({ ...v1, v: 2, canary_b64: "Y2FuYXJ5" })).toBe(true);
+    expect(isKeystore({ ...v1, v: 2, canary_b64: "" })).toBe(false);
+    expect(isKeystore({ ...v1, v: 2, canary_b64: "x".repeat(300) })).toBe(
+      false,
+    );
+    expect(isKeystore({ ...v1, v: 2, canary_b64: 123 })).toBe(false);
+    // …and v1 must NOT carry one — the field is exactly what the version gates.
+    expect(isKeystore({ ...v1, canary_b64: "Y2FuYXJ5" })).toBe(false);
+  });
+});
+
+describe("keystore canary", () => {
+  it("buildKeystore with a canary is a v2 keystore isKeystore accepts", async () => {
+    const { mk, salt, wrapped, iv } = await setupKeys();
+    // ITERATIONS (not FAST) so the stored count clears isKeystore's KDF floor.
+    const ks = buildKeystore(
+      salt,
+      ITERATIONS,
+      wrapped,
+      iv,
+      await sealCanary(mk),
+    );
+    expect(ks.v).toBe(2);
+    expect(typeof ks.canary_b64).toBe("string");
+    expect(isKeystore(ks)).toBe(true);
+    // Survives the JSON round-trip the store puts it through.
+    expect(isKeystore(JSON.parse(JSON.stringify(ks)))).toBe(true);
+  });
+
+  it("the sealing MK opens its canary; any other MK fails", async () => {
+    const a = await setupKeys("pass-a");
+    const b = await setupKeys("pass-b");
+    const ks = buildKeystore(
+      a.salt,
+      FAST,
+      a.wrapped,
+      a.iv,
+      await sealCanary(a.mk),
+    );
+    expect(await checkCanary(a.mk, ks)).toBe(true);
+    expect(await checkCanary(b.mk, ks)).toBe(false);
+  });
+
+  it("a v1 keystore has no canary — checkCanary returns 'absent' and skips", async () => {
+    const { mk, salt, wrapped, iv } = await setupKeys();
+    const v1 = buildKeystore(salt, FAST, wrapped, iv); // no canary arg → v1
+    expect(v1.v).toBe(1);
+    expect(await checkCanary(mk, v1)).toBe("absent");
+  });
+
+  it("survives a passphrase change: the canary is under the MK, not the KEK", async () => {
+    const { mk, kek: oldKek, wrapped, iv, salt } = await setupKeys("old-pass");
+    const canary = await sealCanary(mk);
+    const ksOld = buildKeystore(salt, FAST, wrapped, iv, canary);
+    expect(await checkCanary(mk, ksOld)).toBe(true);
+
+    // Passphrase change re-wraps the SAME MK under a new KEK; the canary rides
+    // along untouched (or re-sealed under the same key — either stays valid).
+    const tempMk = await unwrapMk(wrapped, iv, oldKek, true);
+    const newKek = await deriveKek("new-pass", salt, FAST);
+    const { wrapped: w2, iv: iv2 } = await wrapMk(tempMk, newKek);
+    const ksNew = buildKeystore(salt, FAST, w2, iv2, canary);
+
+    // The MK unwrapped from the NEW keystore still opens the canary.
+    const mkAgain = await unwrapMk(w2, iv2, newKek);
+    expect(await checkCanary(mkAgain, ksNew)).toBe(true);
+    expect(await checkCanary(mkAgain, ksOld)).toBe(true); // same MK, either store
+  });
+
+  it("a reset (fresh MK) invalidates the canary — the stale-key case", async () => {
+    const a = await setupKeys("pass");
+    const ks = buildKeystore(
+      a.salt,
+      FAST,
+      a.wrapped,
+      a.iv,
+      await sealCanary(a.mk),
+    );
+    expect(await checkCanary(a.mk, ks)).toBe(true);
+    // Another device reset the vault: a brand-new random MK under the same
+    // passphrase. The old cached key can no longer open the new keystore's canary.
+    const b = await setupKeys("pass");
+    expect(await checkCanary(b.mk, ks)).toBe(false);
+  });
+
+  it("a tampered or truncated canary reads as false, never throws", async () => {
+    const { mk, salt, wrapped, iv } = await setupKeys();
+    const bytes = fromB64url(await sealCanary(mk));
+    bytes[bytes.length - 1] ^= 0x01;
+    const tampered = buildKeystore(salt, FAST, wrapped, iv, toB64url(bytes));
+    expect(await checkCanary(mk, tampered)).toBe(false);
+    const truncated = buildKeystore(
+      salt,
+      FAST,
+      wrapped,
+      iv,
+      toB64url(bytes.subarray(0, 8)),
+    );
+    expect(await checkCanary(mk, truncated)).toBe(false);
   });
 });
 
