@@ -71,12 +71,21 @@ export interface EnvelopeMeta {
  * ever leaves the device, stored at `meta/keystore`. Iterations live here (not in
  * code) so they can be raised later without breaking old keystores; `v` gates
  * format migrations.
+ *
+ * v2 adds `canary_b64`: the fixed canary plaintext sealed under THIS keystore's
+ * master key (see `sealCanary`). A cached key that can't open it belongs to a
+ * different keystore — a vault reset on another device — so the boot path can drop
+ * it instead of "unlocking" into row-by-row decrypt failures. v1 keystores carry
+ * no canary and heal to v2 the next time the client holds the MK (unlock or
+ * passphrase change); nothing needs migrating up front.
  */
 export interface Keystore {
-  v: 1;
+  v: 1 | 2;
   kdf: { salt_b64: string; iterations: number };
   wrapped_mk_b64: string;
   iv_b64: string;
+  /** v2 only: the canary envelope (`sealCanary`), base64url. Absent on v1. */
+  canary_b64?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,27 +205,40 @@ export function unwrapMk(
 // keystore (the stored JSON around the wrapped MK)
 // ---------------------------------------------------------------------------
 
+/**
+ * Assemble the stored keystore. Pass `canary_b64` (from `sealCanary`) to build a
+ * v2 keystore; omit it for a bare v1. The canary is what the version gates — its
+ * presence is the only difference between the two shapes.
+ */
 export function buildKeystore(
   salt: Uint8Array,
   iterations: number,
   wrapped: Uint8Array,
   iv: Uint8Array,
+  canary_b64?: string,
 ): Keystore {
-  return {
-    v: 1,
+  const base = {
     kdf: { salt_b64: toB64url(salt), iterations },
     wrapped_mk_b64: toB64url(wrapped),
     iv_b64: toB64url(iv),
   };
+  return canary_b64 === undefined
+    ? { v: 1, ...base }
+    : { v: 2, ...base, canary_b64 };
 }
 
-/** Shape check for anything claiming to be a keystore (server PUT gate + client parse). */
+/**
+ * Shape check for anything claiming to be a keystore (server PUT gate + client
+ * parse). Accepts both versions: v2 MUST carry a `canary_b64` string, v1 MUST NOT
+ * — the field is exactly what distinguishes the two, so a v2 without it (or a v1
+ * with one) is malformed.
+ */
 export function isKeystore(x: unknown): x is Keystore {
   if (typeof x !== "object" || x === null) return false;
   const k = x as Record<string, unknown>;
   const kdf = k.kdf as Record<string, unknown> | undefined;
-  return (
-    k.v === 1 &&
+  const baseOk =
+    (k.v === 1 || k.v === 2) &&
     typeof kdf === "object" &&
     kdf !== null &&
     typeof kdf.salt_b64 === "string" &&
@@ -229,8 +251,78 @@ export function isKeystore(x: unknown): x is Keystore {
     k.wrapped_mk_b64.length <= 128 &&
     typeof k.iv_b64 === "string" &&
     k.iv_b64.length > 0 &&
-    k.iv_b64.length <= 32
+    k.iv_b64.length <= 32;
+  if (!baseOk) return false;
+  return k.v === 2
+    ? typeof k.canary_b64 === "string" &&
+        k.canary_b64.length > 0 &&
+        k.canary_b64.length <= 256
+    : k.canary_b64 === undefined;
+}
+
+// ---------------------------------------------------------------------------
+// keystore canary — the cached key proves itself before it's trusted
+// ---------------------------------------------------------------------------
+//
+// The IndexedDB-cached master key isn't bound to the keystore it came from: reset
+// the vault on another device and the stale cache still "unlocks", then every
+// decrypt fails one row at a time. The canary closes that gap — a tiny fixed
+// plaintext sealed under the MK and carried in v2's `canary_b64`. Opening it at
+// boot succeeds ONLY under the exact key that sealed it (the GCM tag is the
+// comparison), so a wrong cached key fails loudly instead of silently.
+//
+// It's sealed under the MASTER KEY, not the KEK — so a passphrase change (which
+// re-wraps the same MK) leaves it valid on every other device, while a genuine
+// reset (a fresh MK) invalidates it everywhere at once. And because the MK is
+// non-extractable, `open(canary)` is the only comparison available: a hash of the
+// key can't be stored, but a non-extractable key can still *do*, and doing proves.
+
+/** The AEV2 context the canary is sealed under — a fixed pseudo-path that
+ *  domain-separates it from every real blob, so a canary ciphertext can never be
+ *  confused with (or substituted from) another envelope under the same MK. */
+const CANARY_CONTEXT = "meta/keystore#canary";
+
+/** The canary plaintext: a fixed, domain-separated, NON-secret constant. Its
+ *  contents are irrelevant — only that it opens under the right MK and fails
+ *  under any other. */
+const CANARY_PLAINTEXT = new TextEncoder().encode(
+  "anthonyta:keystore-canary:1",
+);
+const CANARY_META: EnvelopeMeta = {
+  n: "canary",
+  t: "",
+  s: CANARY_PLAINTEXT.length,
+};
+
+/**
+ * Seal the fixed canary under `mk`, returning the base64url envelope for a v2
+ * keystore's `canary_b64`. Callers hold the MK anyway (setup / passphrase change /
+ * a fresh unlock), so this is a cheap add on a path that's already unlocked.
+ */
+export async function sealCanary(mk: CryptoKey): Promise<string> {
+  return toB64url(
+    await seal(mk, CANARY_META, CANARY_PLAINTEXT, CANARY_CONTEXT),
   );
+}
+
+/**
+ * Does `mk` open `ks`'s canary? `true` when it does (the cached key belongs to
+ * this keystore), `false` when it doesn't (a stale key from a reset elsewhere —
+ * drop it), and `"absent"` for a v1 keystore that carries no canary (skip the
+ * check and behave as before). Any malformation or tamper reads as `false`, the
+ * same fail-closed verdict as a wrong key.
+ */
+export async function checkCanary(
+  mk: CryptoKey,
+  ks: Keystore,
+): Promise<boolean | "absent"> {
+  if (ks.v !== 2 || ks.canary_b64 === undefined) return "absent";
+  try {
+    await open(mk, fromB64url(ks.canary_b64), CANARY_CONTEXT);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

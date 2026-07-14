@@ -46,7 +46,9 @@ export async function PUT(request: Request) {
     if (!isKeystore(parsed)) return nf();
 
     // Rebuild from the validated fields so what's at rest is exactly the
-    // keystore shape, never a superset smuggled past the type guard.
+    // keystore shape, never a superset smuggled past the type guard. A v2
+    // keystore carries the sealed canary (isKeystore guaranteed it's present);
+    // v1 has none, so the field is only included when the version calls for it.
     const overwrite = request.headers.get("x-keystore-overwrite") === "1";
     const result = await putKeystore(
       JSON.stringify({
@@ -57,6 +59,7 @@ export async function PUT(request: Request) {
         },
         wrapped_mk_b64: parsed.wrapped_mk_b64,
         iv_b64: parsed.iv_b64,
+        ...(parsed.v === 2 ? { canary_b64: parsed.canary_b64 } : {}),
       }),
       overwrite,
     );
