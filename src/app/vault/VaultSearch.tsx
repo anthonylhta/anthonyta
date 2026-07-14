@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
-import { getEmbedder } from "@/lib/embedder";
-import { noteIdOf } from "@/lib/searchindex";
-import { parseIndex, search, type SearchIndex } from "@/lib/vectorsearch";
+import { Fragment, useMemo, useRef, useState } from "react";
+import {
+  deserializeIndex,
+  highlightSegments,
+  query,
+  type TrigramIndex,
+} from "@/lib/searchidx";
 import { VAULT_SEARCH_INDEX_PATH, type VaultIndexNote } from "@/lib/vaultblob";
 
 const input =
   "w-full border border-hairline bg-transparent px-3 py-1.5 text-sm text-fg placeholder:text-muted/60 focus:border-amber focus:outline-none";
 
-/** How many passages a query returns. */
-const K = 8;
+/** How many notes a query returns. */
+const K = 12;
 
 type OpenItem = (envelope: Uint8Array) => Promise<{ bytes: Uint8Array }>;
 
@@ -21,10 +24,9 @@ type State =
   | { kind: "idle" }
   | { kind: "searching" }
   | { kind: "noindex" } // a clean 404 — vault-sync hasn't built the index yet
-  | { kind: "unreachable" } // network/store hiccup, or the model wouldn't load
+  | { kind: "unreachable" } // network/store hiccup
   | { kind: "tamper" } // the index fetched but wouldn't decrypt/parse
-  | { kind: "stale" } // the index dim ≠ the model dim — re-run vault-sync
-  | { kind: "results"; results: Hit[] };
+  | { kind: "results"; q: string; results: Hit[] };
 
 interface Hit {
   noteId: string;
@@ -33,16 +35,13 @@ interface Hit {
 }
 
 /**
- * Semantic search over the vault as a client island (unlock-gated by its parent). On
+ * Full-text search over the vault as a client island (unlock-gated by its parent). On
  * the first query it fetches the sealed `vault/search-index.bin` through the existing
- * owner-gated raw proxy, decrypts + parses it here in the browser, warms the embedding
- * model, embeds the query, and cosine-matches entirely client-side — the server sees
- * neither the vectors nor the query, only the ciphertext it already stores. The parsed
- * index and the warm embedder are cached for the session (a ref + the embedder's own
- * memo), so repeat searches skip the fetch and the model load.
- *
- * The active embedder is the LEXICAL placeholder (see lib/embedder) — the pipeline is
- * live, but matching is by shared vocabulary until the semantic model is wired.
+ * owner-gated raw proxy, decrypts + parses it here in the browser, and matches entirely
+ * client-side — the server sees neither the index nor the query, only the ciphertext it
+ * already stores. The parsed trigram index is cached in a ref for the session, so repeat
+ * searches skip the fetch. Matching is exact substring (character trigrams), bilingual
+ * EN/日本語 by construction; a query shorter than 3 characters prefix-scans instead.
  */
 export function VaultSearch({
   openItem,
@@ -53,7 +52,7 @@ export function VaultSearch({
 }) {
   const [q, setQ] = useState("");
   const [state, setState] = useState<State>({ kind: "idle" });
-  const indexRef = useRef<SearchIndex | null>(null);
+  const indexRef = useRef<TrigramIndex | null>(null);
   const runRef = useRef(0); // drops a stale async resolve when queries overlap
 
   const byId = useMemo(() => {
@@ -65,7 +64,7 @@ export function VaultSearch({
   // Fetch + decrypt + parse the sealed index once, then serve it from the ref. Returns
   // a state string on any miss so the caller degrades cleanly.
   async function loadIndex(): Promise<
-    SearchIndex | "noindex" | "unreachable" | "tamper"
+    TrigramIndex | "noindex" | "unreachable" | "tamper"
   > {
     if (indexRef.current) return indexRef.current;
     let res: Response;
@@ -80,7 +79,7 @@ export function VaultSearch({
     if (res.status !== 200) return "unreachable";
     try {
       const { bytes } = await openItem(new Uint8Array(await res.arrayBuffer()));
-      const parsed = parseIndex(bytes);
+      const parsed = deserializeIndex(bytes);
       indexRef.current = parsed;
       return parsed;
     } catch {
@@ -89,8 +88,8 @@ export function VaultSearch({
   }
 
   async function run() {
-    const query = q.trim();
-    if (!query) {
+    const text = q.trim();
+    if (!text) {
       setState({ kind: "idle" });
       return;
     }
@@ -104,41 +103,22 @@ export function VaultSearch({
       return;
     }
 
-    let vec: Float32Array;
-    try {
-      const embedder = await getEmbedder();
-      vec = await embedder.embed(query);
-    } catch {
-      if (mine === runRef.current) setState({ kind: "unreachable" });
-      return;
-    }
-    if (mine !== runRef.current) return;
-    // A dim gap means the index was built by a different embedder — search would throw;
-    // surface it as "re-index" instead.
-    if (vec.length !== index.dim) {
-      setState({ kind: "stale" });
-      return;
-    }
-
-    const results: Hit[] = search(vec, index, K)
-      .filter((r) => r.score > 0)
-      .map((r) => {
-        const noteId = noteIdOf(r.id);
-        const note = byId.get(noteId);
-        return {
-          noteId,
-          title: note?.title ?? noteId,
-          preview: r.preview || note?.preview || "",
-        };
-      });
-    setState({ kind: "results", results });
+    const results: Hit[] = query(index, text, K).map((r) => {
+      const note = byId.get(r.id);
+      return {
+        noteId: r.id,
+        title: note?.title ?? r.id,
+        preview: note?.preview ?? "",
+      };
+    });
+    setState({ kind: "results", q: text, results });
   }
 
   return (
     <div className="border-b border-hairline px-4 py-4">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[10px] uppercase tracking-[0.2em] text-muted">
-          semantic search
+          search
         </span>
         {state.kind === "searching" && (
           <span className="text-[10px] text-muted">searching…</span>
@@ -149,7 +129,7 @@ export function VaultSearch({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && run()}
-        placeholder="search by meaning…"
+        placeholder="search notes…"
         className={input}
       />
 
@@ -163,10 +143,6 @@ const MESSAGE: Record<string, { text: string; down?: boolean }> = {
   unreachable: { text: "search unreachable — reload to retry", down: true },
   tamper: {
     text: "cannot decrypt the search index — lock and unlock",
-    down: true,
-  },
-  stale: {
-    text: "search index is stale — re-run npm run vault-sync",
     down: true,
   },
 };
@@ -195,13 +171,28 @@ function Results({ state }: { state: State }) {
             prefetch
             className="text-[13px] text-fg hover:text-amber"
           >
-            {r.title}
+            <Mark text={r.title} q={state.q} />
           </Link>
           {r.preview && (
-            <p className="mt-0.5 truncate text-xs text-muted/70">{r.preview}</p>
+            <p className="mt-0.5 truncate text-xs text-muted/70">
+              <Mark text={r.preview} q={state.q} />
+            </p>
           )}
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Render `text` with every case-insensitive occurrence of the query in amber. */
+function Mark({ text, q }: { text: string; q: string }) {
+  return (
+    <>
+      {highlightSegments(text, q).map((seg, i) => (
+        <Fragment key={i}>
+          {seg.hit ? <span className="text-amber">{seg.text}</span> : seg.text}
+        </Fragment>
+      ))}
+    </>
   );
 }
