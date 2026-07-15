@@ -1,11 +1,14 @@
 import { unstable_cache } from "next/cache";
 import {
+  isTftHistory,
   sampleTft,
   summarizeTft,
   type RawLeagueEntry,
   type RawMatch,
+  type TftHistoryDay,
   type TftStats,
 } from "@/lib/tft";
+import { getTftHistoryRaw } from "@/lib/tftstore";
 import type { Connector } from "./types";
 
 /**
@@ -99,6 +102,34 @@ export async function getTft(): Promise<TftStats> {
   } catch (err) {
     console.error("[connector:tft] read failed:", err);
     return sampleTft;
+  }
+}
+
+const loadHistory = unstable_cache(
+  async (): Promise<TftHistoryDay[]> => {
+    const raw = await getTftHistoryRaw();
+    if (raw.state !== "ok") return [];
+    try {
+      const parsed: unknown = JSON.parse(raw.value);
+      if (!isTftHistory(parsed)) throw new Error("unrecognized shape");
+      return parsed.days;
+    } catch {
+      console.error("[connector:tft] history parse failed");
+      return [];
+    }
+  },
+  ["tft-history"],
+  { revalidate: 3600, tags: ["tft"] },
+);
+
+/** Self-recorded LP history for the lobby sparkline (ADR 0082). Fully guarded:
+ *  store off / no data / any failure → [] (never throws). */
+export async function getTftHistory(): Promise<TftHistoryDay[]> {
+  try {
+    return await loadHistory();
+  } catch (err) {
+    console.error("[connector:tft] history read failed:", err);
+    return [];
   }
 }
 

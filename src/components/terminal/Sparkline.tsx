@@ -13,12 +13,15 @@ export function Sparkline({
   delta,
   width = 320,
   height = 48,
+  label = "net worth trend",
 }: {
   values: number[];
   /** Sign decides the line color; usually `last - first`. */
   delta: number;
   width?: number;
   height?: number;
+  /** aria-label for the plot; defaults to the net-worth call sites' wording. */
+  label?: string;
 }) {
   const { line, area, points } = sparkGeometry(values, width, height, 3);
   const end = points[points.length - 1];
@@ -29,7 +32,7 @@ export function Sparkline({
       preserveAspectRatio="none"
       className={`h-12 w-full ${tone(delta)}`}
       role="img"
-      aria-label="net worth trend"
+      aria-label={label}
     >
       <path d={area} fill="currentColor" fillOpacity={0.08} />
       <polyline

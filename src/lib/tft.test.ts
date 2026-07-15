@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  cleanRiotName,
+  isTftHistory,
+  ladderValue,
   placementBucket,
   rankLabel,
   sampleTft,
   summarizeTft,
+  upsertHistoryDay,
   type RawLeagueEntry,
   type RawMatch,
+  type TftHistory,
+  type TftHistoryDay,
 } from "./tft";
 
 describe("placementBucket", () => {
@@ -39,6 +45,20 @@ describe("rankLabel", () => {
   });
 });
 
+describe("cleanRiotName", () => {
+  it("strips the TFT<set>_ prefix and spaces camelCase", () => {
+    expect(cleanRiotName("TFT15_MissFortune")).toBe("Miss Fortune");
+    expect(cleanRiotName("TFT9b_Ahri")).toBe("Ahri");
+    expect(cleanRiotName("TFT15_Jinx")).toBe("Jinx");
+  });
+  it("tolerates a bare name (no prefix) and keeps trailing caps intact", () => {
+    expect(cleanRiotName("JarvanIV")).toBe("Jarvan IV");
+  });
+  it("passes an already-clean single word through", () => {
+    expect(cleanRiotName("Bruiser")).toBe("Bruiser");
+  });
+});
+
 describe("summarizeTft", () => {
   const now = Date.parse("2026-07-15T00:00:00Z");
   const ctx = { puuid: "me", riotId: "anthonyta#OCE", now };
@@ -51,6 +71,8 @@ describe("summarizeTft", () => {
     losses: 22,
   };
 
+  type Participant = RawMatch["info"]["participants"][number];
+
   /** A ranked match the owner played in, unless `puuid` is overridden away. */
   function match(opts: {
     datetime: number;
@@ -58,6 +80,8 @@ describe("summarizeTft", () => {
     puuid?: string;
     queue?: number;
     set?: number;
+    traits?: Participant["traits"];
+    units?: Participant["units"];
   }): RawMatch {
     return {
       info: {
@@ -66,7 +90,12 @@ describe("summarizeTft", () => {
         tft_set_number: opts.set ?? 13,
         participants: [
           { puuid: "other-1", placement: 1 },
-          { puuid: opts.puuid ?? "me", placement: opts.placement ?? 4 },
+          {
+            puuid: opts.puuid ?? "me",
+            placement: opts.placement ?? 4,
+            traits: opts.traits,
+            units: opts.units,
+          },
           { puuid: "other-2", placement: 8 },
         ],
       },
@@ -192,6 +221,79 @@ describe("summarizeTft", () => {
     expect(s.top4Rate).toBe(100);
     expect(s.avgPlacement).toBe(3); // (2 + 4) / 2
   });
+
+  it("builds each game's comp — active traits strongest-first, units by rarity then tier, names cleaned", () => {
+    const at = Date.parse("2026-07-14T02:00:00Z");
+    const matches = [
+      match({
+        datetime: at,
+        placement: 2,
+        traits: [
+          { name: "TFT15_Bruiser", num_units: 4, style: 3, tier_current: 3 },
+          {
+            name: "TFT15_StarGuardian",
+            num_units: 3,
+            style: 3,
+            tier_current: 2,
+          },
+          { name: "TFT15_Sniper", num_units: 2, style: 1, tier_current: 1 },
+          { name: "TFT15_Ghost", num_units: 1, style: 0, tier_current: 0 },
+        ],
+        units: [
+          { character_id: "TFT15_Jinx", tier: 3, rarity: 4 },
+          { character_id: "TFT15_MissFortune", tier: 2, rarity: 4 },
+          { character_id: "TFT15_Malzahar", tier: 1, rarity: 1 },
+        ],
+      }),
+    ];
+    const g = summarizeTft(entry, matches, ctx).recent[0];
+    expect(g.placement).toBe(2);
+    expect(g.at).toBe(new Date(at).toISOString());
+    // style desc, then count desc; the style-0 trait is dropped; names cleaned.
+    expect(g.traits).toEqual([
+      { name: "Bruiser", count: 4, style: 3 },
+      { name: "Star Guardian", count: 3, style: 3 },
+      { name: "Sniper", count: 2, style: 1 },
+    ]);
+    // rarity desc, then tier desc; stars = tier; names cleaned.
+    expect(g.units).toEqual([
+      { name: "Jinx", stars: 3, rarity: 4 },
+      { name: "Miss Fortune", stars: 2, rarity: 4 },
+      { name: "Malzahar", stars: 1, rarity: 1 },
+    ]);
+  });
+
+  it("tolerates a game missing its traits/units arrays (→ empty)", () => {
+    const at = Date.parse("2026-07-14T02:00:00Z");
+    const s = summarizeTft(entry, [match({ datetime: at, placement: 3 })], ctx);
+    expect(s.recent).toEqual([
+      { placement: 3, at: new Date(at).toISOString(), traits: [], units: [] },
+    ]);
+  });
+
+  it("aligns recent 1:1 with placements (same length + order)", () => {
+    const t1 = Date.parse("2026-07-10T02:00:00Z");
+    const t2 = Date.parse("2026-07-12T02:00:00Z");
+    const matches = [
+      match({ datetime: t2, placement: 1 }),
+      match({ datetime: t1, placement: 5 }),
+    ];
+    const s = summarizeTft(entry, matches, ctx);
+    expect(s.recent.map((g) => g.placement)).toEqual(s.placements);
+    expect(s.recent.map((g) => g.at)).toEqual(s.matchDates);
+    expect(s.placements).toEqual([5, 1]); // oldest → newest
+  });
+
+  it("excludes non-ranked matches from recent", () => {
+    const at = Date.parse("2026-07-14T02:00:00Z");
+    const matches = [
+      match({ datetime: at, placement: 2, queue: 1100 }),
+      match({ datetime: at - 1000, placement: 1, queue: 1130 }),
+    ];
+    const s = summarizeTft(entry, matches, ctx);
+    expect(s.recent).toHaveLength(1);
+    expect(s.recent[0].placement).toBe(2);
+  });
 });
 
 describe("sampleTft", () => {
@@ -206,5 +308,174 @@ describe("sampleTft", () => {
     expect(sampleTft.isLive).toBe(false);
     expect(sampleTft.matchDates).toEqual([]);
     expect(sampleTft.lastPlayedAt).toBeNull();
+  });
+  it("has no real comps (empty recent → non-interactive strip)", () => {
+    expect(sampleTft.recent).toEqual([]);
+  });
+});
+
+describe("ladderValue", () => {
+  it("shares one base across the three apex tiers", () => {
+    expect(ladderValue("MASTER", null, 0)).toBe(2800);
+    expect(ladderValue("GRANDMASTER", null, 0)).toBe(2800);
+    expect(ladderValue("CHALLENGER", null, 0)).toBe(2800);
+  });
+
+  it("orders divisions IV < I within a tier", () => {
+    expect(ladderValue("GOLD", "IV", 0)).toBeLessThan(
+      ladderValue("GOLD", "I", 0),
+    );
+    expect(ladderValue("GOLD", "IV", 0)).toBe(1200);
+    expect(ladderValue("GOLD", "I", 0)).toBe(1500);
+  });
+
+  it("stays monotonic across a tier crossing (Diamond I 99 < Master 0)", () => {
+    expect(ladderValue("DIAMOND", "I", 99)).toBe(2799);
+    expect(ladderValue("MASTER", null, 0)).toBe(2800);
+    expect(ladderValue("DIAMOND", "I", 99)).toBeLessThan(
+      ladderValue("MASTER", null, 0),
+    );
+    // apex LP keeps climbing past the base
+    expect(ladderValue("MASTER", null, 350)).toBe(3150);
+  });
+
+  it("treats an unknown tier as base 0", () => {
+    expect(ladderValue("WOOD", "IV", 5)).toBe(5);
+    expect(ladderValue("", null, 12)).toBe(12);
+  });
+
+  it("is case-insensitive on tier and division", () => {
+    expect(ladderValue("diamond", "ii", 63)).toBe(
+      ladderValue("DIAMOND", "II", 63),
+    );
+    expect(ladderValue("diamond", "ii", 63)).toBe(2663); // 2400 + 200 + 63
+  });
+});
+
+describe("upsertHistoryDay", () => {
+  const day = (date: string, lp: number): TftHistoryDay => ({
+    date,
+    tier: "MASTER",
+    division: null,
+    lp,
+    games: null,
+  });
+
+  it("inserts a new date keeping days ascending", () => {
+    const h: TftHistory = { v: 1, days: [day("2026-07-10", 10)] };
+    const out = upsertHistoryDay(h, day("2026-07-09", 5));
+    expect(out.days.map((d) => d.date)).toEqual(["2026-07-09", "2026-07-10"]);
+  });
+
+  it("replaces a same-date row rather than duplicating it", () => {
+    const h: TftHistory = {
+      v: 1,
+      days: [day("2026-07-10", 10), day("2026-07-11", 20)],
+    };
+    const out = upsertHistoryDay(h, day("2026-07-11", 99));
+    expect(out.days).toEqual([day("2026-07-10", 10), day("2026-07-11", 99)]);
+  });
+
+  it("does not mutate the input history", () => {
+    const h: TftHistory = { v: 1, days: [day("2026-07-10", 10)] };
+    upsertHistoryDay(h, day("2026-07-11", 20));
+    expect(h.days).toHaveLength(1);
+  });
+
+  it("caps at 400 days, dropping the oldest", () => {
+    // A genuinely 400-long ascending series with unique consecutive dates.
+    const base = Date.UTC(2020, 0, 1);
+    const ymd = (i: number) =>
+      new Date(base + i * 86_400_000).toISOString().slice(0, 10);
+    const long: TftHistoryDay[] = Array.from({ length: 400 }, (_, i) =>
+      day(ymd(i), i),
+    );
+    const h: TftHistory = { v: 1, days: long };
+    const out = upsertHistoryDay(h, day(ymd(400), 999));
+    expect(out.days).toHaveLength(400);
+    expect(out.days[0].date).toBe(long[1].date); // oldest dropped
+    expect(out.days.at(-1)).toEqual(day(ymd(400), 999));
+  });
+});
+
+describe("isTftHistory", () => {
+  const good: TftHistory = {
+    v: 1,
+    days: [
+      { date: "2026-07-10", tier: "DIAMOND", division: "II", lp: 63, games: 8 },
+      {
+        date: "2026-07-11",
+        tier: "MASTER",
+        division: null,
+        lp: 21,
+        games: null,
+      },
+    ],
+  };
+
+  it("accepts a well-formed history", () => {
+    expect(isTftHistory(good)).toBe(true);
+    expect(isTftHistory({ v: 1, days: [] })).toBe(true);
+  });
+
+  it("rejects a wrong version", () => {
+    expect(isTftHistory({ v: 2, days: [] })).toBe(false);
+  });
+
+  it("rejects non-array days", () => {
+    expect(isTftHistory({ v: 1, days: "nope" })).toBe(false);
+  });
+
+  it("rejects a malformed row", () => {
+    expect(
+      isTftHistory({
+        v: 1,
+        days: [
+          { date: "2026-07-10", tier: "", division: null, lp: 5, games: 1 },
+        ],
+      }),
+    ).toBe(false); // empty tier
+    expect(
+      isTftHistory({
+        v: 1,
+        days: [
+          {
+            date: "2026-07-10",
+            tier: "MASTER",
+            division: null,
+            lp: -1,
+            games: 1,
+          },
+        ],
+      }),
+    ).toBe(false); // negative lp
+    expect(
+      isTftHistory({
+        v: 1,
+        days: [
+          {
+            date: "07-10-2026",
+            tier: "MASTER",
+            division: null,
+            lp: 5,
+            games: 1,
+          },
+        ],
+      }),
+    ).toBe(false); // bad date
+  });
+
+  it("rejects out-of-order dates", () => {
+    expect(
+      isTftHistory({
+        v: 1,
+        days: [good.days[1], good.days[0]], // descending
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects null / non-object", () => {
+    expect(isTftHistory(null)).toBe(false);
+    expect(isTftHistory("x")).toBe(false);
   });
 });
