@@ -11,10 +11,16 @@ import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
-import { ACTIVITY_DAYS, dailyDeltas, toLevels } from "@/lib/activity";
+import {
+  ACTIVITY_DAYS,
+  dailyCounts,
+  dailyDeltas,
+  toLevels,
+} from "@/lib/activity";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getRiichiStats } from "@/lib/connectors/riichi";
+import { getTft } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import {
@@ -65,14 +71,16 @@ function weekRange(): string {
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
-  const [briefing, lang, reading, gh, indexRead, riichi] = await Promise.all([
-    getBriefing(),
-    getLanguageStats(),
-    getCurrentlyReading(),
-    getGithub(),
-    getSnapIndex(),
-    getRiichiStats(),
-  ]);
+  const [briefing, lang, reading, gh, indexRead, riichi, tft] =
+    await Promise.all([
+      getBriefing(),
+      getLanguageStats(),
+      getCurrentlyReading(),
+      getGithub(),
+      getSnapIndex(),
+      getRiichiStats(),
+      getTft(),
+    ]);
   const b = briefing ?? sampleBriefing;
 
   // Reading week-over-week + trend now ride the sealed reading index (the cron's
@@ -141,6 +149,11 @@ export async function CommandCenter({ userName }: { userName: string }) {
         </span>
       ),
       levels: toLevels(riichi.activity),
+    },
+    {
+      k: "tft",
+      value: <span className="text-amber">+{tft.gamesThisWeek}</span>,
+      levels: toLevels(dailyCounts(tft.matchDates, ACTIVITY_DAYS, today)),
     },
   ];
 
