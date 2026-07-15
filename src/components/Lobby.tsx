@@ -6,9 +6,11 @@ import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { GithubModule } from "@/components/GithubModule";
+import { TftModule } from "@/components/TftModule";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getHandOfTheDay } from "@/lib/connectors/riichi";
+import { getTft } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { sampleBriefing } from "@/lib/sampleBriefing";
@@ -47,12 +49,13 @@ function NavItem({
 
 /** The public face of the hub — what visitors / recruiters see (ADR 0004). */
 export async function Lobby() {
-  const [reads, hand, briefingData, lang, gh] = await Promise.all([
+  const [reads, hand, briefingData, lang, gh, tft] = await Promise.all([
     getCurrentlyReading(),
     getHandOfTheDay(),
     getBriefing(),
     getLanguageStats(),
     getGithub(),
+    getTft(),
   ]);
   const briefing = briefingData ?? sampleBriefing;
   const top = reads[0];
@@ -171,6 +174,9 @@ export async function Lobby() {
 
         {/* code — github activity */}
         <GithubModule gh={gh} />
+
+        {/* arena — tft ladder */}
+        <TftModule tft={tft} />
 
         {/* briefing */}
         <Link
