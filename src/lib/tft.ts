@@ -136,6 +136,125 @@ export function summarizeTft(
   };
 }
 
+// ── LP history (self-recorded; Riot exposes no LP-history endpoint) ──────────
+
+/** One day's ladder standing, snapshotted nightly by the cron (ADR 0082). `games`
+ *  is that day's league wins+losses; null when the league read didn't report it. */
+export interface TftHistoryDay {
+  date: string;
+  tier: string;
+  division: string | null;
+  lp: number;
+  games: number | null;
+}
+/** The self-recorded LP-history series — days ascending, one per day, trimmed. */
+export interface TftHistory {
+  v: 1;
+  days: TftHistoryDay[];
+}
+
+/** How many days of LP history we retain before trimming the oldest. */
+const TFT_HISTORY_MAX_DAYS = 400;
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+function isObj(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null;
+}
+function isYmd(x: unknown): x is string {
+  return typeof x === "string" && YMD.test(x);
+}
+/** A safe integer ≥ 0. */
+function isNonNegInt(x: unknown): x is number {
+  return typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+}
+
+/** Strict guard for a stored LP history (mirrors isSnapIndex): `v === 1`, a days
+ *  array of at most 500 (the 400 trim cap plus slack), each a dated row with a
+ *  bounded tier, null-or-string division, non-negative LP, null-or-count games, and
+ *  dates strictly ascending. */
+export function isTftHistory(x: unknown): x is TftHistory {
+  if (!isObj(x) || x.v !== 1 || !Array.isArray(x.days)) return false;
+  if (x.days.length > 500) return false;
+  let prev = "";
+  for (const d of x.days) {
+    if (!isObj(d)) return false;
+    if (!isYmd(d.date)) return false;
+    if (typeof d.tier !== "string" || d.tier.length === 0 || d.tier.length > 20)
+      return false;
+    if (
+      !(
+        d.division === null ||
+        (typeof d.division === "string" && d.division.length <= 4)
+      )
+    )
+      return false;
+    if (!isNonNegInt(d.lp)) return false;
+    if (!(d.games === null || isNonNegInt(d.games))) return false;
+    if (!(d.date > prev)) return false; // strictly ascending (prev "" first)
+    prev = d.date;
+  }
+  return true;
+}
+
+/** Insertion index that keeps `days` ascending — the first slot whose date is
+ *  greater than `date`, or the end. */
+function insertAt(days: { date: string }[], date: string): number {
+  const i = days.findIndex((e) => e.date > date);
+  return i < 0 ? days.length : i;
+}
+
+/** A new history with `day` merged in (replace-or-insert, ascending), then trimmed
+ *  to the last TFT_HISTORY_MAX_DAYS. The input history is never mutated. */
+export function upsertHistoryDay(
+  h: TftHistory,
+  day: TftHistoryDay,
+): TftHistory {
+  const kept = h.days.filter((d) => d.date !== day.date);
+  const at = insertAt(kept, day.date);
+  const merged = [...kept.slice(0, at), day, ...kept.slice(at)];
+  return { v: 1, days: merged.slice(-TFT_HISTORY_MAX_DAYS) };
+}
+
+/** Per-tier ladder base — 400 apart so a full IV→I climb (offsets 0–399) never
+ *  crosses into the next tier's band. The three apex tiers share one base: above
+ *  Diamond it's a single continuous LP ladder with no divisions. */
+const TIER_BASE: Record<string, number> = {
+  IRON: 0,
+  BRONZE: 400,
+  SILVER: 800,
+  GOLD: 1200,
+  PLATINUM: 1600,
+  EMERALD: 2000,
+  DIAMOND: 2400,
+  MASTER: 2800,
+  GRANDMASTER: 2800,
+  CHALLENGER: 2800,
+};
+/** Division → its offset within a tier's band (IV lowest, I highest). */
+const DIVISION_OFFSET: Record<string, number> = {
+  IV: 0,
+  III: 100,
+  II: 200,
+  I: 300,
+};
+
+/**
+ * A rank → one monotonic number that stays comparable ACROSS tier crossings, so the
+ * sparkline reads as a single climb (Diamond I 99 LP < Master 0 LP). base + the
+ * division's offset + LP, case-insensitive; an unknown tier falls back to base 0.
+ * Apex tiers carry no division (null → 0 offset) since they're one continuous ladder.
+ */
+export function ladderValue(
+  tier: string,
+  division: string | null,
+  lp: number,
+): number {
+  const base = TIER_BASE[tier.toUpperCase()] ?? 0;
+  const offset = division ? (DIVISION_OFFSET[division.toUpperCase()] ?? 0) : 0;
+  return base + offset + lp;
+}
+
 // ── sample fallback (deterministic, so it doesn't flicker between requests) ───
 
 /** Shown when the Riot key / riot-id isn't set (CI, local) or a read fails. Not real

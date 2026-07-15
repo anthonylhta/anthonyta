@@ -1,5 +1,12 @@
+import { Sparkline } from "@/components/terminal/Sparkline";
 import { relativeTime } from "@/lib/github";
-import { placementBucket, rankLabel, type TftStats } from "@/lib/tft";
+import {
+  ladderValue,
+  placementBucket,
+  rankLabel,
+  type TftHistoryDay,
+  type TftStats,
+} from "@/lib/tft";
 
 /**
  * The lobby's "arena" band — the live TFT ladder signal for recruiters (ADR 0082).
@@ -15,7 +22,15 @@ const CELL: Record<ReturnType<typeof placementBucket>, string> = {
   bottom4: "border-down/50 text-down",
 };
 
-export function TftModule({ tft }: { tft: TftStats }) {
+export function TftModule({
+  tft,
+  history = [],
+}: {
+  tft: TftStats;
+  history?: TftHistoryDay[];
+}) {
+  // One comparable number per day so the line reads as a single climb across tiers.
+  const ladder = history.map((d) => ladderValue(d.tier, d.division, d.lp));
   return (
     <div className="block border-t border-hairline px-4 py-4">
       {/* header */}
@@ -63,6 +78,20 @@ export function TftModule({ tft }: { tft: TftStats }) {
               {p}
             </span>
           ))}
+        </div>
+      )}
+
+      {/* ladder trend — self-recorded LP history (ADR 0082) */}
+      {ladder.length >= 2 && (
+        <div className="mt-4">
+          <Sparkline
+            values={ladder}
+            delta={ladder[ladder.length - 1] - ladder[0]}
+            label="tft ladder trend"
+          />
+          <p className="mt-1 text-xs text-muted">
+            lp · last {history.length} days
+          </p>
         </div>
       )}
 

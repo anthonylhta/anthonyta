@@ -10,7 +10,7 @@ import { TftModule } from "@/components/TftModule";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getHandOfTheDay } from "@/lib/connectors/riichi";
-import { getTft } from "@/lib/connectors/tft";
+import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { sampleBriefing } from "@/lib/sampleBriefing";
@@ -49,14 +49,16 @@ function NavItem({
 
 /** The public face of the hub — what visitors / recruiters see (ADR 0004). */
 export async function Lobby() {
-  const [reads, hand, briefingData, lang, gh, tft] = await Promise.all([
-    getCurrentlyReading(),
-    getHandOfTheDay(),
-    getBriefing(),
-    getLanguageStats(),
-    getGithub(),
-    getTft(),
-  ]);
+  const [reads, hand, briefingData, lang, gh, tft, tftHistory] =
+    await Promise.all([
+      getCurrentlyReading(),
+      getHandOfTheDay(),
+      getBriefing(),
+      getLanguageStats(),
+      getGithub(),
+      getTft(),
+      getTftHistory(),
+    ]);
   const briefing = briefingData ?? sampleBriefing;
   const top = reads[0];
   const handTeaser = hand
@@ -176,7 +178,7 @@ export async function Lobby() {
         <GithubModule gh={gh} />
 
         {/* arena — tft ladder */}
-        <TftModule tft={tft} />
+        <TftModule tft={tft} history={tftHistory} />
 
         {/* briefing */}
         <Link
