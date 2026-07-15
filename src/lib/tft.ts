@@ -15,15 +15,50 @@ export interface RawLeagueEntry {
   losses: number;
 }
 
-/** A match from tft/match/v1 — Riot's payload is snake_case; trimmed to fields used. */
+/** A match from tft/match/v1 — Riot's payload is snake_case; trimmed to fields used.
+ *  A participant carries its board — `traits`/`units` are optional so an older cached
+ *  payload (or a proxy that drops them) still parses; the transform tolerates absence. */
 export interface RawMatch {
   info: {
     game_datetime: number;
     queue_id?: number;
     queueId?: number;
     tft_set_number?: number;
-    participants: { puuid: string; placement: number }[];
+    participants: {
+      puuid: string;
+      placement: number;
+      // style 0 = inactive, 1 bronze, 2 silver, 3 gold, 4+ prismatic.
+      traits?: {
+        name: string;
+        num_units: number;
+        style: number;
+        tier_current: number;
+      }[];
+      // tier = star level 1–3.
+      units?: { character_id: string; tier: number; rarity: number }[];
+    }[];
   };
+}
+
+/** An active trait on a board: display name, unit count, style tier (higher = better). */
+export interface TftGameTrait {
+  name: string;
+  count: number;
+  style: number;
+}
+/** A unit on a board: display name, star level (1–3), rarity (cost tier). */
+export interface TftGameUnit {
+  name: string;
+  stars: number;
+  rarity: number;
+}
+/** One ranked game's comp — the drill-down behind a placement cell (ADR 0082). */
+export interface TftGame {
+  placement: number;
+  /** ISO datetime the game was played. */
+  at: string;
+  traits: TftGameTrait[];
+  units: TftGameUnit[];
 }
 
 export interface TftStats {
@@ -35,6 +70,9 @@ export interface TftStats {
   gamesThisSet: number | null;
   /** ranked-only placements, oldest → newest, ≤20 */
   placements: number[];
+  /** ranked-only games, oldest → newest — same order/length as `placements`, so cell
+   *  i in the strip is `recent[i]`. Empty in sample mode (no real comps). */
+  recent: TftGame[];
   /** 0–100 rounded; null when no ranked games in the window */
   top4Rate: number | null;
   /** 1 decimal; null when none */
@@ -66,6 +104,50 @@ export function placementBucket(
   return "bottom4";
 }
 
+/**
+ * A Riot internal id → a readable display name. Strips the `TFT<set>_` prefix
+ * (`TFT15_MissFortune` → `MissFortune`, `TFT9b_Ahri` → `Ahri`) and any leftover
+ * `Set<N>_` prefix, then spaces each lowercase→uppercase seam (`MissFortune` →
+ * "Miss Fortune"; `JarvanIV` → "Jarvan IV" — the all-caps "IV" stays intact). A bare
+ * name with no prefix passes through the spacing pass unchanged.
+ */
+export function cleanRiotName(id: string): string {
+  return id
+    .replace(/^TFT[^_]*_/, "")
+    .replace(/^Set\d+_/i, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
+/** Self participant's traits → active ones (style > 0), strongest first (style desc,
+ *  then breadth), names cleaned. Missing array → []. */
+function gameTraits(
+  raw: RawMatch["info"]["participants"][number]["traits"],
+): TftGameTrait[] {
+  return (raw ?? [])
+    .filter((t) => t.style > 0)
+    .sort((a, b) => b.style - a.style || b.num_units - a.num_units)
+    .map((t) => ({
+      name: cleanRiotName(t.name),
+      count: t.num_units,
+      style: t.style,
+    }));
+}
+
+/** Self participant's board → units rarest/highest first (rarity desc, then tier),
+ *  names cleaned, stars = tier. Missing array → []. */
+function gameUnits(
+  raw: RawMatch["info"]["participants"][number]["units"],
+): TftGameUnit[] {
+  return (raw ?? [])
+    .slice()
+    .sort((a, b) => b.rarity - a.rarity || b.tier - a.tier)
+    .map((u) => ({
+      name: cleanRiotName(u.character_id),
+      stars: u.tier,
+      rarity: u.rarity,
+    }));
+}
+
 /** A rank → a display label: "Master · 21 LP", "Diamond II · 63 LP", "unranked". */
 export function rankLabel(rank: TftStats["rank"]): string {
   if (!rank) return "unranked";
@@ -89,8 +171,13 @@ export function summarizeTft(
   // Keep only ranked games the owner actually played in. `queueId` hedges a proxy
   // or a Riot rename of the snake_case field. The ids endpoint returns newest-first,
   // so we sort ascending → placements / dates come out oldest → newest.
-  const ranked: { placement: number; datetime: number; set: number | null }[] =
-    [];
+  const ranked: {
+    placement: number;
+    datetime: number;
+    set: number | null;
+    traits: TftGameTrait[];
+    units: TftGameUnit[];
+  }[] = [];
   for (const m of matches) {
     const queue = m.info.queue_id ?? m.info.queueId;
     if (queue !== RANKED_QUEUE) continue;
@@ -100,12 +187,20 @@ export function summarizeTft(
       placement: self.placement,
       datetime: m.info.game_datetime,
       set: m.info.tft_set_number ?? null,
+      traits: gameTraits(self.traits),
+      units: gameUnits(self.units),
     });
   }
   ranked.sort((a, b) => a.datetime - b.datetime);
 
   const placements = ranked.map((r) => r.placement);
   const matchDates = ranked.map((r) => new Date(r.datetime).toISOString());
+  const recent: TftGame[] = ranked.map((r) => ({
+    placement: r.placement,
+    at: new Date(r.datetime).toISOString(),
+    traits: r.traits,
+    units: r.units,
+  }));
   const n = placements.length;
   const top4 = placements.filter((p) => p <= 4).length;
   const weekStart = now - 7 * 86_400_000;
@@ -124,6 +219,7 @@ export function summarizeTft(
     rank,
     gamesThisSet: entry ? entry.wins + entry.losses : null,
     placements,
+    recent,
     top4Rate: n ? Math.round((100 * top4) / n) : null,
     avgPlacement: n
       ? Math.round((placements.reduce((a, b) => a + b, 0) / n) * 10) / 10
@@ -264,6 +360,7 @@ export const sampleTft: TftStats = {
   rank: { tier: "MASTER", division: null, lp: 21 },
   gamesThisSet: 312,
   placements: [4, 1, 3, 6, 2, 4, 1, 5, 2, 3, 7, 4, 2, 1, 8, 3, 4, 2, 5, 3],
+  recent: [],
   top4Rate: 75,
   avgPlacement: 3.5,
   gamesThisWeek: 0,

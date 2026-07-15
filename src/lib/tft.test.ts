@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cleanRiotName,
   isTftHistory,
   ladderValue,
   placementBucket,
@@ -44,6 +45,20 @@ describe("rankLabel", () => {
   });
 });
 
+describe("cleanRiotName", () => {
+  it("strips the TFT<set>_ prefix and spaces camelCase", () => {
+    expect(cleanRiotName("TFT15_MissFortune")).toBe("Miss Fortune");
+    expect(cleanRiotName("TFT9b_Ahri")).toBe("Ahri");
+    expect(cleanRiotName("TFT15_Jinx")).toBe("Jinx");
+  });
+  it("tolerates a bare name (no prefix) and keeps trailing caps intact", () => {
+    expect(cleanRiotName("JarvanIV")).toBe("Jarvan IV");
+  });
+  it("passes an already-clean single word through", () => {
+    expect(cleanRiotName("Bruiser")).toBe("Bruiser");
+  });
+});
+
 describe("summarizeTft", () => {
   const now = Date.parse("2026-07-15T00:00:00Z");
   const ctx = { puuid: "me", riotId: "anthonyta#OCE", now };
@@ -56,6 +71,8 @@ describe("summarizeTft", () => {
     losses: 22,
   };
 
+  type Participant = RawMatch["info"]["participants"][number];
+
   /** A ranked match the owner played in, unless `puuid` is overridden away. */
   function match(opts: {
     datetime: number;
@@ -63,6 +80,8 @@ describe("summarizeTft", () => {
     puuid?: string;
     queue?: number;
     set?: number;
+    traits?: Participant["traits"];
+    units?: Participant["units"];
   }): RawMatch {
     return {
       info: {
@@ -71,7 +90,12 @@ describe("summarizeTft", () => {
         tft_set_number: opts.set ?? 13,
         participants: [
           { puuid: "other-1", placement: 1 },
-          { puuid: opts.puuid ?? "me", placement: opts.placement ?? 4 },
+          {
+            puuid: opts.puuid ?? "me",
+            placement: opts.placement ?? 4,
+            traits: opts.traits,
+            units: opts.units,
+          },
           { puuid: "other-2", placement: 8 },
         ],
       },
@@ -197,6 +221,79 @@ describe("summarizeTft", () => {
     expect(s.top4Rate).toBe(100);
     expect(s.avgPlacement).toBe(3); // (2 + 4) / 2
   });
+
+  it("builds each game's comp — active traits strongest-first, units by rarity then tier, names cleaned", () => {
+    const at = Date.parse("2026-07-14T02:00:00Z");
+    const matches = [
+      match({
+        datetime: at,
+        placement: 2,
+        traits: [
+          { name: "TFT15_Bruiser", num_units: 4, style: 3, tier_current: 3 },
+          {
+            name: "TFT15_StarGuardian",
+            num_units: 3,
+            style: 3,
+            tier_current: 2,
+          },
+          { name: "TFT15_Sniper", num_units: 2, style: 1, tier_current: 1 },
+          { name: "TFT15_Ghost", num_units: 1, style: 0, tier_current: 0 },
+        ],
+        units: [
+          { character_id: "TFT15_Jinx", tier: 3, rarity: 4 },
+          { character_id: "TFT15_MissFortune", tier: 2, rarity: 4 },
+          { character_id: "TFT15_Malzahar", tier: 1, rarity: 1 },
+        ],
+      }),
+    ];
+    const g = summarizeTft(entry, matches, ctx).recent[0];
+    expect(g.placement).toBe(2);
+    expect(g.at).toBe(new Date(at).toISOString());
+    // style desc, then count desc; the style-0 trait is dropped; names cleaned.
+    expect(g.traits).toEqual([
+      { name: "Bruiser", count: 4, style: 3 },
+      { name: "Star Guardian", count: 3, style: 3 },
+      { name: "Sniper", count: 2, style: 1 },
+    ]);
+    // rarity desc, then tier desc; stars = tier; names cleaned.
+    expect(g.units).toEqual([
+      { name: "Jinx", stars: 3, rarity: 4 },
+      { name: "Miss Fortune", stars: 2, rarity: 4 },
+      { name: "Malzahar", stars: 1, rarity: 1 },
+    ]);
+  });
+
+  it("tolerates a game missing its traits/units arrays (→ empty)", () => {
+    const at = Date.parse("2026-07-14T02:00:00Z");
+    const s = summarizeTft(entry, [match({ datetime: at, placement: 3 })], ctx);
+    expect(s.recent).toEqual([
+      { placement: 3, at: new Date(at).toISOString(), traits: [], units: [] },
+    ]);
+  });
+
+  it("aligns recent 1:1 with placements (same length + order)", () => {
+    const t1 = Date.parse("2026-07-10T02:00:00Z");
+    const t2 = Date.parse("2026-07-12T02:00:00Z");
+    const matches = [
+      match({ datetime: t2, placement: 1 }),
+      match({ datetime: t1, placement: 5 }),
+    ];
+    const s = summarizeTft(entry, matches, ctx);
+    expect(s.recent.map((g) => g.placement)).toEqual(s.placements);
+    expect(s.recent.map((g) => g.at)).toEqual(s.matchDates);
+    expect(s.placements).toEqual([5, 1]); // oldest → newest
+  });
+
+  it("excludes non-ranked matches from recent", () => {
+    const at = Date.parse("2026-07-14T02:00:00Z");
+    const matches = [
+      match({ datetime: at, placement: 2, queue: 1100 }),
+      match({ datetime: at - 1000, placement: 1, queue: 1130 }),
+    ];
+    const s = summarizeTft(entry, matches, ctx);
+    expect(s.recent).toHaveLength(1);
+    expect(s.recent[0].placement).toBe(2);
+  });
 });
 
 describe("sampleTft", () => {
@@ -211,6 +308,9 @@ describe("sampleTft", () => {
     expect(sampleTft.isLive).toBe(false);
     expect(sampleTft.matchDates).toEqual([]);
     expect(sampleTft.lastPlayedAt).toBeNull();
+  });
+  it("has no real comps (empty recent → non-interactive strip)", () => {
+    expect(sampleTft.recent).toEqual([]);
   });
 });
 

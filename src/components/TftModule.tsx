@@ -1,8 +1,8 @@
+import { TftStrip } from "@/components/TftStrip";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import { relativeTime } from "@/lib/github";
 import {
   ladderValue,
-  placementBucket,
   rankLabel,
   type TftHistoryDay,
   type TftStats,
@@ -14,13 +14,6 @@ import {
  * placements, coloured by finish. All public data. Not an anchor — TFT has no
  * canonical public profile URL to link out to (ADR 0082).
  */
-
-/** placementBucket → the cell's text + hairline-quiet border colour. */
-const CELL: Record<ReturnType<typeof placementBucket>, string> = {
-  first: "border-amber/60 text-amber",
-  top4: "border-up/50 text-up",
-  bottom4: "border-down/50 text-down",
-};
 
 export function TftModule({
   tft,
@@ -67,18 +60,9 @@ export function TftModule({
         ) : null}
       </div>
 
-      {/* recent placements */}
+      {/* recent placements — tap a cell for that game's comp (TftStrip island) */}
       {tft.placements.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {tft.placements.map((p, i) => (
-            <span
-              key={i}
-              className={`flex h-5 w-5 items-center justify-center border text-[10px] tabular-nums ${CELL[placementBucket(p)]}`}
-            >
-              {p}
-            </span>
-          ))}
-        </div>
+        <TftStrip placements={tft.placements} games={tft.recent} />
       )}
 
       {/* ladder trend — self-recorded LP history (ADR 0082) */}
