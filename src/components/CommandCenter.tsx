@@ -10,6 +10,7 @@ import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
+import { TftModule } from "@/components/TftModule";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import {
   ACTIVITY_DAYS,
@@ -20,7 +21,7 @@ import {
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getRiichiStats } from "@/lib/connectors/riichi";
-import { getTft } from "@/lib/connectors/tft";
+import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import {
@@ -71,7 +72,7 @@ function weekRange(): string {
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
-  const [briefing, lang, reading, gh, indexRead, riichi, tft] =
+  const [briefing, lang, reading, gh, indexRead, riichi, tft, tftHistory] =
     await Promise.all([
       getBriefing(),
       getLanguageStats(),
@@ -80,6 +81,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
       getSnapIndex(),
       getRiichiStats(),
       getTft(),
+      getTftHistory(),
     ]);
   const b = briefing ?? sampleBriefing;
 
@@ -255,6 +257,11 @@ export async function CommandCenter({ userName }: { userName: string }) {
               vault index), always the final, borderless row. */}
           <JournalActivityRow offline={!r2Enabled()} today={today} />
         </div>
+
+        {/* arena — the same band the lobby shows (rank, recent games, drill-down),
+            so the owner doesn't have to sign out to see it. The THIS WEEK tft row
+            keeps the cadence; this is the standing (deliberate 0032 dent). */}
+        <TftModule tft={tft} history={tftHistory} />
 
         {/* quick jumps */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
