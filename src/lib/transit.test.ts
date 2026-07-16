@@ -320,6 +320,37 @@ describe("normalizeStopFinder", () => {
     expect(normalizeStopFinder(null)).toEqual([]);
     expect(normalizeStopFinder({ locations: "nope" })).toEqual([]);
   });
+
+  it("ranks isBest/matchQuality above response order (the bike-locker case)", () => {
+    // Live TfNSW data: two "Bike Lockers - Westmead Station" POIs arrive BEFORE
+    // the station itself; only the station carries isBest.
+    const out = normalizeStopFinder({
+      locations: [
+        {
+          type: "poi",
+          name: "Bike Lockers - Westmead Station, Alexandra Ave",
+          coord: [-33.8, 150.98],
+          matchQuality: 800,
+        },
+        {
+          type: "poi",
+          name: "Bike Lockers - Westmead Station, Railway Pde",
+          coord: [-33.8, 150.98],
+          matchQuality: 700,
+        },
+        {
+          type: "stop",
+          id: "214510",
+          name: "Westmead, Westmead Station",
+          disassembledName: "Westmead Station",
+          isBest: true,
+          matchQuality: 1000,
+        },
+      ],
+    });
+    expect(out[0]).toMatchObject({ kind: "stop", value: "214510" });
+    expect(out[1].name).toContain("Alexandra Ave");
+  });
 });
 
 // ---------------------------------------------------------------------------

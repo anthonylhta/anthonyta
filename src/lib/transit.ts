@@ -297,14 +297,23 @@ function coordValue(coord: unknown): string | null {
 }
 
 /** Best-effort normalize of a stop_finder response; anything malformed is
- *  simply dropped — a degraded autocomplete beats a crashed one. */
+ *  simply dropped — a degraded autocomplete beats a crashed one. TfNSW does
+ *  NOT return matches ranked (live data puts "Bike Lockers - Westmead
+ *  Station" before Westmead Station itself), so sort by its own relevance
+ *  signals — `isBest`, then `matchQuality` — before cutting to `limit`. */
 export function normalizeStopFinder(
   json: unknown,
   limit = 8,
 ): PlaceCandidate[] {
   if (!isObj(json) || !Array.isArray(json.locations)) return [];
+  const best = (x: unknown) => (isObj(x) && x.isBest === true ? 1 : 0);
+  const quality = (x: unknown) =>
+    isObj(x) && typeof x.matchQuality === "number" ? x.matchQuality : 0;
+  const ranked = [...json.locations].sort(
+    (a, b) => best(b) - best(a) || quality(b) - quality(a),
+  );
   const out: PlaceCandidate[] = [];
-  for (const loc of json.locations) {
+  for (const loc of ranked) {
     if (out.length >= limit) break;
     if (!isObj(loc)) continue;
     const short =
