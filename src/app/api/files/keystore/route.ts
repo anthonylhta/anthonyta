@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { recordAuthEvent } from "@/lib/authlogstore";
-import { isKeystore } from "@/lib/crypto";
+import { isArgonKdf, isKeystore } from "@/lib/crypto";
 import { getKeystore, KEYSTORE_MAX_BYTES, putKeystore } from "@/lib/inbox";
 
 export const dynamic = "force-dynamic";
@@ -47,17 +47,27 @@ export async function PUT(request: Request) {
     if (!isKeystore(parsed)) return nf();
 
     // Rebuild from the validated fields so what's at rest is exactly the
-    // keystore shape, never a superset smuggled past the type guard. A v2
+    // keystore shape, never a superset smuggled past the type guard — per KDF
+    // shape, so an argon2id keystore survives the rebuild intact. A v2
     // keystore carries the sealed canary (isKeystore guaranteed it's present);
     // v1 has none, so the field is only included when the version calls for it.
+    const kdf = isArgonKdf(parsed.kdf)
+      ? {
+          algo: parsed.kdf.algo,
+          salt_b64: parsed.kdf.salt_b64,
+          m: parsed.kdf.m,
+          t: parsed.kdf.t,
+          p: parsed.kdf.p,
+        }
+      : {
+          salt_b64: parsed.kdf.salt_b64,
+          iterations: parsed.kdf.iterations,
+        };
     const overwrite = request.headers.get("x-keystore-overwrite") === "1";
     const result = await putKeystore(
       JSON.stringify({
         v: parsed.v,
-        kdf: {
-          salt_b64: parsed.kdf.salt_b64,
-          iterations: parsed.kdf.iterations,
-        },
+        kdf,
         wrapped_mk_b64: parsed.wrapped_mk_b64,
         iv_b64: parsed.iv_b64,
         ...(parsed.v === 2 ? { canary_b64: parsed.canary_b64 } : {}),

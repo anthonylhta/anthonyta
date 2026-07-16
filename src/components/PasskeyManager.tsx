@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { startRegistration } from "@simplewebauthn/browser";
 import {
-  deriveKek,
   fromB64url,
   isKeystore,
   toB64url,
@@ -11,6 +10,7 @@ import {
   wrapMk,
   type Keystore,
 } from "@/lib/crypto";
+import { deriveKekForKdf } from "@/lib/kdf";
 import {
   deriveKekFromPrf,
   isPrfWrapSet,
@@ -318,11 +318,7 @@ function VaultUnlockManager() {
         setEnroll("failed");
         return;
       }
-      const kek = await deriveKek(
-        pass,
-        fromB64url(ks.kdf.salt_b64),
-        ks.kdf.iterations,
-      );
+      const kek = await deriveKekForKdf(ks.kdf, pass);
       // Re-derive an EXTRACTABLE master key — the only way to re-wrap it (WebCrypto
       // refuses to wrap a non-extractable key), exactly as changePassphrase does. A
       // wrong passphrase fails this unwrap's GCM auth check.

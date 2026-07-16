@@ -34,7 +34,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
-  deriveKek,
   fromB64url,
   isKeystore,
   open,
@@ -42,6 +41,7 @@ import {
   toB64url,
   unwrapMk,
 } from "../src/lib/crypto";
+import { deriveKekForKdf } from "../src/lib/kdf";
 import {
   buildManifest,
   carryForward,
@@ -157,11 +157,9 @@ async function unwrapMasterKey(passphrase: string): Promise<CryptoKey> {
   if (!isKeystore(json))
     throw new Error("meta/keystore is not a valid keystore");
 
-  const kek = await deriveKek(
-    passphrase,
-    fromB64url(json.kdf.salt_b64),
-    json.kdf.iterations,
-  );
+  // The dispatcher derives with whatever the keystore says — pbkdf2 or
+  // argon2id (hash-wasm runs the same WASM under Node).
+  const kek = await deriveKekForKdf(json.kdf, passphrase);
   try {
     return await unwrapMk(
       fromB64url(json.wrapped_mk_b64),

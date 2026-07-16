@@ -23,10 +23,13 @@ export function buildCsp(
   // Nonce + strict-dynamic IS the XSS defense: only our own <script> tags (stamped
   // with this per-request nonce) execute, and anything they inject inherits trust —
   // an injected inline <script> without the nonce can't run.
+  // 'wasm-unsafe-eval' admits WebAssembly.instantiate ONLY — not JS eval — for the
+  // bundled Argon2id KDF (ADR: Argon2id); the deliberate cost of memory-hardness.
   const script = [
     "'self'",
     `'nonce-${nonce}'`,
     "'strict-dynamic'",
+    "'wasm-unsafe-eval'",
     ...(opts?.dev ? ["'unsafe-eval'"] : []),
   ].join(" ");
 

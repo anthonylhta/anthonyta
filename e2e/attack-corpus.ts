@@ -166,6 +166,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/totp",
+    probe: "/api/totp",
+    shape: "owner-api",
+    methods: ["GET", "PUT"],
+  },
+  {
     routeKey: "/api/vault/raw",
     probe: "/api/vault/raw?p=vault%2Fx.bin",
     shape: "owner-api",

@@ -79,13 +79,36 @@ export interface EnvelopeMeta {
  * no canary and heal to v2 the next time the client holds the MK (unlock or
  * passphrase change); nothing needs migrating up front.
  */
+/** The original KDF: PBKDF2-SHA256, identified by the ABSENCE of an `algo`
+ *  discriminator (every keystore written before the Argon2id migration). */
+export interface KdfPbkdf2 {
+  salt_b64: string;
+  iterations: number;
+}
+
+/** The memory-hard KDF (ADR: Argon2id): `m` in KiB, `t` passes, `p` lanes.
+ *  Parameters are versioned IN the keystore, so future tuning is the same lazy
+ *  migration again — the mechanism is the durable part. */
+export interface KdfArgon2id {
+  algo: "argon2id";
+  salt_b64: string;
+  m: number;
+  t: number;
+  p: number;
+}
+
 export interface Keystore {
   v: 1 | 2;
-  kdf: { salt_b64: string; iterations: number };
+  kdf: KdfPbkdf2 | KdfArgon2id;
   wrapped_mk_b64: string;
   iv_b64: string;
   /** v2 only: the canary envelope (`sealCanary`), base64url. Absent on v1. */
   canary_b64?: string;
+}
+
+/** Discriminates the kdf union — the `algo` field is the whole signal. */
+export function isArgonKdf(kdf: Keystore["kdf"]): kdf is KdfArgon2id {
+  return "algo" in kdf && kdf.algo === "argon2id";
 }
 
 // ---------------------------------------------------------------------------
@@ -206,19 +229,19 @@ export function unwrapMk(
 // ---------------------------------------------------------------------------
 
 /**
- * Assemble the stored keystore. Pass `canary_b64` (from `sealCanary`) to build a
+ * Assemble the stored keystore around a ready kdf block (`lib/kdf.freshKdf`
+ * decides pbkdf2 vs argon2id). Pass `canary_b64` (from `sealCanary`) to build a
  * v2 keystore; omit it for a bare v1. The canary is what the version gates — its
  * presence is the only difference between the two shapes.
  */
 export function buildKeystore(
-  salt: Uint8Array,
-  iterations: number,
+  kdf: Keystore["kdf"],
   wrapped: Uint8Array,
   iv: Uint8Array,
   canary_b64?: string,
 ): Keystore {
   const base = {
-    kdf: { salt_b64: toB64url(salt), iterations },
+    kdf,
     wrapped_mk_b64: toB64url(wrapped),
     iv_b64: toB64url(iv),
   };
@@ -227,11 +250,45 @@ export function buildKeystore(
     : { v: 2, ...base, canary_b64 };
 }
 
+/** Either kdf shape, bounds-checked: pbkdf2 by iteration range, argon2id by
+ *  parameter ranges (m in KiB — 8 MiB floor keeps a downgrade attack from
+ *  smuggling in a cheap-to-crack keystore; 1 GiB ceiling keeps a hostile one
+ *  from OOMing the unlock). */
+function isValidKdf(kdf: Record<string, unknown>): boolean {
+  if (typeof kdf.salt_b64 !== "string" || kdf.salt_b64.length === 0)
+    return false;
+  if (kdf.algo === "argon2id") {
+    return (
+      typeof kdf.m === "number" &&
+      Number.isInteger(kdf.m) &&
+      kdf.m >= 8_192 &&
+      kdf.m <= 1_048_576 &&
+      typeof kdf.t === "number" &&
+      Number.isInteger(kdf.t) &&
+      kdf.t >= 1 &&
+      kdf.t <= 16 &&
+      typeof kdf.p === "number" &&
+      Number.isInteger(kdf.p) &&
+      kdf.p >= 1 &&
+      kdf.p <= 4 &&
+      kdf.iterations === undefined
+    );
+  }
+  return (
+    kdf.algo === undefined &&
+    typeof kdf.iterations === "number" &&
+    Number.isInteger(kdf.iterations) &&
+    kdf.iterations >= 100_000 &&
+    kdf.iterations <= 10_000_000
+  );
+}
+
 /**
  * Shape check for anything claiming to be a keystore (server PUT gate + client
- * parse). Accepts both versions: v2 MUST carry a `canary_b64` string, v1 MUST NOT
- * — the field is exactly what distinguishes the two, so a v2 without it (or a v1
- * with one) is malformed.
+ * parse). Accepts both versions and both KDFs: v2 MUST carry a `canary_b64`
+ * string, v1 MUST NOT — the field is exactly what distinguishes the two, so a
+ * v2 without it (or a v1 with one) is malformed. The kdf block is either
+ * legacy pbkdf2 (no `algo`) or argon2id — a half-and-half hybrid is rejected.
  */
 export function isKeystore(x: unknown): x is Keystore {
   if (typeof x !== "object" || x === null) return false;
@@ -241,11 +298,7 @@ export function isKeystore(x: unknown): x is Keystore {
     (k.v === 1 || k.v === 2) &&
     typeof kdf === "object" &&
     kdf !== null &&
-    typeof kdf.salt_b64 === "string" &&
-    typeof kdf.iterations === "number" &&
-    Number.isInteger(kdf.iterations) &&
-    kdf.iterations >= 100_000 &&
-    kdf.iterations <= 10_000_000 &&
+    isValidKdf(kdf) &&
     typeof k.wrapped_mk_b64 === "string" &&
     k.wrapped_mk_b64.length > 0 &&
     k.wrapped_mk_b64.length <= 128 &&
