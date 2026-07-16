@@ -22,7 +22,7 @@ describe("buildCsp", () => {
     const dirs = directiveMap(buildCsp("abc123"));
     const expected: Record<string, string> = {
       "default-src": "'self'",
-      "script-src": "'self' 'nonce-abc123' 'strict-dynamic'",
+      "script-src": "'self' 'nonce-abc123' 'strict-dynamic' 'wasm-unsafe-eval'",
       "style-src": "'self' 'unsafe-inline'",
       "img-src": "'self' data: blob:",
       "font-src": "'self'",
@@ -57,11 +57,23 @@ describe("buildCsp", () => {
   it("adds 'unsafe-eval' to script-src only in dev, and nowhere without it", () => {
     const dev = buildCsp("abc123", { dev: true });
     expect(directiveMap(dev)["script-src"]).toBe(
-      "'self' 'nonce-abc123' 'strict-dynamic' 'unsafe-eval'",
+      "'self' 'nonce-abc123' 'strict-dynamic' 'wasm-unsafe-eval' 'unsafe-eval'",
     );
-    // Prod build never carries the token at all.
-    expect(buildCsp("abc123")).not.toContain("unsafe-eval");
-    expect(buildCsp("abc123", { dev: false })).not.toContain("unsafe-eval");
+    // Prod build never carries the JS-eval token — quoted-exact, because
+    // 'wasm-unsafe-eval' (always present, WASM-only) contains it as a substring.
+    expect(buildCsp("abc123")).not.toContain("'unsafe-eval'");
+    expect(buildCsp("abc123", { dev: false })).not.toContain("'unsafe-eval'");
+  });
+
+  it("carries 'wasm-unsafe-eval' in script-src always — the Argon2id cost, WASM only", () => {
+    for (const policy of [
+      buildCsp("abc123"),
+      buildCsp("abc123", { dev: true }),
+    ]) {
+      expect(directiveMap(policy)["script-src"]).toContain(
+        "'wasm-unsafe-eval'",
+      );
+    }
   });
 
   it("has no doubled separators and no stray whitespace per directive", () => {

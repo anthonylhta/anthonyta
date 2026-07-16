@@ -19,20 +19,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildKeystore,
   checkCanary,
-  deriveKek,
   fromB64url,
   generateMk,
+  isArgonKdf,
   isKeystore,
-  ITERATIONS,
   open,
-  randomSalt,
   seal,
   sealCanary,
+  toB64url,
   unwrapMk,
   wrapMk,
   type EnvelopeMeta,
   type Keystore,
 } from "@/lib/crypto";
+import { deriveKekForKdf, freshKdf } from "@/lib/kdf";
 import { deriveKekFromPrf, findWrap, isPrfWrapSet } from "@/lib/prf";
 import {
   clearCachedKey,
@@ -206,6 +206,47 @@ async function healCanary(mk: CryptoKey, ks: Keystore): Promise<Keystore> {
 }
 
 /**
+ * Lazy pbkdf2 → argon2id migration (ADR: Argon2id), run right after a
+ * successful passphrase unlock while the verified KEK is still in hand: unwrap
+ * the MK momentarily-extractable (the passphrase-change idiom — WebCrypto
+ * refuses to wrap a non-extractable key), re-wrap it under a fresh Argon2id
+ * KEK, overwrite the keystore. Same MK, same canary, new wrapping — every
+ * other device keeps unlocking, they just derive differently next time.
+ * Best-effort at every step: an argon2id keystore, a WASM that can't run, or
+ * any failure returns the input untouched and it retries on the next unlock.
+ */
+async function migrateKdf(
+  ks: Keystore,
+  kek: CryptoKey,
+  passphrase: string,
+): Promise<Keystore> {
+  if (isArgonKdf(ks.kdf)) return ks;
+  try {
+    const kdf = await freshKdf();
+    if (!isArgonKdf(kdf)) return ks; // WASM unavailable — stay on pbkdf2
+    // Momentarily-extractable unwrap, discarded as soon as the new wrap exists.
+    const tempMk = await unwrapMk(
+      fromB64url(ks.wrapped_mk_b64),
+      fromB64url(ks.iv_b64),
+      kek,
+      true,
+    );
+    const newKek = await deriveKekForKdf(kdf, passphrase);
+    const { wrapped, iv } = await wrapMk(tempMk, newKek);
+    const next: Keystore = {
+      ...ks,
+      kdf,
+      wrapped_mk_b64: toB64url(wrapped),
+      iv_b64: toB64url(iv),
+    };
+    if ((await putKeystore(next, true)) === "ok") return next;
+    return ks;
+  } catch {
+    return ks;
+  }
+}
+
+/**
  * Fetch the PRF wrap set for a passkey unlock. A healthy 404 (no device enrolled)
  * and any hiccup both collapse to `null` — passkey unlock is convenience layered
  * on the passphrase, so "no usable wrap" always just falls back to the box; there
@@ -316,18 +357,14 @@ export function useVault(offline: boolean): Vault {
     setWorking(true);
     setError(null);
     try {
-      const salt = randomSalt();
-      const kek = await deriveKek(passphrase, salt);
+      // New vaults are Argon2id from birth (freshKdf degrades to PBKDF2 only
+      // when the WASM can't run here — ADR: Argon2id).
+      const kdf = await freshKdf();
+      const kek = await deriveKekForKdf(kdf, passphrase);
       const mk0 = await generateMk();
       const { wrapped, iv } = await wrapMk(mk0, kek);
       // Seal the canary under the fresh MK so the very first keystore is v2.
-      const ks = buildKeystore(
-        salt,
-        ITERATIONS,
-        wrapped,
-        iv,
-        await sealCanary(mk0),
-      );
+      const ks = buildKeystore(kdf, wrapped, iv, await sealCanary(mk0));
       // No-overwrite write: if a vault already exists (this state was reached
       // by mistake), the server refuses rather than orphaning its data.
       const wrote = await putKeystore(ks, false);
@@ -357,11 +394,8 @@ export function useVault(offline: boolean): Vault {
     setWorking(true);
     setError(null);
     try {
-      const kek = await deriveKek(
-        passphrase,
-        fromB64url(ks.kdf.salt_b64),
-        ks.kdf.iterations,
-      );
+      // Derive with whatever the keystore says — pbkdf2 or argon2id.
+      const kek = await deriveKekForKdf(ks.kdf, passphrase);
       // A wrong passphrase fails this unwrap's GCM auth check — that throw IS
       // the passphrase verdict; there's no verifier to compare against.
       const mk = await unwrapMk(
@@ -372,8 +406,11 @@ export function useVault(offline: boolean): Vault {
       mkRef.current = mk;
       await setCachedKey(mk);
       await touchActivityStamp();
-      // Heal a legacy v1 keystore now that the MK is in hand.
-      ksRef.current = await healCanary(mk, ks);
+      // Heal a legacy v1 keystore now that the MK is in hand, then lazily
+      // migrate a pbkdf2 wrap to argon2id — every keystore upgrades the first
+      // time it's opened, and one that's never opened never needed to.
+      const healed = await healCanary(mk, ks);
+      ksRef.current = await migrateKdf(healed, kek, passphrase);
       setStatus("unlocked");
     } catch {
       setError("wrong passphrase");
@@ -432,11 +469,7 @@ export function useVault(offline: boolean): Vault {
       setWorking(true);
       setError(null);
       try {
-        const oldKek = await deriveKek(
-          oldPass,
-          fromB64url(ks.kdf.salt_b64),
-          ks.kdf.iterations,
-        );
+        const oldKek = await deriveKekForKdf(ks.kdf, oldPass);
         // Momentarily-extractable unwrap: the only way to re-wrap. The handle
         // is discarded as soon as the new wrap exists.
         const tempMk = await unwrapMk(
@@ -445,18 +478,12 @@ export function useVault(offline: boolean): Vault {
           oldKek,
           true,
         );
-        const salt = randomSalt();
-        const newKek = await deriveKek(newPass, salt);
+        const kdf = await freshKdf();
+        const newKek = await deriveKekForKdf(kdf, newPass);
         const { wrapped, iv } = await wrapMk(tempMk, newKek);
         // Refresh the canary under the SAME MK — it stays valid on every other
         // device (they still hold this MK), and a v1 keystore heals to v2 here.
-        const next = buildKeystore(
-          salt,
-          ITERATIONS,
-          wrapped,
-          iv,
-          await sealCanary(tempMk),
-        );
+        const next = buildKeystore(kdf, wrapped, iv, await sealCanary(tempMk));
         // The one legitimate overwrite: same MK, new wrapping.
         if ((await putKeystore(next, true)) !== "ok")
           throw new Error("keystore write failed");

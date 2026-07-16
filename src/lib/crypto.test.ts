@@ -296,10 +296,17 @@ describe("envelope context binding (AEV2)", () => {
   });
 });
 
+/** A pbkdf2 kdf block for the new buildKeystore signature (tests stay on the
+ *  legacy KDF — lib/kdf's own suite covers argon2id blocks). */
+const pbkdf = (salt: Uint8Array, iterations: number) => ({
+  salt_b64: toB64url(salt),
+  iterations,
+});
+
 describe("keystore", () => {
   it("builds a shape isKeystore accepts and JSON round-trips", async () => {
     const { salt, wrapped, iv } = await setupKeys();
-    const ks = buildKeystore(salt, ITERATIONS, wrapped, iv);
+    const ks = buildKeystore(pbkdf(salt, ITERATIONS), wrapped, iv);
     expect(isKeystore(ks)).toBe(true);
     const parsed: unknown = JSON.parse(JSON.stringify(ks));
     expect(isKeystore(parsed)).toBe(true);
@@ -312,14 +319,12 @@ describe("keystore", () => {
     const kek = await deriveKek("pass", salt, FAST);
     const mk0 = await generateMk();
     const { wrapped, iv } = await wrapMk(mk0, kek);
-    const stored = JSON.stringify(buildKeystore(salt, FAST, wrapped, iv));
+    const stored = JSON.stringify(
+      buildKeystore(pbkdf(salt, FAST), wrapped, iv),
+    );
 
     const ks = JSON.parse(stored) as ReturnType<typeof buildKeystore>;
-    const kek2 = await deriveKek(
-      "pass",
-      fromB64url(ks.kdf.salt_b64),
-      ks.kdf.iterations,
-    );
+    const kek2 = await deriveKek("pass", fromB64url(ks.kdf.salt_b64), FAST);
     const mk = await unwrapMk(
       fromB64url(ks.wrapped_mk_b64),
       fromB64url(ks.iv_b64),
@@ -356,6 +361,37 @@ describe("keystore", () => {
     ).toBe(false);
   });
 
+  it("isKeystore accepts either kdf shape and rejects hybrids/bad params", () => {
+    const base = {
+      v: 1,
+      wrapped_mk_b64: "abc",
+      iv_b64: "abc",
+    };
+    const argon = { algo: "argon2id", salt_b64: "abc", m: 65536, t: 3, p: 1 };
+    expect(isKeystore({ ...base, kdf: argon })).toBe(true);
+    // A half-and-half hybrid (argon algo + pbkdf2 iterations) is malformed.
+    expect(
+      isKeystore({ ...base, kdf: { ...argon, iterations: 600_000 } }),
+    ).toBe(false);
+    // Sub-floor memory would smuggle in a cheap-to-crack keystore (downgrade).
+    expect(isKeystore({ ...base, kdf: { ...argon, m: 1024 } })).toBe(false);
+    // Ceilings keep a hostile keystore from OOMing/stalling the unlock.
+    expect(isKeystore({ ...base, kdf: { ...argon, m: 2_097_152 } })).toBe(
+      false,
+    );
+    expect(isKeystore({ ...base, kdf: { ...argon, t: 0 } })).toBe(false);
+    expect(isKeystore({ ...base, kdf: { ...argon, t: 99 } })).toBe(false);
+    expect(isKeystore({ ...base, kdf: { ...argon, p: 0 } })).toBe(false);
+    expect(isKeystore({ ...base, kdf: { ...argon, p: 8 } })).toBe(false);
+    // An unknown algo is rejected, not silently treated as pbkdf2.
+    expect(
+      isKeystore({
+        ...base,
+        kdf: { algo: "scrypt", salt_b64: "abc", m: 65536, t: 3, p: 1 },
+      }),
+    ).toBe(false);
+  });
+
   it("isKeystore accepts v1 and v2, gating on the canary field", () => {
     const v1 = {
       v: 1,
@@ -382,8 +418,7 @@ describe("keystore canary", () => {
     const { mk, salt, wrapped, iv } = await setupKeys();
     // ITERATIONS (not FAST) so the stored count clears isKeystore's KDF floor.
     const ks = buildKeystore(
-      salt,
-      ITERATIONS,
+      pbkdf(salt, ITERATIONS),
       wrapped,
       iv,
       await sealCanary(mk),
@@ -399,8 +434,7 @@ describe("keystore canary", () => {
     const a = await setupKeys("pass-a");
     const b = await setupKeys("pass-b");
     const ks = buildKeystore(
-      a.salt,
-      FAST,
+      pbkdf(a.salt, FAST),
       a.wrapped,
       a.iv,
       await sealCanary(a.mk),
@@ -411,7 +445,7 @@ describe("keystore canary", () => {
 
   it("a v1 keystore has no canary — checkCanary returns 'absent' and skips", async () => {
     const { mk, salt, wrapped, iv } = await setupKeys();
-    const v1 = buildKeystore(salt, FAST, wrapped, iv); // no canary arg → v1
+    const v1 = buildKeystore(pbkdf(salt, FAST), wrapped, iv); // no canary arg → v1
     expect(v1.v).toBe(1);
     expect(await checkCanary(mk, v1)).toBe("absent");
   });
@@ -419,7 +453,7 @@ describe("keystore canary", () => {
   it("survives a passphrase change: the canary is under the MK, not the KEK", async () => {
     const { mk, kek: oldKek, wrapped, iv, salt } = await setupKeys("old-pass");
     const canary = await sealCanary(mk);
-    const ksOld = buildKeystore(salt, FAST, wrapped, iv, canary);
+    const ksOld = buildKeystore(pbkdf(salt, FAST), wrapped, iv, canary);
     expect(await checkCanary(mk, ksOld)).toBe(true);
 
     // Passphrase change re-wraps the SAME MK under a new KEK; the canary rides
@@ -427,7 +461,7 @@ describe("keystore canary", () => {
     const tempMk = await unwrapMk(wrapped, iv, oldKek, true);
     const newKek = await deriveKek("new-pass", salt, FAST);
     const { wrapped: w2, iv: iv2 } = await wrapMk(tempMk, newKek);
-    const ksNew = buildKeystore(salt, FAST, w2, iv2, canary);
+    const ksNew = buildKeystore(pbkdf(salt, FAST), w2, iv2, canary);
 
     // The MK unwrapped from the NEW keystore still opens the canary.
     const mkAgain = await unwrapMk(w2, iv2, newKek);
@@ -438,8 +472,7 @@ describe("keystore canary", () => {
   it("a reset (fresh MK) invalidates the canary — the stale-key case", async () => {
     const a = await setupKeys("pass");
     const ks = buildKeystore(
-      a.salt,
-      FAST,
+      pbkdf(a.salt, FAST),
       a.wrapped,
       a.iv,
       await sealCanary(a.mk),
@@ -455,11 +488,15 @@ describe("keystore canary", () => {
     const { mk, salt, wrapped, iv } = await setupKeys();
     const bytes = fromB64url(await sealCanary(mk));
     bytes[bytes.length - 1] ^= 0x01;
-    const tampered = buildKeystore(salt, FAST, wrapped, iv, toB64url(bytes));
+    const tampered = buildKeystore(
+      pbkdf(salt, FAST),
+      wrapped,
+      iv,
+      toB64url(bytes),
+    );
     expect(await checkCanary(mk, tampered)).toBe(false);
     const truncated = buildKeystore(
-      salt,
-      FAST,
+      pbkdf(salt, FAST),
       wrapped,
       iv,
       toB64url(bytes.subarray(0, 8)),
