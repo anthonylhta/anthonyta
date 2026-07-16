@@ -5,6 +5,7 @@ import {
   normalizeTrip,
   stopFinderParams,
   tripParams,
+  type DepArr,
   type ModeFilter,
   type PlaceCandidate,
   type TransitPlace,
@@ -84,6 +85,8 @@ export async function planTrip(opts: {
   from: Pick<TransitPlace, "kind" | "value">;
   to: Pick<TransitPlace, "kind" | "value">;
   modes: ModeFilter;
+  depArr?: DepArr;
+  at?: Date;
 }): Promise<TripRead | null> {
   if (!process.env.TNSW_API_KEY) return { sample: true, result: SAMPLE_TRIP };
   const json = await tnsw("trip", tripParams(opts), "trip");

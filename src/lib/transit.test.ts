@@ -6,6 +6,7 @@ import {
   excludedClasses,
   fmtSydneyTime,
   groupNames,
+  isDepArr,
   isModeFilter,
   parseEndpointParam,
   modeName,
@@ -211,7 +212,7 @@ describe("tripParams", () => {
       from: { kind: "stop", value: "10101100" },
       to: { kind: "coord", value: "151.1932,-33.9312" },
       modes: "all",
-      now,
+      at: now,
     });
     expect(p.get("type_origin")).toBe("any");
     expect(p.get("name_origin")).toBe("10101100");
@@ -227,7 +228,7 @@ describe("tripParams", () => {
       from: { kind: "stop", value: "1" },
       to: { kind: "stop", value: "2" },
       modes: "all",
-      now,
+      at: now,
     });
     expect(p.get("excludedMeans")).toBeNull();
     expect([...p.keys()].filter((k) => k.startsWith("exclMOT_"))).toEqual([]);
@@ -238,7 +239,7 @@ describe("tripParams", () => {
       from: { kind: "stop", value: "1" },
       to: { kind: "stop", value: "2" },
       modes: "train+bus",
-      now,
+      at: now,
     });
     expect(p.get("excludedMeans")).toBe("checkbox");
     expect(p.get("exclMOT_4")).toBe("1");
@@ -248,6 +249,28 @@ describe("tripParams", () => {
     expect(p.get("exclMOT_1")).toBeNull();
     expect(p.get("exclMOT_2")).toBeNull();
     expect(p.get("exclMOT_5")).toBeNull();
+  });
+
+  it("anchors on arrival for arr — same wire time, flipped macro", () => {
+    const p = tripParams({
+      from: { kind: "stop", value: "1" },
+      to: { kind: "stop", value: "2" },
+      modes: "all",
+      depArr: "arr",
+      at: new Date(Date.UTC(2026, 6, 16, 23, 0)), // 09:00 on the 17th in Sydney
+    });
+    expect(p.get("depArrMacro")).toBe("arr");
+    expect(p.get("itdDate")).toBe("20260717");
+    expect(p.get("itdTime")).toBe("0900");
+  });
+});
+
+describe("isDepArr", () => {
+  it("accepts the two anchors, rejects the rest", () => {
+    expect(isDepArr("dep")).toBe(true);
+    expect(isDepArr("arr")).toBe(true);
+    expect(isDepArr("now")).toBe(false);
+    expect(isDepArr(null)).toBe(false);
   });
 });
 
