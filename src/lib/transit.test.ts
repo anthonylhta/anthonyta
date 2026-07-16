@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_TRANSIT_CONFIG,
   delayMinutes,
+  endpointParam,
   excludedClasses,
   fmtSydneyTime,
   groupNames,
+  isModeFilter,
+  parseEndpointParam,
   modeName,
   normalizeStopFinder,
   normalizeTransitConfig,
@@ -114,6 +117,38 @@ describe("config helpers", () => {
   it("tripTitle prefers the label, else derives from endpoints", () => {
     expect(tripTitle(trip({ label: "to work" }))).toBe("to work");
     expect(tripTitle(trip())).toBe("Westmead Station → 10 Bourke Rd, Mascot");
+  });
+});
+
+describe("endpoint wire format", () => {
+  it("round-trips stops and coords", () => {
+    expect(parseEndpointParam(endpointParam(place()))).toEqual({
+      kind: "stop",
+      value: "10101100",
+    });
+    expect(parseEndpointParam("coord:151.1932,-33.9312")).toEqual({
+      kind: "coord",
+      value: "151.1932,-33.9312",
+    });
+  });
+
+  it("rejects malformed input", () => {
+    expect(parseEndpointParam(null)).toBeNull();
+    expect(parseEndpointParam("")).toBeNull();
+    expect(parseEndpointParam("stop:")).toBeNull();
+    expect(parseEndpointParam("bogus:1")).toBeNull();
+    expect(parseEndpointParam("coord:151.19")).toBeNull();
+    expect(parseEndpointParam("coord:x,y")).toBeNull();
+    expect(parseEndpointParam(`stop:${"9".repeat(300)}`)).toBeNull();
+  });
+});
+
+describe("isModeFilter", () => {
+  it("accepts the four filters, rejects the rest", () => {
+    expect(isModeFilter("all")).toBe(true);
+    expect(isModeFilter("train+bus")).toBe(true);
+    expect(isModeFilter("boat")).toBe(false);
+    expect(isModeFilter(1)).toBe(false);
   });
 });
 

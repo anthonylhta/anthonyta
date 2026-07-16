@@ -126,6 +126,36 @@ export function tripTitle(trip: TransitTrip): string {
   return trip.label || `${trip.from.name} → ${trip.to.name}`;
 }
 
+export function isModeFilter(x: unknown): x is ModeFilter {
+  return typeof x === "string" && MODE_FILTERS.includes(x as ModeFilter);
+}
+
+/** Wire format for an endpoint riding a query string: `stop:<id>` or
+ *  `coord:<lon>,<lat>`. Null on anything else — the route answers 400. */
+export function parseEndpointParam(
+  s: string | null,
+): Pick<TransitPlace, "kind" | "value"> | null {
+  if (!s || s.length > MAX_STR + 6) return null;
+  const idx = s.indexOf(":");
+  if (idx < 1) return null;
+  const kind = s.slice(0, idx);
+  const value = s.slice(idx + 1);
+  if (!value) return null;
+  if (kind === "stop") return { kind: "stop", value };
+  if (kind === "coord") {
+    const parts = value.split(",");
+    if (parts.length !== 2) return null;
+    const [lon, lat] = parts.map(Number);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    return { kind: "coord", value };
+  }
+  return null;
+}
+
+export function endpointParam(p: Pick<TransitPlace, "kind" | "value">): string {
+  return `${p.kind}:${p.value}`;
+}
+
 // ---------------------------------------------------------------------------
 // TfNSW request params (EFA rapidJSON dialect)
 // ---------------------------------------------------------------------------
