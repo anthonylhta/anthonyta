@@ -114,6 +114,13 @@ export async function r2Get(key: string): Promise<Response> {
  * write conditional on the key NOT existing — R2 answers 412 instead of
  * overwriting. A retried PUT re-sends the same bytes, so the transport-level
  * retry on 5xx stays idempotent.
+ *
+ * Signs first, then ships the RAW body through a plain fetch: `AwsClient.fetch`
+ * threads the body through the signed Request, which Node's fetch can send as a
+ * length-less stream (chunked) — R2 refuses that with 411 Length-Required. A
+ * bare string/Uint8Array body lets undici measure it and set Content-Length;
+ * the signature stays valid because aws4fetch signs the payload as
+ * UNSIGNED-PAYLOAD and Content-Length is not part of the signature.
  */
 export async function r2Put(
   key: string,
@@ -123,11 +130,22 @@ export async function r2Put(
   const e = required();
   const headers: Record<string, string> = { "content-type": opts.contentType };
   if (opts.ifNoneMatch) headers["if-none-match"] = "*";
-  return client(e).fetch(objectUrl(e, key), {
+  const signed = await client(e).sign(objectUrl(e, key), {
     method: "PUT",
     body: body as BodyInit,
     headers,
   });
+  // sign() doesn't transport, so mirror AwsClient's retry-on-5xx/429 backoff.
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(signed.url, {
+      method: "PUT",
+      headers: signed.headers,
+      body: body as BodyInit,
+    });
+    if ((res.status < 500 && res.status !== 429) || attempt === RETRIES)
+      return res;
+    await new Promise((r) => setTimeout(r, 50 * 2 ** attempt));
+  }
 }
 
 /** Signed DELETE for one object (S3 deletes are idempotent — a missing key 204s). */

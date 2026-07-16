@@ -9,8 +9,14 @@ import {
   writeKey,
 } from "./r2";
 
-// The signed transport hands a Request to global fetch — stub it and inspect.
-const mockFetch = vi.fn<(req: Request) => Promise<Response>>();
+// The signed transport hands global fetch a Request (reads) or a bare
+// url + init with the raw body (PUTs — see r2Put's 411 note). Stub and inspect.
+const mockFetch =
+  vi.fn<(input: Request | string, init?: RequestInit) => Promise<Response>>();
+
+/** Method of a captured call, whichever shape it used. */
+const methodOf = (input: Request | string, init?: RequestInit) =>
+  typeof input === "string" ? (init?.method ?? "GET") : input.method;
 
 const stubR2Env = () => {
   vi.stubEnv("R2_ACCOUNT_ID", "acct123");
@@ -151,7 +157,7 @@ describe("readKey", () => {
       state: "ok",
       value: new Uint8Array([1, 2, 3]),
     });
-    const req = mockFetch.mock.calls[0][0];
+    const req = mockFetch.mock.calls[0][0] as Request; // reads still ride a Request
     expect(req.url).toBe(
       "https://acct123.r2.cloudflarestorage.com/hub/meta/fin",
     );
@@ -205,14 +211,51 @@ describe("writeKey", () => {
         contentType: "application/json",
       }),
     ).toBe("ok");
-    const req = mockFetch.mock.calls[0][0];
-    expect(req.method).toBe("PUT");
-    expect(req.url).toBe(
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(init?.method).toBe("PUT");
+    expect(url).toBe(
       "https://acct123.r2.cloudflarestorage.com/hub/meta/keystore",
     );
-    expect(req.headers.get("content-type")).toBe("application/json");
-    expect(req.headers.get("if-none-match")).toBe("*");
-    expect(await req.text()).toBe('{"v":1}');
+    const headers = new Headers(init?.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("if-none-match")).toBe("*");
+    expect(init?.body).toBe('{"v":1}');
+  });
+
+  it("sends the raw body via a bare fetch — never a Request whose stream drops Content-Length (R2 411)", async () => {
+    mockFetch.mockImplementation(
+      async () => new Response(null, { status: 200 }),
+    );
+    const bytes = new Uint8Array([1, 2, 3]);
+    expect(
+      await writeKey("meta/fin", bytes, {
+        overwrite: true,
+        contentType: "application/octet-stream",
+      }),
+    ).toBe("ok");
+    const [url, init] = mockFetch.mock.calls[0];
+    // A bare url string + the exact bytes lets undici set Content-Length; a
+    // Request here would regress to a chunked, length-less PUT that R2 refuses.
+    expect(typeof url).toBe("string");
+    expect(init?.body).toBe(bytes);
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toMatch(/^AWS4-HMAC-SHA256 /);
+    expect(headers.get("x-amz-content-sha256")).toMatch(
+      /^([0-9a-f]{64}|UNSIGNED-PAYLOAD)$/,
+    );
+  });
+
+  it("retries a 5xx PUT and succeeds on the next attempt", async () => {
+    mockFetch
+      .mockResolvedValueOnce(new Response("boom", { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    expect(
+      await writeKey("meta/snap/index.json", "[]", {
+        overwrite: true,
+        contentType: "application/json",
+      }),
+    ).toBe("ok");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it("omits the condition when overwriting", async () => {
@@ -225,7 +268,8 @@ describe("writeKey", () => {
         contentType: "application/json",
       }),
     ).toBe("ok");
-    expect(mockFetch.mock.calls[0][0].headers.get("if-none-match")).toBeNull();
+    const headers = new Headers(mockFetch.mock.calls[0][1]?.headers);
+    expect(headers.get("if-none-match")).toBeNull();
   });
 
   it("maps a 412 on a no-clobber write to conflict", async () => {
@@ -242,8 +286,8 @@ describe("writeKey", () => {
 
   it("re-checks existence on any other no-clobber refusal: exists → conflict, absent → failed", async () => {
     // PUT attempts fail 500 (retried); the follow-up existence GET answers 200.
-    mockFetch.mockImplementation(async (req) =>
-      req.method === "PUT"
+    mockFetch.mockImplementation(async (input, init) =>
+      methodOf(input, init) === "PUT"
         ? new Response("boom", { status: 500 })
         : new Response("present", { status: 200 }),
     );
@@ -254,8 +298,8 @@ describe("writeKey", () => {
       }),
     ).toBe("conflict");
 
-    mockFetch.mockImplementation(async (req) =>
-      req.method === "PUT"
+    mockFetch.mockImplementation(async (input, init) =>
+      methodOf(input, init) === "PUT"
         ? new Response("boom", { status: 500 })
         : new Response(NO_SUCH_KEY, { status: 404 }),
     );
