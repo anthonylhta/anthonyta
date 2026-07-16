@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_TRANSIT_CONFIG,
+  anchorFromParts,
   delayMinutes,
   endpointParam,
   excludedClasses,
@@ -8,7 +9,10 @@ import {
   groupNames,
   isDepArr,
   isModeFilter,
+  isValidHm,
+  nextDays,
   parseEndpointParam,
+  pickJourneys,
   modeName,
   normalizeStopFinder,
   normalizeTransitConfig,
@@ -20,6 +24,7 @@ import {
   tripTitle,
   upsertTrip,
   type TransitConfig,
+  type TransitJourney,
   type TransitTrip,
 } from "./transit";
 
@@ -597,6 +602,144 @@ describe("normalizeTrip", () => {
       journeys: [],
       alerts: [],
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// journey selection
+// ---------------------------------------------------------------------------
+
+/** Minimal journey with a given route shape + duration. */
+function journey(
+  lines: string[],
+  durationMin: number,
+  cancelled = false,
+): TransitJourney {
+  return {
+    legs: lines.map((line) => ({
+      kind: "transit" as const,
+      modeClass: 1,
+      line,
+      headsign: null,
+      durationMin: null,
+      distanceM: null,
+      from: { name: "A", platform: null, timePlanned: null, timeEst: null },
+      to: { name: "B", platform: null, timePlanned: null, timeEst: null },
+      stops: [],
+      live: false,
+      cancelled: false,
+    })),
+    interchanges: Math.max(0, lines.length - 1),
+    durationMin,
+    departPlanned: null,
+    departEst: null,
+    arrivePlanned: null,
+    arriveEst: null,
+    cancelled,
+    live: false,
+    delayMin: null,
+  };
+}
+
+describe("pickJourneys", () => {
+  it("passes short lists through untouched", () => {
+    const two = [journey(["T1"], 30), journey(["T1"], 35)];
+    expect(pickJourneys(two)).toEqual(two);
+    expect(pickJourneys([])).toEqual([]);
+  });
+
+  it("collapses near-identical departures to the primary alone", () => {
+    const js = [
+      journey(["T1", "T8"], 60),
+      journey(["T1", "T8"], 62),
+      journey(["T1", "T8"], 65),
+    ];
+    expect(pickJourneys(js)).toEqual([js[0]]);
+  });
+
+  it("keeps a different route at comparable cost", () => {
+    const js = [
+      journey(["T1", "T8"], 60),
+      journey(["T1", "T8"], 62),
+      journey(["T1", "305"], 68),
+    ];
+    expect(pickJourneys(js)).toEqual([js[0], js[2]]);
+  });
+
+  it("drops a different route that costs too much more", () => {
+    const js = [
+      journey(["T1", "T8"], 60),
+      journey(["T1", "305"], 85),
+      journey(["T1", "T8"], 62),
+    ];
+    expect(pickJourneys(js)).toEqual([js[0]]);
+  });
+
+  it("keeps a faster journey even on the same route", () => {
+    const js = [
+      journey(["T1", "T8"], 60),
+      journey(["T1", "T8"], 61),
+      journey(["T1", "T8"], 52),
+    ];
+    expect(pickJourneys(js)).toEqual([js[0], js[2]]);
+  });
+
+  it("shows a cancelled first service beside the first live alternative", () => {
+    const js = [
+      journey(["T1", "T8"], 60, true),
+      journey(["T1", "T8"], 62),
+      journey(["T1", "T8"], 65),
+    ];
+    expect(pickJourneys(js)).toEqual([js[0], js[1]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// time-anchor parts
+// ---------------------------------------------------------------------------
+
+describe("anchorFromParts", () => {
+  it("builds a local-clock Date from valid parts", () => {
+    const d = anchorFromParts("2026-07-18", "09:05");
+    expect(d).not.toBeNull();
+    expect(d!.getFullYear()).toBe(2026);
+    expect(d!.getMonth()).toBe(6);
+    expect(d!.getDate()).toBe(18);
+    expect(d!.getHours()).toBe(9);
+    expect(d!.getMinutes()).toBe(5);
+  });
+
+  it("rejects malformed parts", () => {
+    expect(anchorFromParts("2026-7-18", "09:05")).toBeNull();
+    expect(anchorFromParts("2026-07-18", "9:05")).toBeNull();
+    expect(anchorFromParts("2026-07-18", "24:00")).toBeNull();
+    expect(anchorFromParts("2026-07-18", "09:60")).toBeNull();
+    expect(anchorFromParts("", "")).toBeNull();
+  });
+});
+
+describe("isValidHm", () => {
+  it("accepts 24h HH:MM only", () => {
+    expect(isValidHm("00:00")).toBe(true);
+    expect(isValidHm("23:59")).toBe(true);
+    expect(isValidHm("24:00")).toBe(false);
+    expect(isValidHm("9:00")).toBe(false);
+  });
+});
+
+describe("nextDays", () => {
+  it("labels today/tomorrow then weekday, crossing month edges", () => {
+    const days = nextDays(4, new Date(2026, 6, 30, 15, 0)); // Thu 30 Jul local
+    expect(days.map((d) => d.ymd)).toEqual([
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-01",
+      "2026-08-02",
+    ]);
+    expect(days[0].label).toBe("today");
+    expect(days[1].label).toBe("tomorrow");
+    expect(days[2].label).toBe("sat 01/08");
+    expect(days[3].label).toBe("sun 02/08");
   });
 });
 
