@@ -11,6 +11,7 @@ import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { TftModule } from "@/components/TftModule";
+import { TotpDrawer } from "@/components/TotpDrawer";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import {
   ACTIVITY_DAYS,
@@ -262,6 +263,15 @@ export async function CommandCenter({ userName }: { userName: string }) {
             so the owner doesn't have to sign out to see it. The THIS WEEK tft row
             keeps the cadence; this is the standing (deliberate 0032 dent). */}
         <TftModule tft={tft} history={tftHistory} />
+
+        {/* 2fa — seeds sealed in the vault, codes computed in-browser behind the
+            unlock (ADR: TOTP drawer); the server never sees a seed or a code. */}
+        <div className="border-t border-hairline px-4 py-4">
+          <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+            2fa
+          </div>
+          <TotpDrawer offline={!r2Enabled()} />
+        </div>
 
         {/* quick jumps */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
