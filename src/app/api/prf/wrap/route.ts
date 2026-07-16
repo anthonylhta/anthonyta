@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { recordAuthEvent } from "@/lib/authlogstore";
 import { isPrfWrapSet } from "@/lib/prf";
 import {
   getPrfWrapSet,
@@ -53,6 +54,12 @@ export async function PUT(request: Request) {
     const parsed: unknown = JSON.parse(body);
     if (!isPrfWrapSet(parsed)) return nf();
 
+    // The PUT replaces the whole set, so the journal kind reads off the count
+    // delta against what was stored (grow → add, shrink → remove); the detail
+    // carries the exact transition either way.
+    const prior = await getPrfWrapSet();
+    const priorCount = prior.state === "ok" ? prior.value.wraps.length : 0;
+
     // Rebuild from the validated fields so what's at rest is exactly the wrap-set
     // shape, never a superset smuggled past the type guard.
     const ok = await putPrfWrapSet({
@@ -64,6 +71,11 @@ export async function PUT(request: Request) {
         iv_b64: w.iv_b64,
       })),
     });
+    if (ok)
+      await recordAuthEvent(
+        parsed.wraps.length < priorCount ? "prf-remove" : "prf-add",
+        `wraps ${priorCount} → ${parsed.wraps.length}`,
+      );
     return ok
       ? Response.json({ ok: true })
       : new Response("Unavailable", { status: 503 });

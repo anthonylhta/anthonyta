@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { recordAuthEvent } from "@/lib/authlogstore";
 import { isKeystore } from "@/lib/crypto";
 import { getKeystore, KEYSTORE_MAX_BYTES, putKeystore } from "@/lib/inbox";
 
@@ -64,6 +65,15 @@ export async function PUT(request: Request) {
       overwrite,
     );
     if (result === "conflict") return new Response("Conflict", { status: 409 });
+    if (result === "ok")
+      // A keystore overwrite is an attacker's favorite move (rotate the
+      // passphrase, lock the owner out "mysteriously") — journal both paths.
+      await recordAuthEvent(
+        "keystore",
+        overwrite
+          ? "overwritten (passphrase change / re-wrap)"
+          : "first-run setup",
+      );
     return result === "ok" ? Response.json({ ok: true }) : nf();
   } catch (err) {
     console.error("[files/keystore] put failed", err);

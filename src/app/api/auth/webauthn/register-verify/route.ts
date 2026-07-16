@@ -1,6 +1,7 @@
 import { verifyRegistrationResponse } from "@simplewebauthn/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { auth } from "@/auth";
+import { recordAuthEvent } from "@/lib/authlogstore";
 import { toB64url } from "@/lib/crypto";
 import {
   challengeClearCookie,
@@ -102,6 +103,10 @@ export async function POST(request: Request) {
       if (wrote === "conflict")
         return new Response("Conflict", { status: 409, headers: clear });
       if (wrote !== "ok") return unavailable();
+      await recordAuthEvent(
+        "register",
+        `${cred.label} #${cred.id.slice(0, 6)} (first enrollment)`,
+      );
       return Response.json({ ok: true, recovery: code }, { headers: clear });
     }
 
@@ -117,6 +122,7 @@ export async function POST(request: Request) {
     if (!next) return new Response("Conflict", { status: 409, headers: clear });
     const wrote = await putWebauthnRecord(JSON.stringify(next), true);
     if (wrote !== "ok") return unavailable();
+    await recordAuthEvent("register", `${cred.label} #${cred.id.slice(0, 6)}`);
     return Response.json({ ok: true }, { headers: clear });
   } catch (err) {
     console.error("[webauthn] register-verify failed", err);

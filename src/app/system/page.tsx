@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { AuthJournalPanel } from "@/components/AuthJournal";
 import { PasskeyManager } from "@/components/PasskeyManager";
 import { RecoveryShares } from "@/components/RecoveryShares";
 import {
@@ -10,6 +11,7 @@ import {
 } from "@/components/SystemPanels";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { readDays } from "@/lib/anastore";
+import { getAuthLog } from "@/lib/authlogstore";
 import { sydneyToday } from "@/lib/fin";
 import { r2Enabled } from "@/lib/r2";
 
@@ -29,6 +31,9 @@ export default async function SystemPage() {
   // Traffic reads its own week here (owner-side, after the gate) — this used to
   // ride the command center's Promise.all; it moved out with the panel.
   const anaDays = await readDays(today, 7);
+  // The journal ships RAW to a client island: the chain's verdict must come
+  // from the browser, not from the server that authored the record.
+  const journal = await getAuthLog();
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -50,6 +55,15 @@ export default async function SystemPage() {
         <PasskeyManager />
         <LastSignIn />
         <RecoveryShares offline={!r2Enabled()} />
+
+        {/* ───────────── JOURNAL ───────────── */}
+        <Section label="journal" right="hash-chained" />
+        <div className="px-4 py-3">
+          <AuthJournalPanel
+            raw={journal.state === "ok" ? journal.value : null}
+            state={journal.state}
+          />
+        </div>
 
         {/* ───────────── TRAFFIC ───────────── */}
         <Section label="traffic" right="last 7 days" />

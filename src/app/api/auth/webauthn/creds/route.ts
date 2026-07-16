@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { recordAuthEvent } from "@/lib/authlogstore";
 import {
   isWebauthnRecord,
   removeCred,
@@ -107,6 +108,11 @@ export async function DELETE(request: Request) {
 
     const wrote = await putWebauthnRecord(JSON.stringify(next), true);
     if (wrote !== "ok") return unavailable();
+    const removed = read.record.creds.find((c) => c.id === id);
+    await recordAuthEvent(
+      "remove",
+      `${removed?.label ?? "passkey"} #${id.slice(0, 6)}`,
+    );
     return Response.json({ ok: true });
   } catch (err) {
     console.error("[webauthn] creds delete failed", err);
