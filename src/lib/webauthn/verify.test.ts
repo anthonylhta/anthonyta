@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
+import { recordAuthEvent } from "@/lib/authlogstore";
 import { sealChallenge } from "./cookie";
 import { hashRecoveryCode } from "./recovery";
 import { getWebauthnRecord, putWebauthnRecord } from "./store";
@@ -12,10 +13,14 @@ vi.mock("./store", () => ({
 vi.mock("@simplewebauthn/server", () => ({
   verifyAuthenticationResponse: vi.fn(),
 }));
+vi.mock("@/lib/authlogstore", () => ({
+  recordAuthEvent: vi.fn(),
+}));
 
 const mockGet = vi.mocked(getWebauthnRecord);
 const mockPut = vi.mocked(putWebauthnRecord);
 const mockVerify = vi.mocked(verifyAuthenticationResponse);
+const mockJournal = vi.mocked(recordAuthEvent);
 
 const SECRET = "test-secret";
 
@@ -76,6 +81,18 @@ describe("verifyDoor — assertion path", () => {
     expect(call.credential.counter).toBe(5);
     expect(Array.from(call.credential.publicKey)).toEqual([1, 2, 3]);
     expect(call.requireUserVerification).toBe(true);
+  });
+
+  it("journals the sign-in with the credential named — and journals nothing on a deny", async () => {
+    await verifyDoor({ assertion: assertion() }, req(authCookie()));
+    expect(mockJournal).toHaveBeenCalledWith("signin", "iphone #cred-a");
+
+    mockJournal.mockClear();
+    mockVerify.mockResolvedValue({ verified: false } as Awaited<
+      ReturnType<typeof verifyAuthenticationResponse>
+    >);
+    await verifyDoor({ assertion: assertion() }, req(authCookie()));
+    expect(mockJournal).not.toHaveBeenCalled();
   });
 
   it("denies without a cookie, with a reg-typed cookie, and when expired", async () => {

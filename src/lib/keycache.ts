@@ -29,6 +29,7 @@ const STORE = "keys";
 const ROW = "mk";
 const ACTIVITY_ROW = "activity";
 const EPOCH_ROW = "vaultEpoch";
+const AUTH_TIP_ROW = "authlogTip";
 
 function withStore(
   mode: IDBTransactionMode,
@@ -103,10 +104,43 @@ export async function bumpSeenEpoch(epoch: number): Promise<void> {
   await withStore("readwrite", (s) => s.put(epoch, EPOCH_ROW));
 }
 
+/** The newest auth-journal tip this device has verified, or null when it has
+ *  never verified one (first visit — trusted by design, like the manifest
+ *  epoch). Shape-checked on the way out so IDB garbage reads as "no memory". */
+export async function getSeenAuthTip(): Promise<{
+  seq: number;
+  h: string;
+} | null> {
+  const v = await withStore("readonly", (s) => s.get(AUTH_TIP_ROW));
+  if (typeof v !== "object" || v === null) return null;
+  const t = v as { seq?: unknown; h?: unknown };
+  return typeof t.seq === "number" &&
+    Number.isFinite(t.seq) &&
+    t.seq >= 1 &&
+    typeof t.h === "string" &&
+    t.h.length > 0
+    ? { seq: t.seq, h: t.h }
+    : null;
+}
+
+/** Remember a verified journal tip — advances by seq only, never regresses
+ *  (an older tip is exactly the rollback signal the memory exists to catch). */
+export async function bumpSeenAuthTip(tip: {
+  seq: number;
+  h: string;
+}): Promise<void> {
+  if (!Number.isFinite(tip.seq) || tip.seq < 1 || !tip.h) return;
+  const seen = await getSeenAuthTip();
+  if (seen !== null && seen.seq >= tip.seq) return;
+  await withStore("readwrite", (s) =>
+    s.put({ seq: tip.seq, h: tip.h }, AUTH_TIP_ROW),
+  );
+}
+
 /** Forget the cached key and its activity stamp — the storage half of the lock
- *  button; the stamp is meaningless without a key. The seen-epoch row is
- *  deliberately NOT cleared: it isn't key material, and surviving lock/unlock
- *  is what makes rollback detection work across sessions. */
+ *  button; the stamp is meaningless without a key. The seen-epoch and journal-tip
+ *  rows are deliberately NOT cleared: they aren't key material, and surviving
+ *  lock/unlock is what makes rollback detection work across sessions. */
 export async function clearCachedKey(): Promise<void> {
   await withStore("readwrite", (s) => s.delete(ROW));
   await withStore("readwrite", (s) => s.delete(ACTIVITY_ROW));

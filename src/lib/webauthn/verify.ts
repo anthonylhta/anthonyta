@@ -1,5 +1,6 @@
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { recordAuthEvent } from "@/lib/authlogstore";
 import { fromB64url } from "@/lib/crypto";
 import { challengeFromCookieHeader, openChallenge } from "./cookie";
 import {
@@ -117,6 +118,11 @@ async function verifyAssertion(
   const wrote = await putWebauthnRecord(JSON.stringify(stamped), true);
   if (wrote !== "ok") console.error("[webauthn] sign-in stamp failed");
 
+  // Journal the opened door (ADR: auth journal) — success only, never failures
+  // (guests probing the wall must not write into the journal), and never a
+  // gate: recordAuthEvent cannot throw and its failure doesn't deny the owner.
+  await recordAuthEvent("signin", `${cred.label} #${cred.id.slice(0, 6)}`);
+
   return owner();
 }
 
@@ -138,6 +144,9 @@ async function verifyRecovery(code: string): Promise<DoorUser | null> {
     true,
   );
   if (consumed !== "ok") return null;
+
+  // The loudest possible entry — break-glass use should never be a surprise.
+  await recordAuthEvent("recovery", "break-glass code consumed");
 
   return owner();
 }
