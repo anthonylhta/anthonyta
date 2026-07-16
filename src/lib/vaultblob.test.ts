@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareIndexNotes,
   deriveId,
   imageBlob,
   isValidVaultPath,
@@ -10,6 +11,7 @@ import {
   VAULT_INDEX_PATH,
   VAULT_SEARCH_INDEX_PATH,
   type VaultIndex,
+  type VaultIndexNote,
 } from "./vaultblob";
 
 // A well-formed 22-char base64url id (letters, digits, `-`, `_`).
@@ -125,6 +127,69 @@ describe("isVaultIndex", () => {
         images: [{ id: ID, name: "p.jpg" }], // no path
       }),
     ).toBe(false);
+  });
+});
+
+describe("compareIndexNotes", () => {
+  const note = (
+    title: string,
+    modified: string,
+    path = `Journals/${title}.md`,
+  ): VaultIndexNote => ({ id: ID, title, path, modified });
+
+  it("orders dated titles by journal day, newest first, ignoring mtime", () => {
+    // A backfill import rewrites old notes' files, so mtimes no longer track
+    // the journal day — the title date must win over the write order.
+    const scrambled = [
+      note("2026-07-16", "2026-07-16T06:00:00Z"),
+      note("2026-07-13", "2026-07-13T09:00:00Z"),
+      note("2026-07-04", "2026-07-04T12:00:00Z"),
+      note("2026-07-15", "2026-07-16T05:00:03Z"), // backfilled today
+      note("2026-07-14", "2026-07-16T05:00:02Z"), // backfilled today
+      note("2026-07-11", "2026-07-16T05:00:01Z"), // backfilled today
+    ];
+    expect(scrambled.sort(compareIndexNotes).map((n) => n.title)).toEqual([
+      "2026-07-16",
+      "2026-07-15",
+      "2026-07-14",
+      "2026-07-13",
+      "2026-07-11",
+      "2026-07-04",
+    ]);
+  });
+  it("falls back to the modified day for undated titles", () => {
+    const sorted = [
+      note("Project Ideas", "2026-07-10T08:00:00Z", "Project Ideas.md"),
+      note("2026-07-12", "2026-07-16T05:00:00Z"),
+      note("2026-07-08", "2026-07-08T20:00:00Z"),
+    ].sort(compareIndexNotes);
+    expect(sorted.map((n) => n.title)).toEqual([
+      "2026-07-12",
+      "Project Ideas",
+      "2026-07-08",
+    ]);
+  });
+  it("only a title PREFIX counts as a date", () => {
+    const dated = note("2026-07-09 trip", "2026-07-16T05:00:00Z");
+    const undated = note("notes 2026-07-15", "2026-07-10T00:00:00Z");
+    // The mid-title date is NOT a key: "notes 2026-07-15" keys on its modified
+    // day (07-10), which beats the dated note's 07-09 prefix.
+    expect(
+      [dated, undated].sort(compareIndexNotes).map((n) => n.title),
+    ).toEqual(["notes 2026-07-15", "2026-07-09 trip"]);
+  });
+  it("breaks same-day ties newest-modified-first, so duplicate-title first-wins keeps resolving to the newest note", () => {
+    const older = note(
+      "2026-07-11",
+      "2026-07-11T10:00:00Z",
+      "Old/2026-07-11.md",
+    );
+    const newer = note("2026-07-11", "2026-07-16T05:00:00Z");
+    expect([older, newer].sort(compareIndexNotes)[0]).toBe(newer);
+  });
+  it("returns 0 for identical keys (stable for equal entries)", () => {
+    const a = note("2026-07-11", "2026-07-11T10:00:00Z");
+    expect(compareIndexNotes(a, { ...a })).toBe(0);
   });
 });
 

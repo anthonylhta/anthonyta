@@ -48,6 +48,7 @@ import {
   type IndexDoc,
 } from "../src/lib/searchidx";
 import {
+  compareIndexNotes,
   deriveId,
   imageBlob,
   isVaultIndex,
@@ -435,9 +436,9 @@ async function main(): Promise<void> {
     });
   }
 
-  // 5. rewrite the index — notes NEWEST-FIRST so the reader's duplicate-title
-  // first-wins resolves to the most recently modified note (matches getVaultIndex)
-  indexNotes.sort((a, b) => (a.modified < b.modified ? 1 : -1));
+  // 5. rewrite the index — newest-first by journal day (title date, mtime fallback)
+  // with a modified tiebreak, so duplicate-title first-wins stays newest-note
+  indexNotes.sort(compareIndexNotes);
   const index: VaultIndex = { v: 1, notes: indexNotes, images: indexImages };
   const indexBytes = new TextEncoder().encode(JSON.stringify(index));
   const indexEnvelope = await seal(

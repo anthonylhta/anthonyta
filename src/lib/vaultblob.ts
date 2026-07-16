@@ -114,6 +114,31 @@ export function isVaultIndex(x: unknown): x is VaultIndex {
   );
 }
 
+/** The journal day a note is ABOUT: a `YYYY-MM-DD` title prefix when present, else
+ *  the (UTC) calendar day it was last modified. */
+function indexDay(n: VaultIndexNote): string {
+  const m = /^\d{4}-\d{2}-\d{2}/.exec(n.title);
+  return m ? m[0] : n.modified.slice(0, 10);
+}
+
+/**
+ * Newest-first index order: by journal day (title date), then by modified time.
+ * Sorting on mtime alone scrambles the list whenever a backfill import rewrites
+ * old notes' files; the title date is what the note is about, so it wins. The
+ * modified tiebreak keeps the reader's duplicate-title first-wins resolving to
+ * the most recently modified note (same title ⇒ same day key).
+ */
+export function compareIndexNotes(
+  a: VaultIndexNote,
+  b: VaultIndexNote,
+): number {
+  const da = indexDay(a);
+  const db = indexDay(b);
+  if (da !== db) return da < db ? 1 : -1;
+  if (a.modified !== b.modified) return a.modified < b.modified ? 1 : -1;
+  return 0;
+}
+
 // `preprocessNote` rewrites `![[image]]` embeds to `/vault/img/<id>`; this is the
 // inverse the reader uses to fetch + decrypt one. Only that exact shape resolves —
 // external `http(s)`/`data:`/anything else is left for the browser to load directly.
