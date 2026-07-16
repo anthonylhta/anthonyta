@@ -19,16 +19,14 @@
 import { useRef, useState } from "react";
 import {
   buildKeystore,
-  deriveKek,
   fromB64url,
   isKeystore,
-  ITERATIONS,
   open,
-  randomSalt,
   sealCanary,
   wrapMk,
   type Keystore,
 } from "@/lib/crypto";
+import { deriveKekForKdf, freshKdf } from "@/lib/kdf";
 import { reconstructSecret } from "@/lib/recovery";
 import { formatShare, split } from "@/lib/shamir";
 import { VAULT_INDEX_PATH } from "@/lib/vaultblob";
@@ -97,11 +95,7 @@ export function RecoveryShares({ offline }: { offline: boolean }) {
         return;
       }
       const ks = parsed as Keystore;
-      const kek = await deriveKek(
-        pass,
-        fromB64url(ks.kdf.salt_b64),
-        ks.kdf.iterations,
-      );
+      const kek = await deriveKekForKdf(ks.kdf, pass);
       // Momentarily-extractable unwrap — the only honest path to raw bytes. A
       // wrong passphrase fails this GCM check and throws.
       const mk = await unwrapExtractable(ks, kek);
@@ -409,17 +403,11 @@ export function RecoverWithShares() {
     setWorking(true);
     setError(null);
     try {
-      const salt = randomSalt();
-      const kek = await deriveKek(newPass, salt);
+      const kdf = await freshKdf();
+      const kek = await deriveKekForKdf(kdf, newPass);
       const { wrapped, iv } = await wrapMk(mk, kek);
       // Refresh the canary under the recovered MK so recovery lands a v2 keystore.
-      const ks = buildKeystore(
-        salt,
-        ITERATIONS,
-        wrapped,
-        iv,
-        await sealCanary(mk),
-      );
+      const ks = buildKeystore(kdf, wrapped, iv, await sealCanary(mk));
       // The one legitimate overwrite: recovery means the old passphrase is gone.
       const res = await fetch("/api/files/keystore", {
         method: "PUT",
