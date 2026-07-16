@@ -21,6 +21,7 @@ import {
 } from "@/lib/activity";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
+import { getLayout } from "@/lib/connectors/layout";
 import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
@@ -31,6 +32,7 @@ import {
   sydneyDaysAgo,
   type SnapIndexDay,
 } from "@/lib/fin";
+import { hiddenSet } from "@/lib/layout";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { r2Enabled } from "@/lib/r2";
@@ -73,18 +75,34 @@ function weekRange(): string {
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
-  const [briefing, lang, reading, gh, indexRead, riichi, tft, tftHistory] =
-    await Promise.all([
-      getBriefing(),
-      getLanguageStats(),
-      getCurrentlyReading(),
-      getGithub(),
-      getSnapIndex(),
-      getRiichiStats(),
-      getTft(),
-      getTftHistory(),
-    ]);
+  const [
+    briefing,
+    lang,
+    reading,
+    gh,
+    indexRead,
+    riichi,
+    tft,
+    tftHistory,
+    layout,
+  ] = await Promise.all([
+    getBriefing(),
+    getLanguageStats(),
+    getCurrentlyReading(),
+    getGithub(),
+    getSnapIndex(),
+    getRiichiStats(),
+    getTft(),
+    getTftHistory(),
+    getLayout(),
+  ]);
   const b = briefing ?? sampleBriefing;
+  // Owner-curated visibility (roadmap 59) — the /system layout panel decides
+  // which of these blocks render at all.
+  const hidden = hiddenSet(layout, "center");
+  const todayVisible = ["networth", "vault-today", "briefing", "hand"].some(
+    (k) => !hidden.has(k),
+  );
 
   // Reading week-over-week + trend now ride the sealed reading index (the cron's
   // plaintext day series), not the retired snapshot store. A store miss or a bad
@@ -174,104 +192,120 @@ export async function CommandCenter({ userName }: { userName: string }) {
 
         {/* encrypted drop box — a client island behind the vault unlock; sealed
             messages left on /contact open here and nowhere else (ADR: sealed box). */}
-        <DropInbox offline={!r2Enabled()} />
+        {!hidden.has("dropbox") && <DropInbox offline={!r2Enabled()} />}
 
         {/* ───────────── TODAY ───────────── */}
-        <Zone label="today" right={todayLabel()} />
+        {todayVisible && <Zone label="today" right={todayLabel()} />}
 
         {/* net worth — a glance; full holdings + cash live on /portfolio. The
             numbers are a client island: everything rides the E2EE fin envelope
             (ADR 0061) and decrypts in the browser — sealed dots until unlocked. */}
-        <div className="border-b border-hairline px-4 py-4">
-          <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
-            <span>net worth</span>
-            <Link
-              href="/portfolio"
-              className="normal-case tracking-normal text-amber hover:underline"
-            >
-              portfolio →
-            </Link>
+        {!hidden.has("networth") && (
+          <div className="border-b border-hairline px-4 py-4">
+            <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
+              <span>net worth</span>
+              <Link
+                href="/portfolio"
+                className="normal-case tracking-normal text-amber hover:underline"
+              >
+                portfolio →
+              </Link>
+            </div>
+            <NetWorthGlance offline={!r2Enabled()} />
           </div>
-          <NetWorthGlance offline={!r2Enabled()} />
-        </div>
+        )}
 
         {/* today's daily note, parsed: headline + planner + a journal peek. A
             client island — the note is sealed in the E2EE vault, so it's fetched +
             decrypted in the browser (unlock in files/), never server-rendered. */}
-        <VaultTodayGlance offline={!r2Enabled()} date={today} />
+        {!hidden.has("vault-today") && (
+          <VaultTodayGlance offline={!r2Enabled()} date={today} />
+        )}
 
-        <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
-          <Module
-            label="briefing"
-            className="border-0 sm:col-span-2"
-            action={
-              <Link
-                href="/briefing"
-                className="text-xs text-amber hover:underline"
+        {(!hidden.has("briefing") || !hidden.has("hand")) && (
+          <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
+            {!hidden.has("briefing") && (
+              <Module
+                label="briefing"
+                className="border-0 sm:col-span-2"
+                action={
+                  <Link
+                    href="/briefing"
+                    className="text-xs text-amber hover:underline"
+                  >
+                    [full]
+                  </Link>
+                }
               >
-                [full]
-              </Link>
-            }
-          >
-            <p className="text-fg">{b.driver}</p>
-            <Tape items={ticks} className="mt-2" />
-            <BriefingRelevance briefing={b} offline={!r2Enabled()} />
-          </Module>
+                <p className="text-fg">{b.driver}</p>
+                <Tape items={ticks} className="mt-2" />
+                <BriefingRelevance briefing={b} offline={!r2Enabled()} />
+              </Module>
+            )}
 
-          <Module
-            label="today's hand"
-            className="border-0 sm:col-span-2"
-            action={
-              <Link
-                href="/riichi"
-                className="text-xs text-amber hover:underline"
+            {!hidden.has("hand") && (
+              <Module
+                label="today's hand"
+                className="border-0 sm:col-span-2"
+                action={
+                  <Link
+                    href="/riichi"
+                    className="text-xs text-amber hover:underline"
+                  >
+                    [solve]
+                  </Link>
+                }
               >
-                [solve]
-              </Link>
-            }
-          >
-            <p className="text-fg">
-              <span lang="ja" className="font-[family-name:var(--font-jp)]">
-                本日の一手
-              </span>{" "}
-              — {riichi.todaySolved ? "solved ✓" : "unsolved"}
-            </p>
-            <p className="mt-1.5 text-xs text-muted">
-              solve to keep the streak
-            </p>
-          </Module>
-        </div>
+                <p className="text-fg">
+                  <span lang="ja" className="font-[family-name:var(--font-jp)]">
+                    本日の一手
+                  </span>{" "}
+                  — {riichi.todaySolved ? "solved ✓" : "unsolved"}
+                </p>
+                <p className="mt-1.5 text-xs text-muted">
+                  solve to keep the streak
+                </p>
+              </Module>
+            )}
+          </div>
+        )}
 
         {/* ──────────── THIS WEEK ──────────── */}
-        <Zone label="this week" right={weekRange()} />
-        <div className="px-4 py-2">
-          {rows.map((r) => (
-            <ActivityRow
-              key={r.k}
-              k={r.k}
-              value={r.value}
-              levels={r.levels}
-              last={false}
-            />
-          ))}
-          {/* journal — a client island (the count + trend come from the sealed
+        {!hidden.has("week") && (
+          <>
+            <Zone label="this week" right={weekRange()} />
+            <div className="px-4 py-2">
+              {rows.map((r) => (
+                <ActivityRow
+                  key={r.k}
+                  k={r.k}
+                  value={r.value}
+                  levels={r.levels}
+                  last={false}
+                />
+              ))}
+              {/* journal — a client island (the count + trend come from the sealed
               vault index), always the final, borderless row. */}
-          <JournalActivityRow offline={!r2Enabled()} today={today} />
-        </div>
+              <JournalActivityRow offline={!r2Enabled()} today={today} />
+            </div>
+          </>
+        )}
 
         {/* arena — the same band the lobby shows (rank, recent games, drill-down),
             so the owner doesn't have to sign out to see it. The THIS WEEK tft row
             keeps the cadence; this is the standing (deliberate 0032 dent). */}
-        <TftModule tft={tft} history={tftHistory} />
+        {!hidden.has("tft") && <TftModule tft={tft} history={tftHistory} />}
 
         {/* 2fa — seeds sealed in the vault, codes computed in-browser behind the
             unlock (ADR: TOTP drawer); the server never sees a seed or a code. */}
-        <div className="border-t border-hairline px-4 py-4">
-          <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-            2fa
+        {!hidden.has("totp") && (
+          <div className="border-t border-hairline px-4 py-4">
+            <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+              2fa
+            </div>
+            <TotpDrawer offline={!r2Enabled()} />
           </div>
-          <TotpDrawer offline={!r2Enabled()} />
-        </div>
+        )}
 
         {/* quick jumps */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">

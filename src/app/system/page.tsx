@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { AuthJournalPanel } from "@/components/AuthJournal";
+import { LayoutPanel } from "@/components/LayoutPanel";
 import { PasskeyManager } from "@/components/PasskeyManager";
 import { RecoveryShares } from "@/components/RecoveryShares";
 import {
@@ -55,6 +56,12 @@ export default async function SystemPage() {
         <PasskeyManager />
         <LastSignIn />
         <RecoveryShares offline={!r2Enabled()} />
+
+        {/* ───────────── LAYOUT ───────────── */}
+        <Section label="layout" right="visibility" />
+        <div className="px-4 py-3">
+          <LayoutPanel offline={!r2Enabled()} />
+        </div>
 
         {/* ───────────── JOURNAL ───────────── */}
         <Section label="journal" right="hash-chained" />
