@@ -14,6 +14,7 @@ import {
   removeTrip,
   tripTitle,
   upsertTrip,
+  type DepArr,
   type ModeFilter,
   type PlaceCandidate,
   type TransitConfig,
@@ -66,6 +67,10 @@ export function TransitClient({ offline }: { offline: boolean }) {
   const [from, setFrom] = useState<TransitPlace | null>(null);
   const [to, setTo] = useState<TransitPlace | null>(null);
   const [modes, setModes] = useState<ModeFilter>("train+bus");
+  // "now" = plan forward from the present; "dep"/"arr" anchor on `atText`
+  // (a datetime-local value — the device clock is the owner's clock).
+  const [timing, setTiming] = useState<"now" | "dep" | "arr">("now");
+  const [atText, setAtText] = useState("");
   const [js, setJs] = useState<JourneysState>({ phase: "idle" });
   const runSeq = useRef(0);
 
@@ -81,7 +86,13 @@ export function TransitClient({ offline }: { offline: boolean }) {
 
   /** Plan one origin→destination; a later call abandons an earlier response. */
   const plan = useCallback(
-    async (f: TransitPlace, t: TransitPlace, m: ModeFilter, title: string) => {
+    async (
+      f: TransitPlace,
+      t: TransitPlace,
+      m: ModeFilter,
+      title: string,
+      when: { depArr: DepArr; at: Date } | null = null,
+    ) => {
       const seq = ++runSeq.current;
       setJs({ phase: "loading", title });
       try {
@@ -90,6 +101,10 @@ export function TransitClient({ offline }: { offline: boolean }) {
           ["to", endpointParam(t)],
           ["modes", m],
         ]);
+        if (when) {
+          qs.set("when", when.depArr);
+          qs.set("at", when.at.toISOString());
+        }
         const res = await fetch(`/api/transit/trip?${qs}`);
         if (runSeq.current !== seq) return;
         if (!res.ok) {
@@ -125,13 +140,30 @@ export function TransitClient({ offline }: { offline: boolean }) {
     [],
   );
 
+  /** The planner's current time anchor (null = leave now); annotates the
+   *  journeys title so a constrained plan names its constraint. */
+  function currentTiming(): {
+    when: { depArr: DepArr; at: Date } | null;
+    suffix: string;
+  } {
+    if (timing === "now" || !atText) return { when: null, suffix: "" };
+    const ms = Date.parse(atText);
+    if (Number.isNaN(ms)) return { when: null, suffix: "" };
+    const wall = atText.replace("T", " ");
+    return {
+      when: { depArr: timing, at: new Date(ms) },
+      suffix: timing === "arr" ? ` · arrive by ${wall}` : ` · leave ${wall}`,
+    };
+  }
+
   function runTrip(trip: TransitTrip, flip = false) {
     const f = flip ? trip.to : trip.from;
     const t = flip ? trip.from : trip.to;
     const title = flip
       ? `${trip.to.name} → ${trip.from.name}`
       : tripTitle(trip);
-    void plan(f, t, trip.modes, title);
+    const { when, suffix } = currentTiming();
+    void plan(f, t, trip.modes, title + suffix, when);
   }
 
   // Load + decrypt once per unlock; auto-plan the first saved trip so opening
@@ -290,6 +322,25 @@ export function TransitClient({ offline }: { offline: boolean }) {
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <select
+            value={timing}
+            onChange={(e) => setTiming(e.target.value as typeof timing)}
+            className={input}
+            aria-label="departure or arrival anchor"
+          >
+            <option value="now">leave now</option>
+            <option value="dep">leave at</option>
+            <option value="arr">arrive by</option>
+          </select>
+          {timing !== "now" && (
+            <input
+              type="datetime-local"
+              value={atText}
+              onChange={(e) => setAtText(e.target.value)}
+              className={input}
+              aria-label="anchor time"
+            />
+          )}
+          <select
             value={modes}
             onChange={(e) => setModes(e.target.value as ModeFilter)}
             className={input}
@@ -305,11 +356,17 @@ export function TransitClient({ offline }: { offline: boolean }) {
             type="button"
             className={btn}
             disabled={!from || !to || planning}
-            onClick={() =>
-              from &&
-              to &&
-              void plan(from, to, modes, `${from.name} → ${to.name}`)
-            }
+            onClick={() => {
+              if (!from || !to) return;
+              const { when, suffix } = currentTiming();
+              void plan(
+                from,
+                to,
+                modes,
+                `${from.name} → ${to.name}${suffix}`,
+                when,
+              );
+            }}
           >
             plan ▸
           </button>

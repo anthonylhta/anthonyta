@@ -250,18 +250,29 @@ export function stopFinderParams(q: string): URLSearchParams {
   ]);
 }
 
-/** Query for `/v1/tp/trip` — door-to-door journeys, real-time, mode-filtered. */
+/** EFA's two time anchors: "dep" plans forward from the time (leave at/after),
+ *  "arr" plans backward from it (arrive by). */
+export type DepArr = "dep" | "arr";
+
+export function isDepArr(x: unknown): x is DepArr {
+  return x === "dep" || x === "arr";
+}
+
+/** Query for `/v1/tp/trip` — door-to-door journeys, real-time, mode-filtered.
+ *  `at` is the anchor instant (default: now); `depArr` picks which side it
+ *  binds — departure floor or arrival ceiling. */
 export function tripParams(opts: {
   from: Pick<TransitPlace, "kind" | "value">;
   to: Pick<TransitPlace, "kind" | "value">;
   modes: ModeFilter;
-  now?: Date;
+  depArr?: DepArr;
+  at?: Date;
 }): URLSearchParams {
-  const { date, time } = sydneyDateTime(opts.now);
+  const { date, time } = sydneyDateTime(opts.at);
   const params = new URLSearchParams([
     ["outputFormat", "rapidJSON"],
     ["coordOutputFormat", "EPSG:4326"],
-    ["depArrMacro", "dep"],
+    ["depArrMacro", opts.depArr ?? "dep"],
     ["itdDate", date],
     ["itdTime", time],
     ...endpointParams("origin", opts.from),
