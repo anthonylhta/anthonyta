@@ -9,10 +9,12 @@ import { GithubModule } from "@/components/GithubModule";
 import { TftModule } from "@/components/TftModule";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
+import { getLayout } from "@/lib/connectors/layout";
 import { getHandOfTheDay } from "@/lib/connectors/riichi";
 import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
+import { hiddenSet } from "@/lib/layout";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { me, nav, reading as mockReading, riichi } from "@/lib/mock";
 
@@ -49,7 +51,7 @@ function NavItem({
 
 /** The public face of the hub — what visitors / recruiters see (ADR 0004). */
 export async function Lobby() {
-  const [reads, hand, briefingData, lang, gh, tft, tftHistory] =
+  const [reads, hand, briefingData, lang, gh, tft, tftHistory, layout] =
     await Promise.all([
       getCurrentlyReading(),
       getHandOfTheDay(),
@@ -58,8 +60,12 @@ export async function Lobby() {
       getGithub(),
       getTft(),
       getTftHistory(),
+      getLayout(),
     ]);
   const briefing = briefingData ?? sampleBriefing;
+  // Owner-curated visibility (roadmap 59): a hidden module simply doesn't
+  // render — guests see whatever the layout config currently says.
+  const hidden = hiddenSet(layout, "lobby");
   const top = reads[0];
   const handTeaser = hand
     ? "what would you discard?"
@@ -99,105 +105,128 @@ export async function Lobby() {
         <Prompt tagline={me.tagline} subtitle={me.intro} />
 
         {/* module grid */}
-        <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-3">
-          <Module
-            label="languages"
-            className="border-0"
-            action={
-              <Link
-                href="/translator"
-                className="text-xs text-amber hover:underline"
+        {["languages", "reading", "riichi"].some((k) => !hidden.has(k)) && (
+          <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-3">
+            {!hidden.has("languages") && (
+              <Module
+                label="languages"
+                className="border-0"
+                action={
+                  <Link
+                    href="/translator"
+                    className="text-xs text-amber hover:underline"
+                  >
+                    [open]
+                  </Link>
+                }
               >
-                [open]
-              </Link>
-            }
-          >
-            <div className="space-y-2">
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted">jp streak</span>
-                <span className="tabular-nums text-fg">{lang.streakDays}d</span>
-              </div>
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted">translations</span>
-                <span className="tabular-nums text-fg">{lang.total}</span>
-              </div>
-              <div className="flex items-baseline justify-between">
-                <span className="text-muted">this week</span>
-                <span className="tabular-nums text-fg">{lang.thisWeek}</span>
-              </div>
-              {topTonePct != null ? (
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-muted">tone</span>
-                  <span className="text-fg">
-                    <span className="text-amber">{lang.topTone}</span>{" "}
-                    {topTonePct}%
-                  </span>
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-muted">jp streak</span>
+                    <span className="tabular-nums text-fg">
+                      {lang.streakDays}d
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-muted">translations</span>
+                    <span className="tabular-nums text-fg">{lang.total}</span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-muted">this week</span>
+                    <span className="tabular-nums text-fg">
+                      {lang.thisWeek}
+                    </span>
+                  </div>
+                  {topTonePct != null ? (
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-muted">tone</span>
+                      <span className="text-fg">
+                        <span className="text-amber">{lang.topTone}</span>{" "}
+                        {topTonePct}%
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-          </Module>
+              </Module>
+            )}
 
-          <Module label="reading" className="border-0">
-            <div className="space-y-2">
-              <p className="line-clamp-2 text-fg">{reading.title}</p>
-              <p className="text-xs text-muted">
-                ch. {reading.chapter}
-                {reading.total ? `/${reading.total}` : ""}
-                {reading.count > 1 ? ` · ${reading.count} in progress` : ""}
-              </p>
-              {reading.total ? (
-                <Bar value={reading.chapter} max={reading.total} width={8} />
-              ) : null}
-            </div>
-          </Module>
+            {!hidden.has("reading") && (
+              <Module label="reading" className="border-0">
+                <div className="space-y-2">
+                  <p className="line-clamp-2 text-fg">{reading.title}</p>
+                  <p className="text-xs text-muted">
+                    ch. {reading.chapter}
+                    {reading.total ? `/${reading.total}` : ""}
+                    {reading.count > 1 ? ` · ${reading.count} in progress` : ""}
+                  </p>
+                  {reading.total ? (
+                    <Bar
+                      value={reading.chapter}
+                      max={reading.total}
+                      width={8}
+                    />
+                  ) : null}
+                </div>
+              </Module>
+            )}
 
-          <Module
-            label="riichi"
-            className="border-0"
-            action={
-              <Link
-                href="/riichi"
-                className="text-xs text-amber hover:underline"
+            {!hidden.has("riichi") && (
+              <Module
+                label="riichi"
+                className="border-0"
+                action={
+                  <Link
+                    href="/riichi"
+                    className="text-xs text-amber hover:underline"
+                  >
+                    [solve]
+                  </Link>
+                }
               >
-                [solve]
-              </Link>
-            }
-          >
-            <div className="space-y-1">
-              <p className="text-fg">{handTeaser}</p>
-              <p className="text-xs text-muted">
-                <span lang="ja" className="font-[family-name:var(--font-jp)]">
-                  本日の一手
-                </span>
-              </p>
-            </div>
-          </Module>
-        </div>
+                <div className="space-y-1">
+                  <p className="text-fg">{handTeaser}</p>
+                  <p className="text-xs text-muted">
+                    <span
+                      lang="ja"
+                      className="font-[family-name:var(--font-jp)]"
+                    >
+                      本日の一手
+                    </span>
+                  </p>
+                </div>
+              </Module>
+            )}
+          </div>
+        )}
 
         {/* code — github activity */}
-        <GithubModule gh={gh} />
+        {!hidden.has("github") && <GithubModule gh={gh} />}
 
         {/* arena — tft ladder */}
-        <TftModule tft={tft} history={tftHistory} />
+        {!hidden.has("tft") && <TftModule tft={tft} history={tftHistory} />}
 
         {/* briefing */}
-        <Link
-          href="/briefing"
-          className="block border-t border-hairline px-4 py-4 transition-colors hover:bg-surface/30"
-        >
-          <div className="mb-2 flex items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-muted">
-            <span>briefing</span>
-            <span className="h-px flex-1 bg-hairline" />
-            <span className="tabular-nums">
-              {briefing.weekday} {briefing.date}
-            </span>
-          </div>
-          <Tape items={briefing.tape.slice(0, 8)} />
-          <p className="mt-3 flex items-baseline justify-between gap-3 text-sm">
-            <span className="text-fg/90">driving: {briefing.driver}</span>
-            <span className="shrink-0 text-xs text-amber">full briefing →</span>
-          </p>
-        </Link>
+        {!hidden.has("briefing") && (
+          <Link
+            href="/briefing"
+            className="block border-t border-hairline px-4 py-4 transition-colors hover:bg-surface/30"
+          >
+            <div className="mb-2 flex items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-muted">
+              <span>briefing</span>
+              <span className="h-px flex-1 bg-hairline" />
+              <span className="tabular-nums">
+                {briefing.weekday} {briefing.date}
+              </span>
+            </div>
+            <Tape items={briefing.tape.slice(0, 8)} />
+            <p className="mt-3 flex items-baseline justify-between gap-3 text-sm">
+              <span className="text-fg/90">driving: {briefing.driver}</span>
+              <span className="shrink-0 text-xs text-amber">
+                full briefing →
+              </span>
+            </p>
+          </Link>
+        )}
 
         {/* nav */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
