@@ -22,6 +22,7 @@ test.describe("guest gating", () => {
     "/api/files/raw?p=meta%2Fkeystore", // keystore exfil attempt via raw
     "/api/files/keystore", // wrapped-master-key read
     "/api/fin/config", // E2EE financial config (ADR 0054; holdings too since ADR 0061)
+    "/api/totp", // E2EE TOTP seed envelope (ADR: TOTP drawer)
     "/api/prf/wrap", // passkey PRF vault-unlock wraps (ADR: PRF unlock)
     "/api/fin/snapkey", // retired sealed-box route — stays 404 for everyone
     "/api/fin/snapshots?days=30", // retired sealed-history route — stays 404
