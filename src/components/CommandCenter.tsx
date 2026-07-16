@@ -295,6 +295,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
               translator/
             </Link>
             <Link
+              href="/transit"
+              className="text-amber/80 transition-colors hover:text-amber"
+            >
+              transit/
+            </Link>
+            <Link
               href="/vault"
               className="text-amber/80 transition-colors hover:text-amber"
             >

@@ -172,6 +172,24 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/transit/config",
+    probe: "/api/transit/config",
+    shape: "owner-api",
+    methods: ["GET", "PUT"],
+  },
+  {
+    routeKey: "/api/transit/stops",
+    probe: "/api/transit/stops?q=central",
+    shape: "owner-api",
+    methods: ["GET"],
+  },
+  {
+    routeKey: "/api/transit/trip",
+    probe: "/api/transit/trip?from=stop%3A1&to=stop%3A2",
+    shape: "owner-api",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/api/vault/raw",
     probe: "/api/vault/raw?p=vault%2Fx.bin",
     shape: "owner-api",
@@ -208,6 +226,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
   {
     routeKey: "/system",
     probe: "/system",
+    shape: "owner-page",
+    methods: ["GET"],
+  },
+  {
+    routeKey: "/transit",
+    probe: "/transit",
     shape: "owner-page",
     methods: ["GET"],
   },

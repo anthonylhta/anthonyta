@@ -33,6 +33,10 @@ test.describe("guest gating", () => {
     "/api/vault/raw?p=meta%2Fkeystore", // keystore exfil attempt via the vault route
     "/api/dropbox/list", // owner-gated sealed drop-box listing (ADR: sealed box)
     "/api/dropbox/key", // owner-gated box keypair record (holds the sealed priv)
+    "/transit", // the owner-only transit planner (ADR: transit page)
+    "/api/transit/config", // E2EE saved-trips envelope (home/work addresses)
+    "/api/transit/stops?q=central", // TfNSW place-search proxy
+    "/api/transit/trip?from=stop%3A1&to=stop%3A2", // TfNSW journey proxy
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
