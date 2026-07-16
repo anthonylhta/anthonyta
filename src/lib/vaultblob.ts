@@ -14,6 +14,11 @@ export const VAULT_INDEX_PATH = "vault/index";
 /** The sealed vector search index (ADR: private semantic search) — just another
  *  `vault/*` ciphertext blob served by the same owner-gated raw route. */
 export const VAULT_SEARCH_INDEX_PATH = "vault/search-index.bin";
+/** The sealed integrity manifest (ADR: integrity manifest) — the Merkle record
+ *  vault-sync seals over every vault blob, one more leaf on the same raw route.
+ *  It covers everything under `vault/` EXCEPT itself (it can't contain its own
+ *  hash); its own integrity comes from the AEV tag + the root recompute. */
+export const VAULT_MANIFEST_PATH = "vault/manifest.bin";
 
 export interface VaultIndexNote {
   id: string;
@@ -62,8 +67,9 @@ export function imageBlob(id: string): string {
 }
 
 // The only leaf shapes the raw route + store ever serve: the sealed note index, the
-// sealed search index, or an `n-`/`i-` envelope named by a 22-char base64url id.
-// Length is exact — nothing here adds a random suffix, unlike the inbox.
+// sealed search index, the sealed integrity manifest, or an `n-`/`i-` envelope named
+// by a 22-char base64url id. Length is exact — nothing here adds a random suffix,
+// unlike the inbox.
 const VAULT_LEAF = /^[ni]-[A-Za-z0-9_-]{22}\.bin$/;
 
 /** Traversal/probe guard for a STORED vault pathname — the only shape we serve. */
@@ -72,7 +78,10 @@ export function isValidVaultPath(p: string): boolean {
     return false;
   const leaf = p.slice(VAULT_PREFIX.length);
   return (
-    leaf === "index" || leaf === "search-index.bin" || VAULT_LEAF.test(leaf)
+    leaf === "index" ||
+    leaf === "search-index.bin" ||
+    leaf === "manifest.bin" ||
+    VAULT_LEAF.test(leaf)
   );
 }
 

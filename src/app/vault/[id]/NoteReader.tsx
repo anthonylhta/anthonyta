@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { useVault, type Vault } from "@/app/files/useVault";
+import { hashBytes, isManifest } from "@/lib/merkle";
 import { preprocessNote } from "@/lib/vault";
 import {
   isVaultIndex,
   noteBlob,
   VAULT_INDEX_PATH,
+  VAULT_MANIFEST_PATH,
   type VaultIndex,
   type VaultIndexNote,
 } from "@/lib/vaultblob";
+import { manifestHashFor } from "@/lib/vaultverify";
 import { NoteBody } from "./NoteBody";
 
 // Input/button idioms, lifted from the FinPanel/FilesInbox unlock prompts.
@@ -42,6 +45,10 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
   const [phase, setPhase] = useState<Phase>("decrypting");
   const [note, setNote] = useState<VaultIndexNote | null>(null);
   const [md, setMd] = useState<string | null>(null);
+  // Valid decrypt, wrong lineage: the served ciphertext doesn't match the
+  // integrity manifest (e.g. substituted with its own older valid envelope).
+  // Distinct from the tamper phase — the body still renders, under a banner.
+  const [integrityAlarm, setIntegrityAlarm] = useState(false);
 
   // Render-phase reset (not an effect), per the lint-blessed pattern: on the
   // lock/unlock edge OR a navigation to a different note id, drop the decrypted
@@ -53,6 +60,7 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
     setPhase("decrypting");
     setNote(null);
     setMd(null);
+    setIntegrityAlarm(false);
   }
 
   // Fetch + decrypt once per unlock. A cancelled flag drops a late resolve after
@@ -66,10 +74,16 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
       // envelope, together — one round-trip each.
       let idxRes: Response;
       let noteRes: Response;
+      let manRes: Response | null;
       try {
-        [idxRes, noteRes] = await Promise.all([
+        [idxRes, noteRes, manRes] = await Promise.all([
           fetch(`/api/vault/raw?p=${encodeURIComponent(VAULT_INDEX_PATH)}`),
           fetch(`/api/vault/raw?p=${encodeURIComponent(noteBlob(id))}`),
+          // The manifest only ever powers the integrity banner — its failures
+          // never block the note (collection-level alarms live on /vault).
+          fetch(
+            `/api/vault/raw?p=${encodeURIComponent(VAULT_MANIFEST_PATH)}`,
+          ).catch(() => null),
         ]);
       } catch {
         if (!cancelled) setPhase("unreachable");
@@ -111,14 +125,34 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
       // Decrypt the note body. A throw means the cached key no longer matches this
       // keystore (reset elsewhere) — lock/unlock to re-derive.
       let raw: string;
+      const noteBuf = new Uint8Array(await noteRes.arrayBuffer());
       try {
-        const { bytes } = await openItem(
-          new Uint8Array(await noteRes.arrayBuffer()),
-        );
+        const { bytes } = await openItem(noteBuf);
         raw = new TextDecoder().decode(bytes);
       } catch {
         if (!cancelled) setPhase("tamper");
         return;
+      }
+
+      // Lazy integrity check (ADR: integrity manifest): a note substituted with
+      // its own OLDER valid ciphertext decrypts cleanly — only the manifest hash
+      // notices. Best-effort: no manifest / unreadable manifest → no banner here.
+      if (manRes?.status === 200) {
+        try {
+          const opened = await openItem(
+            new Uint8Array(await manRes.arrayBuffer()),
+          );
+          const man: unknown = JSON.parse(
+            new TextDecoder().decode(opened.bytes),
+          );
+          if (isManifest(man)) {
+            const recorded = manifestHashFor(man, noteBlob(id));
+            if (recorded !== null && recorded !== (await hashBytes(noteBuf)))
+              if (!cancelled) setIntegrityAlarm(true);
+          }
+        } catch {
+          // an unreadable manifest is /vault's alarm to raise, not this note's
+        }
       }
 
       // The pure, UNCHANGED preprocessing — wikilinks → /vault/<id>, embeds →
@@ -179,6 +213,19 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
           {note.modified.slice(0, 10)}
         </p>
       </div>
+
+      {integrityAlarm && (
+        <div className="mx-4 mt-3 border border-down/60 px-3 py-2 text-xs text-down">
+          <p className="font-semibold uppercase tracking-[0.15em]">
+            integrity alarm
+          </p>
+          <p className="mt-1">
+            this note&apos;s ciphertext does not match the integrity manifest —
+            it may have been substituted or rolled back to an older version.
+            compare against your local vault before trusting it.
+          </p>
+        </div>
+      )}
 
       <NoteBody md={md} openItem={openItem} />
     </>
