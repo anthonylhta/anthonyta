@@ -625,6 +625,93 @@ export function normalizeTrip(json: unknown): TripResult {
   };
 }
 
+/** The ordered transit-leg fingerprint — two journeys with the same signature
+ *  are "the same route" for selection purposes. */
+function journeySignature(j: TransitJourney): string {
+  return j.legs
+    .filter((l) => l.kind === "transit")
+    .map((l) => `${l.modeClass}:${l.line ?? ""}`)
+    .join(">");
+}
+
+/**
+ * Cut a journey list down to what's worth choosing between — at most two.
+ * The engine returns several near-identical departures, which reads as noise;
+ * a second option earns its slot only by adding information:
+ *   - the time-first journey is cancelled → show it (that IS information)
+ *     plus the first live alternative, or
+ *   - a DIFFERENT route at comparable cost (≤ 10 min slower), or
+ *   - a faster journey whatever its shape (the "less convenient but quicker"
+ *     trade the owner might take).
+ * Everything else stays reachable behind the caller's "+n more" affordance.
+ */
+export function pickJourneys(journeys: TransitJourney[]): TransitJourney[] {
+  if (journeys.length <= 2) return journeys;
+  const first = journeys[0];
+  const primary = journeys.find((j) => !j.cancelled) ?? first;
+  if (first.cancelled && primary !== first) return [first, primary];
+
+  const pSig = journeySignature(primary);
+  const pDur = primary.durationMin ?? Infinity;
+  for (const j of journeys.slice(journeys.indexOf(primary) + 1)) {
+    if (j.cancelled) continue;
+    const dur = j.durationMin ?? Infinity;
+    if (journeySignature(j) !== pSig && dur <= pDur + 10) return [primary, j];
+    if (dur < pDur) return [primary, j];
+  }
+  return [primary];
+}
+
+// ---------------------------------------------------------------------------
+// time-anchor picker parts (the themed replacement for datetime-local)
+// ---------------------------------------------------------------------------
+
+const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** True iff `hm` is a well-formed 24h "HH:MM". */
+export function isValidHm(hm: string): boolean {
+  return HM.test(hm);
+}
+
+/** Local-clock `YYYY-MM-DD` + `HH:MM` → a Date (the device clock IS the
+ *  owner's clock on this single-user page); null on malformed parts. */
+export function anchorFromParts(ymd: string, hm: string): Date | null {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!dm || !isValidHm(hm)) return null;
+  const [h, m] = hm.split(":").map(Number);
+  const d = new Date(+dm[1], +dm[2] - 1, +dm[3], h, m);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+export interface DayOption {
+  ymd: string;
+  label: string;
+}
+
+/** The picker's day list: today + the next `count - 1` days, local clock,
+ *  labeled today / tomorrow / "fri 24/07". A commute planner doesn't need a
+ *  calendar widget's infinite horizon. */
+export function nextDays(count: number, from: Date = new Date()): DayOption[] {
+  const out: DayOption[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    out.push({
+      ymd: `${d.getFullYear()}-${mm}-${dd}`,
+      label:
+        i === 0
+          ? "today"
+          : i === 1
+            ? "tomorrow"
+            : `${WEEKDAYS[d.getDay()]} ${dd}/${mm}`,
+    });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // display helpers
 // ---------------------------------------------------------------------------

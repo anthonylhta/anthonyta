@@ -5,12 +5,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { randomId } from "@/lib/crypto";
 import {
   EMPTY_TRANSIT_CONFIG,
+  anchorFromParts,
   delayMinutes,
   endpointParam,
   fmtSydneyTime,
   groupNames,
+  isValidHm,
   modeName,
+  nextDays,
   normalizeTransitConfig,
+  pickJourneys,
   removeTrip,
   tripTitle,
   upsertTrip,
@@ -67,11 +71,18 @@ export function TransitClient({ offline }: { offline: boolean }) {
   const [from, setFrom] = useState<TransitPlace | null>(null);
   const [to, setTo] = useState<TransitPlace | null>(null);
   const [modes, setModes] = useState<ModeFilter>("train+bus");
-  // "now" = plan forward from the present; "dep"/"arr" anchor on `atText`
-  // (a datetime-local value — the device clock is the owner's clock).
+  // "now" = plan forward from the present; "dep"/"arr" anchor on a day pick +
+  // typed HH:MM (themed parts — native datetime pickers fight the terminal
+  // look). The device clock is the owner's clock.
   const [timing, setTiming] = useState<"now" | "dep" | "arr">("now");
-  const [atText, setAtText] = useState("");
+  // Recomputed per render (7 tiny objects) so "today" stays true even in a
+  // tab that lives past midnight.
+  const dayOptions = nextDays(7);
+  const [dayYmd, setDayYmd] = useState(() => nextDays(1)[0].ymd);
+  const [timeText, setTimeText] = useState("");
   const [js, setJs] = useState<JourneysState>({ phase: "idle" });
+  // Collapsed by default: pickJourneys picks ≤ 2 worth choosing between.
+  const [showAll, setShowAll] = useState(false);
   const runSeq = useRef(0);
 
   // Render-phase reset on the lock/unlock edge (FinPanel's idiom) — decrypted
@@ -94,6 +105,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
       when: { depArr: DepArr; at: Date } | null = null,
     ) => {
       const seq = ++runSeq.current;
+      setShowAll(false);
       setJs({ phase: "loading", title });
       try {
         const qs = new URLSearchParams([
@@ -146,12 +158,13 @@ export function TransitClient({ offline }: { offline: boolean }) {
     when: { depArr: DepArr; at: Date } | null;
     suffix: string;
   } {
-    if (timing === "now" || !atText) return { when: null, suffix: "" };
-    const ms = Date.parse(atText);
-    if (Number.isNaN(ms)) return { when: null, suffix: "" };
-    const wall = atText.replace("T", " ");
+    if (timing === "now") return { when: null, suffix: "" };
+    const at = anchorFromParts(dayYmd, timeText);
+    if (!at) return { when: null, suffix: "" };
+    const day = dayOptions.find((d) => d.ymd === dayYmd)?.label ?? dayYmd;
+    const wall = `${day} ${timeText}`;
     return {
-      when: { depArr: timing, at: new Date(ms) },
+      when: { depArr: timing, at },
       suffix: timing === "arr" ? ` · arrive by ${wall}` : ` · leave ${wall}`,
     };
   }
@@ -284,7 +297,6 @@ export function TransitClient({ offline }: { offline: boolean }) {
   }
 
   async function deleteTrip(trip: TransitTrip): Promise<void> {
-    if (!window.confirm(`delete "${tripTitle(trip)}"?`)) return;
     await saveConfig((base) => removeTrip(base, trip.id));
   }
 
@@ -332,13 +344,32 @@ export function TransitClient({ offline }: { offline: boolean }) {
             <option value="arr">arrive by</option>
           </select>
           {timing !== "now" && (
-            <input
-              type="datetime-local"
-              value={atText}
-              onChange={(e) => setAtText(e.target.value)}
-              className={input}
-              aria-label="anchor time"
-            />
+            <>
+              <select
+                value={dayYmd}
+                onChange={(e) => setDayYmd(e.target.value)}
+                className={input}
+                aria-label="day"
+              >
+                {dayOptions.map((d) => (
+                  <option key={d.ymd} value={d.ymd}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={5}
+                value={timeText}
+                onChange={(e) => setTimeText(e.target.value)}
+                placeholder="hh:mm"
+                className={`w-20 ${input} ${
+                  timeText && !isValidHm(timeText) ? "text-down" : ""
+                }`}
+                aria-label="time (24h hh:mm)"
+              />
+            </>
           )}
           <select
             value={modes}
@@ -370,6 +401,19 @@ export function TransitClient({ offline }: { offline: boolean }) {
           >
             plan ▸
           </button>
+          {js.phase !== "idle" && (
+            <button
+              type="button"
+              className={btn}
+              title="clear results"
+              onClick={() => {
+                runSeq.current++;
+                setJs({ phase: "idle" });
+              }}
+            >
+              clear
+            </button>
+          )}
           {unlocked && cfg && from && to && (
             <SaveTripForm groups={groups} onSave={saveTrip} />
           )}
@@ -421,11 +465,37 @@ export function TransitClient({ offline }: { offline: boolean }) {
           {js.result.journeys.length === 0 ? (
             <p className="text-xs text-muted">no journeys found</p>
           ) : (
-            <div className="flex flex-col gap-2">
-              {js.result.journeys.map((j, i) => (
-                <JourneyCard key={i} journey={j} fastest={i === 0} />
-              ))}
-            </div>
+            (() => {
+              const shown = showAll
+                ? js.result.journeys
+                : pickJourneys(js.result.journeys);
+              const hidden = js.result.journeys.length - shown.length;
+              return (
+                <div className="flex flex-col gap-2">
+                  {shown.map((j, i) => (
+                    <JourneyCard key={i} journey={j} fastest={i === 0} />
+                  ))}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(true)}
+                      className="self-start text-xs text-muted transition-colors hover:text-amber"
+                    >
+                      + {hidden} more option{hidden === 1 ? "" : "s"} ▸
+                    </button>
+                  )}
+                  {showAll && js.result.journeys.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(false)}
+                      className="self-start text-xs text-muted transition-colors hover:text-amber"
+                    >
+                      ▴ show fewer
+                    </button>
+                  )}
+                </div>
+              );
+            })()
           )}
         </div>
       )}
@@ -515,14 +585,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
                     >
                       ⇄
                     </button>
-                    <button
-                      type="button"
-                      title="delete"
-                      onClick={() => void deleteTrip(trip)}
-                      className={btn}
-                    >
-                      ✕
-                    </button>
+                    <DeleteButton onConfirm={() => void deleteTrip(trip)} />
                   </div>
                 ))}
               </div>
@@ -531,6 +594,41 @@ export function TransitClient({ offline }: { offline: boolean }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** Two-tap delete, in-theme (no native confirm dialog): first tap arms the
+ *  button as an amber-red "sure?", a second tap within 4s deletes. */
+function DeleteButton({ onConfirm }: { onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  if (armed) {
+    return (
+      <button
+        type="button"
+        title="confirm delete"
+        onClick={onConfirm}
+        className="border border-down px-2 py-1 text-down transition-colors hover:bg-down hover:text-bg"
+      >
+        sure?
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title="delete"
+      onClick={() => setArmed(true)}
+      className={btn}
+    >
+      ✕
+    </button>
   );
 }
 
@@ -672,18 +770,25 @@ function SaveTripForm({
     <span className="flex flex-wrap items-center gap-2">
       <input
         type="text"
-        list="transit-groups"
         value={group}
         onChange={(e) => setGroup(e.target.value)}
         placeholder="group (work…)"
         className={`w-28 ${input}`}
         disabled={busy}
       />
-      <datalist id="transit-groups">
-        {groups.map((g) => (
-          <option key={g} value={g} />
+      {groups
+        .filter((g) => g !== group.trim())
+        .map((g) => (
+          <button
+            key={g}
+            type="button"
+            onClick={() => setGroup(g)}
+            disabled={busy}
+            className="border border-hairline px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:border-amber hover:text-amber"
+          >
+            {g}
+          </button>
         ))}
-      </datalist>
       <input
         type="text"
         value={label}
