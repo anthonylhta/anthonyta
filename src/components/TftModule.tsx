@@ -9,10 +9,11 @@ import {
 } from "@/lib/tft";
 
 /**
- * The lobby's "arena" band — the live TFT ladder signal for recruiters (ADR 0082).
- * A full-width strip below the code band: rank + top-4 rate + the recent ranked
- * placements, coloured by finish. All public data. Not an anchor — TFT has no
- * canonical public profile URL to link out to (ADR 0082).
+ * The "arena" band — the live TFT ladder signal (ADR 0082). Born as the lobby's
+ * recruiter-facing strip below the code band, also rendered in the command
+ * center so the owner sees it without signing out: rank + top-4 rate + the
+ * recent ranked placements, coloured by finish. All public data. Not an anchor —
+ * TFT has no canonical public profile URL to link out to (ADR 0082).
  */
 
 export function TftModule({
