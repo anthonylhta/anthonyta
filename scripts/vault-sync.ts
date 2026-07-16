@@ -14,7 +14,9 @@
  *      index doubles as the sync manifest — there is no separate state file — so a
  *      note/image is re-sealed and re-uploaded ONLY when its bytes changed.
  *   3. Walk the vault, seal every changed note/image under the MK, upload the
- *      changed ones, rewrite the index, then prune blobs no longer backed by a file.
+ *      changed ones, rewrite the index + the integrity manifest (the Merkle
+ *      record the reader verifies on unlock — ADR: integrity manifest), then
+ *      prune blobs no longer backed by a file.
  *
  * The hub therefore only ever stores ciphertext under `vault/`; decryption happens
  * in the owner's browser with the same MK. Reuses `src/lib/crypto.ts`,
@@ -40,7 +42,15 @@ import {
   toB64url,
   unwrapMk,
 } from "../src/lib/crypto";
+import {
+  buildManifest,
+  carryForward,
+  hashBytes,
+  isManifest,
+  type VaultManifest,
+} from "../src/lib/merkle";
 import { r2Delete, r2Enabled, r2List, r2Put, readKey } from "../src/lib/r2";
+import { expectedVaultPaths } from "../src/lib/vaultverify";
 import {
   buildIndex,
   indexStats,
@@ -55,6 +65,7 @@ import {
   noteBlob,
   notePreview,
   VAULT_INDEX_PATH,
+  VAULT_MANIFEST_PATH,
   VAULT_PREFIX,
   VAULT_SEARCH_INDEX_PATH,
   type VaultIndex,
@@ -159,6 +170,31 @@ async function unwrapMasterKey(passphrase: string): Promise<CryptoKey> {
     );
   } catch {
     throw new Error("wrong passphrase");
+  }
+}
+
+/**
+ * The prior INTEGRITY manifest (the sealed Merkle record over every vault blob —
+ * distinct from the index-as-sync-manifest below). Absent → null (first run since
+ * the feature — epoch starts at 1). Present-but-unreadable → ALSO null, with a
+ * loud warning: the epoch restarts at 1, which the browser's epoch memory reports
+ * as a rollback alarm — deliberately noisy, because an unreadable manifest is
+ * exactly as suspicious as a rolled-back one.
+ */
+async function loadPriorManifest(mk: CryptoKey): Promise<VaultManifest | null> {
+  const envelope = await getBytes(VAULT_MANIFEST_PATH);
+  if (!envelope) return null;
+  try {
+    const { bytes } = await open(mk, envelope);
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!isManifest(parsed)) throw new Error("bad shape");
+    return parsed;
+  } catch {
+    console.error(
+      "⚠ the prior integrity manifest exists but cannot be read — the epoch will " +
+        "restart at 1 and the reader will raise a rollback alarm until re-verified",
+    );
+    return null;
   }
 }
 
@@ -326,7 +362,7 @@ async function readPassphrase(): Promise<string> {
 async function buildAndUploadSearchIndex(
   mk: CryptoKey,
   notes: WalkedNote[],
-): Promise<void> {
+): Promise<Uint8Array> {
   const docs: IndexDoc[] = notes.map((note) => ({
     id: note.id,
     title: note.name.replace(/\.md$/i, ""),
@@ -348,6 +384,7 @@ async function buildAndUploadSearchIndex(
     `· writing the search index (${stats.docs} notes, ${stats.tokens} trigrams, ${searchBytes.length} bytes)…`,
   );
   await putEnvelope(VAULT_SEARCH_INDEX_PATH, envelope);
+  return envelope;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,9 +410,13 @@ async function main(): Promise<void> {
   const mk = await unwrapMasterKey(passphrase);
   console.error("· unlocked the vault key");
 
-  // 2. the prior index doubles as the manifest — id → hash of the last upload
+  // 2. the prior index doubles as the sync manifest — id → hash of the last
+  // upload — and the prior INTEGRITY manifest carries the envelope hashes +
+  // epoch forward so unchanged blobs need no re-download
   const priorH = await loadPriorHashes(mk);
   console.error(`· prior index: ${priorH.size} entries`);
+  const priorManifest = await loadPriorManifest(mk);
+  const freshHashes = new Map<string, string>();
 
   // 3. walk the vault (reads + hashes every file)
   const { notes, images } = await walkVault(root);
@@ -398,6 +439,7 @@ async function main(): Promise<void> {
         note.bytes,
       );
       await putEnvelope(noteBlob(note.id), envelope);
+      freshHashes.set(noteBlob(note.id), await hashBytes(envelope));
       uploaded++;
     }
     indexNotes.push({
@@ -426,6 +468,7 @@ async function main(): Promise<void> {
         image.bytes,
       );
       await putEnvelope(imageBlob(image.id), envelope);
+      freshHashes.set(imageBlob(image.id), await hashBytes(envelope));
       uploaded++;
     }
     indexImages.push({
@@ -448,16 +491,64 @@ async function main(): Promise<void> {
   );
   console.error("· writing the index…");
   await putEnvelope(VAULT_INDEX_PATH, indexEnvelope);
+  freshHashes.set(VAULT_INDEX_PATH, await hashBytes(indexEnvelope));
 
   // 5b. build + seal the trigram full-text index. Rebuilt from scratch each run
   // (tokenizing the vault is cheap) and decrypted + queried entirely in the browser.
-  await buildAndUploadSearchIndex(mk, notes);
+  const searchEnvelope = await buildAndUploadSearchIndex(mk, notes);
+  freshHashes.set(VAULT_SEARCH_INDEX_PATH, await hashBytes(searchEnvelope));
+
+  // 5c. seal the integrity manifest — the Merkle record over every blob just
+  // written or kept, epoch+1 so the reader's device memory can catch a rollback.
+  // Unchanged blobs carry their envelope hash forward from the prior manifest;
+  // anything the prior manifest doesn't cover (its first run) is re-downloaded
+  // once and hashed. Written AFTER the index so a run that dies between the two
+  // leaves a stale manifest the reader flags loudly (re-run to heal), never a
+  // manifest attesting to blobs that don't exist yet.
+  const currentPaths = expectedVaultPaths(index);
+  const { entries, backfill } = carryForward(
+    priorManifest,
+    currentPaths,
+    freshHashes,
+  );
+  if (backfill.length > 0)
+    console.error(
+      `· manifest backfill: hashing ${backfill.length} already-stored blobs…`,
+    );
+  for (let i = 0; i < backfill.length; i++) {
+    const bytes = await getBytes(backfill[i]);
+    if (!bytes)
+      throw new Error(
+        `manifest backfill: ${backfill[i]} is in the index but not in the store`,
+      );
+    entries.push({ path: backfill[i], h: await hashBytes(bytes) });
+    if ((i + 1) % 50 === 0)
+      console.error(`  hashed ${i + 1}/${backfill.length}`);
+  }
+  const manifest = await buildManifest(
+    entries,
+    (priorManifest?.epoch ?? 0) + 1,
+  );
+  const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
+  const manifestEnvelope = await seal(
+    mk,
+    { n: "manifest", t: "application/json", s: manifestBytes.length },
+    manifestBytes,
+  );
+  console.error(
+    `· writing the integrity manifest (epoch ${manifest.epoch}, ${manifest.count} blobs)…`,
+  );
+  await putEnvelope(VAULT_MANIFEST_PATH, manifestEnvelope);
 
   console.error("· pruning stale blobs…");
 
   // 6. prune blobs no longer backed by a file. Uploads → index → prune, so a run
   // that dies before this leaves stale blobs the NEXT run cleans up (self-healing).
-  const keep = new Set<string>([VAULT_INDEX_PATH, VAULT_SEARCH_INDEX_PATH]);
+  const keep = new Set<string>([
+    VAULT_INDEX_PATH,
+    VAULT_SEARCH_INDEX_PATH,
+    VAULT_MANIFEST_PATH,
+  ]);
   for (const n of indexNotes) keep.add(noteBlob(n.id));
   for (const i of indexImages) keep.add(imageBlob(i.id));
 

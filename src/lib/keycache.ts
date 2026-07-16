@@ -28,6 +28,7 @@ const DB_NAME = "inbox-vault";
 const STORE = "keys";
 const ROW = "mk";
 const ACTIVITY_ROW = "activity";
+const EPOCH_ROW = "vaultEpoch";
 
 function withStore(
   mode: IDBTransactionMode,
@@ -85,8 +86,27 @@ export async function touchActivityStamp(now = Date.now()): Promise<void> {
   await withStore("readwrite", (s) => s.put(now, ACTIVITY_ROW));
 }
 
+/** The highest vault-manifest epoch this device has verified, or null when it
+ *  has never verified one (first sync — trusted by design, like the manifest's
+ *  own first run). */
+export async function getSeenEpoch(): Promise<number | null> {
+  const v = await withStore("readonly", (s) => s.get(EPOCH_ROW));
+  return typeof v === "number" && Number.isFinite(v) && v >= 1 ? v : null;
+}
+
+/** Remember a verified epoch — monotonic, never regresses (a lower value is
+ *  exactly the rollback signal the memory exists to catch). Best-effort. */
+export async function bumpSeenEpoch(epoch: number): Promise<void> {
+  if (!Number.isFinite(epoch) || epoch < 1) return;
+  const seen = await getSeenEpoch();
+  if (seen !== null && seen >= epoch) return;
+  await withStore("readwrite", (s) => s.put(epoch, EPOCH_ROW));
+}
+
 /** Forget the cached key and its activity stamp — the storage half of the lock
- *  button; the stamp is meaningless without a key. */
+ *  button; the stamp is meaningless without a key. The seen-epoch row is
+ *  deliberately NOT cleared: it isn't key material, and surviving lock/unlock
+ *  is what makes rollback detection work across sessions. */
 export async function clearCachedKey(): Promise<void> {
   await withStore("readwrite", (s) => s.delete(ROW));
   await withStore("readwrite", (s) => s.delete(ACTIVITY_ROW));

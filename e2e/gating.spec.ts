@@ -27,6 +27,7 @@ test.describe("guest gating", () => {
     "/api/fin/snapshots?days=30", // retired sealed-history route — stays 404
     "/api/vault/raw?p=vault%2Findex", // E2EE vault index ciphertext
     "/api/vault/raw?p=vault%2Fsearch-index.bin", // E2EE semantic search index
+    "/api/vault/raw?p=vault%2Fmanifest.bin", // E2EE integrity manifest (ADR: integrity manifest)
     "/api/vault/raw?p=vault%2Fn-AAAAAAAAAAAAAAAAAAAAAA.bin", // a vault note
     "/api/vault/raw?p=meta%2Fkeystore", // keystore exfil attempt via the vault route
     "/api/dropbox/list", // owner-gated sealed drop-box listing (ADR: sealed box)
