@@ -85,6 +85,16 @@ export function TransitClient({ offline }: { offline: boolean }) {
   const [showAll, setShowAll] = useState(false);
   const runSeq = useRef(0);
 
+  // The last executed query, for the 60s auto-refresh (roadmap 50). Cleared
+  // with the results (clear button, lock edge) so refreshes stop with them.
+  const lastQuery = useRef<{
+    f: TransitPlace;
+    t: TransitPlace;
+    m: ModeFilter;
+    title: string;
+    when: { depArr: DepArr; at: Date } | null;
+  } | null>(null);
+
   // Render-phase reset on the lock/unlock edge (FinPanel's idiom) — decrypted
   // trips AND any journeys derived from them leave with the key.
   const [prevUnlocked, setPrevUnlocked] = useState(unlocked);
@@ -94,8 +104,15 @@ export function TransitClient({ offline }: { offline: boolean }) {
     setCfgErr(null);
     setJs({ phase: "idle" });
   }
+  // Refs can't be touched in the render-phase reset above — clear the pending
+  // query on the lock edge here instead, so auto-refresh stops with the key.
+  useEffect(() => {
+    if (!unlocked) lastQuery.current = null;
+  }, [unlocked]);
 
-  /** Plan one origin→destination; a later call abandons an earlier response. */
+  /** Plan one origin→destination; a later call abandons an earlier response.
+   *  `silent` is the auto-refresh path: no loading flicker, failures keep the
+   *  last good result on screen, the user's expanded state survives. */
   const plan = useCallback(
     async (
       f: TransitPlace,
@@ -103,10 +120,14 @@ export function TransitClient({ offline }: { offline: boolean }) {
       m: ModeFilter,
       title: string,
       when: { depArr: DepArr; at: Date } | null = null,
+      silent = false,
     ) => {
       const seq = ++runSeq.current;
-      setShowAll(false);
-      setJs({ phase: "loading", title });
+      lastQuery.current = { f, t, m, title, when };
+      if (!silent) {
+        setShowAll(false);
+        setJs({ phase: "loading", title });
+      }
       try {
         const qs = new URLSearchParams([
           ["from", endpointParam(f)],
@@ -120,13 +141,14 @@ export function TransitClient({ offline }: { offline: boolean }) {
         const res = await fetch(`/api/transit/trip?${qs}`);
         if (runSeq.current !== seq) return;
         if (!res.ok) {
-          setJs({
-            phase: "error",
-            msg:
-              res.status === 503
-                ? "trip planner unreachable — try again"
-                : "trip request failed",
-          });
+          if (!silent)
+            setJs({
+              phase: "error",
+              msg:
+                res.status === 503
+                  ? "trip planner unreachable — try again"
+                  : "trip request failed",
+            });
           return;
         }
         const data = (await res.json()) as {
@@ -135,7 +157,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
         };
         if (runSeq.current !== seq) return;
         if (!data.result || !Array.isArray(data.result.journeys)) {
-          setJs({ phase: "error", msg: "trip request failed" });
+          if (!silent) setJs({ phase: "error", msg: "trip request failed" });
           return;
         }
         setJs({
@@ -145,12 +167,29 @@ export function TransitClient({ offline }: { offline: boolean }) {
           result: data.result,
         });
       } catch {
-        if (runSeq.current === seq)
+        if (!silent && runSeq.current === seq)
           setJs({ phase: "error", msg: "trip request failed" });
       }
     },
     [],
   );
+
+  // Auto-refresh: while results are on screen and the tab is visible, re-run
+  // the last query every 60s — "leave now" plans roll forward with the clock,
+  // anchored plans pick up fresh real-time. A hidden tab spends nothing.
+  const phaseRef = useRef(js.phase);
+  useEffect(() => {
+    phaseRef.current = js.phase;
+  }, [js.phase]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const q = lastQuery.current;
+      if (!q || phaseRef.current !== "ready") return;
+      if (document.visibilityState !== "visible") return;
+      void plan(q.f, q.t, q.m, q.title, q.when, true);
+    }, 60_000);
+    return () => clearInterval(id);
+  }, [plan]);
 
   /** The planner's current time anchor (null = leave now); annotates the
    *  journeys title so a constrained plan names its constraint. */
@@ -408,6 +447,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
               title="clear results"
               onClick={() => {
                 runSeq.current++;
+                lastQuery.current = null;
                 setJs({ phase: "idle" });
               }}
             >
@@ -442,6 +482,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
                 sample data — set TNSW_API_KEY
               </span>
             )}
+            <span className="text-[10px] text-muted/60">auto-refresh 60s</span>
           </div>
           {js.result.alerts.length > 0 && (
             <div className="mb-2 border border-hairline border-l-amber bg-surface/40 px-3 py-2">

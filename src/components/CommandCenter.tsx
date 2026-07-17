@@ -13,6 +13,7 @@ import { Tape } from "@/components/terminal/Tape";
 import { TftModule } from "@/components/TftModule";
 import { TodoGlance } from "@/components/TodoGlance";
 import { TotpDrawer } from "@/components/TotpDrawer";
+import { TransitGlance } from "@/components/TransitGlance";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import {
   ACTIVITY_DAYS,
@@ -26,6 +27,7 @@ import { getLayout } from "@/lib/connectors/layout";
 import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
+import { getWeather } from "@/lib/connectors/weather";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import {
   indexBaseline,
@@ -34,6 +36,7 @@ import {
   type SnapIndexDay,
 } from "@/lib/fin";
 import { hiddenSet } from "@/lib/layout";
+import { uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
 import { r2Enabled } from "@/lib/r2";
@@ -86,6 +89,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     tft,
     tftHistory,
     layout,
+    wx,
   ] = await Promise.all([
     getBriefing(),
     getLanguageStats(),
@@ -96,12 +100,15 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getTft(),
     getTftHistory(),
     getLayout(),
+    getWeather(),
   ]);
   const b = briefing ?? sampleBriefing;
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
   // which of these blocks render at all.
   const hidden = hiddenSet(layout, "center");
   const todayVisible = [
+    "weather",
+    "transit-next",
     "networth",
     "vault-today",
     "todo",
@@ -201,6 +208,46 @@ export async function CommandCenter({ userName }: { userName: string }) {
 
         {/* ───────────── TODAY ───────────── */}
         {todayVisible && <Zone label="today" right={todayLabel()} />}
+
+        {/* the morning glance rows (roadmap 50+51): Sydney weather is public
+            data server-rendered off the keyless Open-Meteo connector; the
+            next-trip line is a vault island over the sealed saved trips. */}
+        {!hidden.has("weather") && (
+          <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+              weather
+            </span>
+            <span className="min-w-0 flex-1 text-fg/90">
+              <span className="tabular-nums text-fg">
+                {Math.round(wx.tempC)}°
+              </span>{" "}
+              {weatherCodeText(wx.code)}
+              {wx.feelsC !== null && ` · feels ${Math.round(wx.feelsC)}°`}
+              {wx.uv !== null && (
+                <>
+                  {" · uv "}
+                  <span className={wx.uv >= 3 ? "text-amber" : "text-fg/90"}>
+                    {Math.round(wx.uv)}
+                  </span>{" "}
+                  {uvLabel(wx.uv)}
+                </>
+              )}
+              {wx.todayMinC !== null &&
+                wx.todayMaxC !== null &&
+                ` · ${Math.round(wx.todayMinC)}–${Math.round(wx.todayMaxC)}°`}
+            </span>
+          </div>
+        )}
+        {!hidden.has("transit-next") && (
+          <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+              transit
+            </span>
+            <span className="min-w-0 flex-1">
+              <TransitGlance offline={!r2Enabled()} />
+            </span>
+          </div>
+        )}
 
         {/* net worth — a glance; full holdings + cash live on /portfolio. The
             numbers are a client island: everything rides the E2EE fin envelope
