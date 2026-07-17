@@ -36,6 +36,7 @@ export const CENTER_MODULES: ModuleDef[] = [
   { key: "dropbox", label: "drop inbox (sealed messages)" },
   { key: "networth", label: "net worth glance" },
   { key: "vault-today", label: "today's daily note" },
+  { key: "todo", label: "quick capture (todo list)" },
   { key: "briefing", label: "briefing glance" },
   { key: "hand", label: "today's hand" },
   { key: "week", label: "this week (activity digest)" },

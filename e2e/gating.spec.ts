@@ -38,6 +38,7 @@ test.describe("guest gating", () => {
     "/api/transit/stops?q=central", // TfNSW place-search proxy
     "/api/transit/trip?from=stop%3A1&to=stop%3A2", // TfNSW journey proxy
     "/api/layout", // owner layout config write/read (ADR: layout visibility)
+    "/api/todo", // E2EE quick-capture envelope (ADR: quick capture)
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);

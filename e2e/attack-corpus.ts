@@ -172,6 +172,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/todo",
+    probe: "/api/todo",
+    shape: "owner-api",
+    methods: ["GET", "PUT"],
+  },
+  {
     routeKey: "/api/totp",
     probe: "/api/totp",
     shape: "owner-api",

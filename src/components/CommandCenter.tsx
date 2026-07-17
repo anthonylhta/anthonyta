@@ -11,6 +11,7 @@ import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { TftModule } from "@/components/TftModule";
+import { TodoGlance } from "@/components/TodoGlance";
 import { TotpDrawer } from "@/components/TotpDrawer";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import {
@@ -100,9 +101,13 @@ export async function CommandCenter({ userName }: { userName: string }) {
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
   // which of these blocks render at all.
   const hidden = hiddenSet(layout, "center");
-  const todayVisible = ["networth", "vault-today", "briefing", "hand"].some(
-    (k) => !hidden.has(k),
-  );
+  const todayVisible = [
+    "networth",
+    "vault-today",
+    "todo",
+    "briefing",
+    "hand",
+  ].some((k) => !hidden.has(k));
 
   // Reading week-over-week + trend now ride the sealed reading index (the cron's
   // plaintext day series), not the retired snapshot store. A store miss or a bad
@@ -220,6 +225,18 @@ export async function CommandCenter({ userName }: { userName: string }) {
             decrypted in the browser (unlock in files/), never server-rendered. */}
         {!hidden.has("vault-today") && (
           <VaultTodayGlance offline={!r2Enabled()} date={today} />
+        )}
+
+        {/* quick capture — the E2EE todo list (roadmap 53). A client island:
+            captures seal into the meta/todo envelope in the browser; sealed
+            dots until the key is in hand. */}
+        {!hidden.has("todo") && (
+          <div className="border-b border-hairline px-4 py-4">
+            <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+              capture
+            </div>
+            <TodoGlance offline={!r2Enabled()} />
+          </div>
         )}
 
         {(!hidden.has("briefing") || !hidden.has("hand")) && (
