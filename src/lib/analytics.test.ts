@@ -8,8 +8,11 @@ import {
   hllMerge,
   HLL_REGISTERS,
   isDayStats,
+  MAX_TRACKED_PATHS,
   newDaySalt,
   newHll,
+  OVERFLOW_PATH,
+  pathBucket,
   topPaths,
   visitorHash,
 } from "./analytics";
@@ -129,6 +132,49 @@ describe("isDayStats", () => {
       isDayStats({ ...good, paths: { "/": { views: 1.5, hll_b64: "" } } }),
     ).toBe(false);
     expect(isDayStats(null)).toBe(false);
+  });
+});
+
+describe("pathBucket (distinct-path cap)", () => {
+  /** A record with `n` distinct tracked paths, `/p0`…`/p{n-1}`. */
+  const withPaths = (n: number): Record<string, unknown> =>
+    Object.fromEntries(Array.from({ length: n }, (_, i) => [`/p${i}`, {}]));
+
+  it("returns the path itself when it is already tracked", () => {
+    expect(pathBucket({ "/": {}, "/contact": {} }, "/contact")).toBe(
+      "/contact",
+    );
+  });
+
+  it("returns the path itself while there is room under the cap", () => {
+    expect(pathBucket(withPaths(MAX_TRACKED_PATHS - 1), "/fresh")).toBe(
+      "/fresh",
+    );
+  });
+
+  it("folds a new path into the overflow bucket once the cap is reached", () => {
+    expect(pathBucket(withPaths(MAX_TRACKED_PATHS), "/fresh")).toBe(
+      OVERFLOW_PATH,
+    );
+  });
+
+  it("keeps updating an already-tracked path even past the cap", () => {
+    const paths = { ...withPaths(MAX_TRACKED_PATHS), [OVERFLOW_PATH]: {} };
+    // an existing real path stays itself…
+    expect(pathBucket(paths, "/p0")).toBe("/p0");
+    // …and the overflow bucket, once present, keeps absorbing new paths without
+    // counting as further growth (it's already tracked).
+    expect(pathBucket(paths, "/brand-new")).toBe(OVERFLOW_PATH);
+  });
+
+  it("never mints a bucket key that collides with a real app path", () => {
+    // isAppPath requires a leading slash; the overflow key deliberately lacks one.
+    expect(OVERFLOW_PATH.startsWith("/")).toBe(false);
+  });
+
+  it("honors a smaller explicit cap", () => {
+    expect(pathBucket({ "/a": {}, "/b": {} }, "/c", 2)).toBe(OVERFLOW_PATH);
+    expect(pathBucket({ "/a": {} }, "/c", 2)).toBe("/c");
   });
 });
 

@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bytesToB64, isDayStats, newHll, type DayStats } from "./analytics";
+import {
+  bytesToB64,
+  isDayStats,
+  MAX_TRACKED_PATHS,
+  newHll,
+  OVERFLOW_PATH,
+  type DayStats,
+} from "./analytics";
 import {
   expiredDayKeys,
   mergeDays,
@@ -167,6 +174,55 @@ describe("recordHit fold", () => {
     ) as DayStats;
     expect(body.paths["/"].views).toBe(2);
     expect(body.paths["/contact"].views).toBe(1);
+  });
+
+  /** A saturated day: MAX_TRACKED_PATHS distinct real paths, /p0…/p{n-1}. */
+  const saturatedDay = (): DayStats => ({
+    v: 1,
+    date: TODAY,
+    visitors_hll_b64: bytesToB64(newHll()),
+    paths: Object.fromEntries(
+      Array.from({ length: MAX_TRACKED_PATHS }, (_, i) => [
+        `/p${i}`,
+        { views: 1, hll_b64: bytesToB64(newHll()) },
+      ]),
+    ),
+  });
+
+  it("folds a new path past the cap into the overflow bucket, not a fresh key", async () => {
+    mockRead.mockResolvedValue(okRead(saturatedDay()));
+    expect(await recordHit(TODAY, "/wp-admin", hashA)).toBe(true);
+    const body = lastWriteBody(
+      "meta/analytics/day/2026-07-12.json",
+    ) as DayStats;
+    expect(body.paths["/wp-admin"]).toBeUndefined();
+    expect(body.paths[OVERFLOW_PATH].views).toBe(1);
+    // bounded: the original cap plus the single overflow bucket, nothing more.
+    expect(Object.keys(body.paths).length).toBe(MAX_TRACKED_PATHS + 1);
+    // the real visitor was still counted site-wide, junk path or not.
+    expect(body.visitors_hll_b64).not.toBe(bytesToB64(newHll()));
+  });
+
+  it("keeps the record bounded under a flood of distinct junk paths", async () => {
+    let day = saturatedDay();
+    mockRead.mockImplementation(async () => okRead(day));
+    for (const p of ["/.env", "/xmlrpc.php", "/../etc"]) {
+      await recordHit(TODAY, p, hashB);
+      day = lastWriteBody("meta/analytics/day/2026-07-12.json") as DayStats;
+    }
+    expect(Object.keys(day.paths).length).toBe(MAX_TRACKED_PATHS + 1);
+    expect(day.paths[OVERFLOW_PATH].views).toBe(3);
+  });
+
+  it("still increments an already-tracked path on a saturated day", async () => {
+    mockRead.mockResolvedValue(okRead(saturatedDay()));
+    await recordHit(TODAY, "/p0", hashA);
+    const body = lastWriteBody(
+      "meta/analytics/day/2026-07-12.json",
+    ) as DayStats;
+    expect(body.paths["/p0"].views).toBe(2);
+    expect(body.paths[OVERFLOW_PATH]).toBeUndefined();
+    expect(Object.keys(body.paths).length).toBe(MAX_TRACKED_PATHS);
   });
 
   it("never clobbers a day on a flaky read", async () => {

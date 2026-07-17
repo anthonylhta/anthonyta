@@ -134,6 +134,40 @@ export function isDayStats(x: unknown): x is DayStats {
   return true;
 }
 
+/**
+ * The overflow bucket a day's per-path breakdown lumps long-tail/abusive paths
+ * into once the cap is reached. Not a valid app path (no leading slash — the
+ * recorder's `isAppPath` requires one), so it can never collide with a real
+ * pageview's `location.pathname`.
+ */
+export const OVERFLOW_PATH = "(other)";
+
+/**
+ * Cap on distinct per-path buckets in one day's record. The public site has well
+ * under this many real routes, so legitimate traffic never reaches it; a flood of
+ * junk paths (a scanner hitting `/wp-admin`, `/.env`, … — each a distinct 404 that
+ * still fires the beacon) does. Past the cap a new path folds into OVERFLOW_PATH
+ * rather than minting a fresh ~1.4 KB sketch, bounding a day record to
+ * MAX_TRACKED_PATHS + 1 buckets.
+ */
+export const MAX_TRACKED_PATHS = 100;
+
+/**
+ * The bucket key a hit to `path` should land in, given the paths already tracked
+ * today: the path itself if it's already tracked or there's still room under the
+ * cap, else the overflow bucket. Pure. Only the per-path breakdown is capped — the
+ * site-wide visitor sketch counts every hit regardless of which bucket it lands in.
+ */
+export function pathBucket(
+  paths: Record<string, unknown>,
+  path: string,
+  cap: number = MAX_TRACKED_PATHS,
+): string {
+  if (Object.prototype.hasOwnProperty.call(paths, path)) return path;
+  if (Object.keys(paths).length >= cap) return OVERFLOW_PATH;
+  return path;
+}
+
 /** The paths of a day sorted by pageviews, most-visited first — for the dashboard. */
 export function topPaths(
   day: DayStats,
