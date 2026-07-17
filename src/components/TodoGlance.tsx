@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import { randomId } from "@/lib/crypto";
+import { TODO_CONTEXT } from "@/lib/aevcontext";
 import {
   EMPTY_TODO_CONFIG,
   addItem,
@@ -69,7 +70,7 @@ export function TodoGlance({ offline }: { offline: boolean }) {
         } else if (res.status === 200) {
           try {
             const envelope = new Uint8Array(await res.arrayBuffer());
-            const { bytes } = await openItem(envelope);
+            const { bytes } = await openItem(envelope, TODO_CONTEXT);
             const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
             config = normalizeTodoConfig(parsed);
             if (!config) throw new Error("bad shape");
@@ -103,6 +104,7 @@ export function TodoGlance({ offline }: { offline: boolean }) {
     const sealed = await vault.sealItem(
       { n: "todo.json", t: "application/json", s: bytes.length },
       bytes,
+      TODO_CONTEXT,
     );
     const res = await fetch("/api/todo", {
       method: "PUT",
@@ -121,7 +123,7 @@ export function TodoGlance({ offline }: { offline: boolean }) {
     if (res.status === 404) return EMPTY_TODO_CONFIG;
     if (res.status !== 200) throw new Error("todo refetch failed");
     const envelope = new Uint8Array(await res.arrayBuffer());
-    const { bytes } = await openItem(envelope);
+    const { bytes } = await openItem(envelope, TODO_CONTEXT);
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     const config = normalizeTodoConfig(parsed);
     if (!config) throw new Error("todo refetch: bad shape");

@@ -115,19 +115,21 @@ async function sealBytes(
   mk: CryptoKey,
   meta: EnvelopeMeta,
   bytes: Uint8Array,
+  context?: string,
 ): Promise<Uint8Array> {
-  if (bytes.length < WORKER_MIN_BYTES) return seal(mk, meta, bytes);
+  if (bytes.length < WORKER_MIN_BYTES) return seal(mk, meta, bytes, context);
   try {
     // Copy before transfer so the fallback (and the caller) keep `bytes` usable.
     const buf = bytes.slice().buffer as ArrayBuffer;
-    const resp = await callWorker({ id: ++seq, op: "seal", mk, meta, buf }, [
-      buf,
-    ]);
+    const resp = await callWorker(
+      { id: ++seq, op: "seal", mk, meta, buf, context },
+      [buf],
+    );
     if (!resp.ok) throw new Error("seal failed");
     return new Uint8Array(resp.buf);
   } catch (err) {
     if (err instanceof Error && err.message === WORKER_BROKEN)
-      return seal(mk, meta, bytes);
+      return seal(mk, meta, bytes, context);
     throw err;
   }
 }
@@ -135,16 +137,19 @@ async function sealBytes(
 async function openBytes(
   mk: CryptoKey,
   envelope: Uint8Array,
+  context?: string,
 ): Promise<{ meta: EnvelopeMeta; bytes: Uint8Array }> {
-  if (envelope.length < WORKER_MIN_BYTES) return open(mk, envelope);
+  if (envelope.length < WORKER_MIN_BYTES) return open(mk, envelope, context);
   try {
     const buf = envelope.slice().buffer as ArrayBuffer;
-    const resp = await callWorker({ id: ++seq, op: "open", mk, buf }, [buf]);
+    const resp = await callWorker({ id: ++seq, op: "open", mk, buf, context }, [
+      buf,
+    ]);
     if (!resp.ok || !resp.meta) throw new Error("cannot decrypt");
     return { meta: resp.meta, bytes: new Uint8Array(resp.buf) };
   } catch (err) {
     if (err instanceof Error && err.message === WORKER_BROKEN)
-      return open(mk, envelope);
+      return open(mk, envelope, context);
     throw err;
   }
 }
@@ -276,11 +281,20 @@ export interface Vault {
   /** Unlock via a passkey's PRF secret instead of the passphrase. A missing or
    *  wrong wrap surfaces an error and stays locked — the passphrase box remains. */
   unlockWithPasskey: () => Promise<void>;
-  /** Encrypt one item under the unlocked MK. Throws when locked. */
-  sealItem: (meta: EnvelopeMeta, bytes: Uint8Array) => Promise<Uint8Array>;
-  /** Decrypt one envelope. Throws on tamper/garbage or when locked. */
+  /** Encrypt one item under the unlocked MK. Throws when locked. Pass the blob's
+   *  storage path as `context` to seal an AEV2 (address-bound) envelope; omit it
+   *  for a legacy AEV1 envelope (ADR 0073). */
+  sealItem: (
+    meta: EnvelopeMeta,
+    bytes: Uint8Array,
+    context?: string,
+  ) => Promise<Uint8Array>;
+  /** Decrypt one envelope. Throws on tamper/garbage or when locked. For an AEV2
+   *  envelope, `context` MUST be the path it was sealed under (a wrong/absent path
+   *  fails like tampering); it is ignored for a legacy AEV1 envelope. */
   openItem: (
     envelope: Uint8Array,
+    context?: string,
   ) => Promise<{ meta: EnvelopeMeta; bytes: Uint8Array }>;
 }
 
@@ -505,19 +519,22 @@ export function useVault(offline: boolean): Vault {
   );
 
   const sealItem = useCallback(
-    async (meta: EnvelopeMeta, bytes: Uint8Array) => {
+    async (meta: EnvelopeMeta, bytes: Uint8Array, context?: string) => {
       const mk = mkRef.current;
       if (!mk) throw new Error("locked");
-      return sealBytes(mk, meta, bytes);
+      return sealBytes(mk, meta, bytes, context);
     },
     [],
   );
 
-  const openItem = useCallback(async (envelope: Uint8Array) => {
-    const mk = mkRef.current;
-    if (!mk) throw new Error("locked");
-    return openBytes(mk, envelope);
-  }, []);
+  const openItem = useCallback(
+    async (envelope: Uint8Array, context?: string) => {
+      const mk = mkRef.current;
+      if (!mk) throw new Error("locked");
+      return openBytes(mk, envelope, context);
+    },
+    [],
+  );
 
   return useMemo(
     () => ({

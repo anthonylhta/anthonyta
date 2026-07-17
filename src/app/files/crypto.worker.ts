@@ -16,8 +16,17 @@ export type WorkerRequest =
       mk: CryptoKey;
       meta: EnvelopeMeta;
       buf: ArrayBuffer;
+      /** AEV2 context (storage path). Omitted → AEV1, byte-identical to before. */
+      context?: string;
     }
-  | { id: number; op: "open"; mk: CryptoKey; buf: ArrayBuffer };
+  | {
+      id: number;
+      op: "open";
+      mk: CryptoKey;
+      buf: ArrayBuffer;
+      /** Must match the context the blob was sealed under; ignored for AEV1. */
+      context?: string;
+    };
 
 export type WorkerResponse =
   | { id: number; ok: true; meta?: EnvelopeMeta; buf: ArrayBuffer }
@@ -27,13 +36,22 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
   const req = event.data;
   try {
     if (req.op === "seal") {
-      const out = await seal(req.mk, req.meta, new Uint8Array(req.buf));
+      const out = await seal(
+        req.mk,
+        req.meta,
+        new Uint8Array(req.buf),
+        req.context,
+      );
       const buf = out.buffer as ArrayBuffer;
       self.postMessage({ id: req.id, ok: true, buf } satisfies WorkerResponse, {
         transfer: [buf],
       });
     } else {
-      const { meta, bytes } = await open(req.mk, new Uint8Array(req.buf));
+      const { meta, bytes } = await open(
+        req.mk,
+        new Uint8Array(req.buf),
+        req.context,
+      );
       const buf = bytes.buffer as ArrayBuffer;
       self.postMessage(
         { id: req.id, ok: true, meta, buf } satisfies WorkerResponse,

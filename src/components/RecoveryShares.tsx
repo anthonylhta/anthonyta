@@ -26,6 +26,7 @@ import {
   wrapMk,
   type Keystore,
 } from "@/lib/crypto";
+import { FIN_CONTEXT } from "@/lib/aevcontext";
 import { deriveKekForKdf, freshKdf } from "@/lib/kdf";
 import { reconstructSecret } from "@/lib/recovery";
 import { formatShare, split } from "@/lib/shamir";
@@ -376,8 +377,11 @@ export function RecoverWithShares() {
         return;
       }
       try {
-        // The load-bearing check: a wrong reconstruction fails this GCM tag.
-        await open(mk, target.bytes);
+        // The load-bearing check: a wrong reconstruction fails this GCM tag. The
+        // context must match how the envelope was sealed — the fin blob is AEV2
+        // (ADR 0073), so a missing/wrong path would throw here even for the RIGHT
+        // key and read as a bogus "shares don't reconstruct".
+        await open(mk, target.bytes, target.context);
       } catch {
         setError("these shares don't reconstruct the key — check them");
         return;
@@ -588,7 +592,9 @@ function NewPass({
  * must not be mistaken for absence.
  */
 async function fetchVerifyEnvelope(): Promise<
-  { kind: "envelope"; bytes: Uint8Array } | { kind: "none" } | { kind: "error" }
+  | { kind: "envelope"; bytes: Uint8Array; context?: string }
+  | { kind: "none" }
+  | { kind: "error" }
 > {
   try {
     const fin = await fetch("/api/fin/config");
@@ -596,6 +602,8 @@ async function fetchVerifyEnvelope(): Promise<
       return {
         kind: "envelope",
         bytes: new Uint8Array(await fin.arrayBuffer()),
+        // fin is AEV2-sealed (ADR 0073); the path is its open context.
+        context: FIN_CONTEXT,
       };
     if (fin.status !== 404) return { kind: "error" };
   } catch {
@@ -609,6 +617,10 @@ async function fetchVerifyEnvelope(): Promise<
       return {
         kind: "envelope",
         bytes: new Uint8Array(await note.arrayBuffer()),
+        // Vault blobs are still AEV1 (their threading is a later follow-up), so
+        // this context is ignored today — supplied so it stays correct once the
+        // vault index is sealed AEV2 under this same path.
+        context: VAULT_INDEX_PATH,
       };
     if (note.status !== 404) return { kind: "error" };
   } catch {

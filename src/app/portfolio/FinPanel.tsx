@@ -17,6 +17,7 @@ import {
   type NetWorthPoint,
 } from "@/lib/fin";
 import { arrow, aud, tone } from "@/lib/money";
+import { FIN_CONTEXT } from "@/lib/aevcontext";
 import { useVault, type Vault } from "@/app/files/useVault";
 
 // Shared input/button idioms, lifted from FilesInbox's panels.
@@ -89,7 +90,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
         } else if (res.status === 200) {
           try {
             const envelope = new Uint8Array(await res.arrayBuffer());
-            const { bytes } = await openItem(envelope);
+            const { bytes } = await openItem(envelope, FIN_CONTEXT);
             const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
             config = normalizeFinConfig(parsed);
             if (!config) throw new Error("bad shape");
@@ -126,6 +127,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
     const sealed = await vault.sealItem(
       { n: "fin.json", t: "application/json", s: bytes.length },
       bytes,
+      FIN_CONTEXT,
     );
     const res = await fetch("/api/fin/config", {
       method: "PUT",
@@ -145,7 +147,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
       return { v: 2, entries: [], invested: [], portfolio: null };
     if (res.status !== 200) throw new Error("config refetch failed");
     const envelope = new Uint8Array(await res.arrayBuffer());
-    const { bytes } = await openItem(envelope);
+    const { bytes } = await openItem(envelope, FIN_CONTEXT);
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     const config = normalizeFinConfig(parsed);
     if (!config) throw new Error("config refetch: bad shape");
