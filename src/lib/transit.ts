@@ -662,6 +662,37 @@ export function pickJourneys(journeys: TransitJourney[]): TransitJourney[] {
   return [primary];
 }
 
+export interface GlanceSummary {
+  depTime: string | null;
+  arriveTime: string | null;
+  line: string | null;
+  platform: string | null;
+  delayMin: number | null;
+  cancelled: boolean;
+  live: boolean;
+}
+
+/** One journey collapsed to a single line — the command center's "next trip"
+ *  row. Prefers the first live journey; falls back to a cancelled one rather
+ *  than nothing (a cancelled next train IS the morning's headline). */
+export function glanceSummary(result: TripResult): GlanceSummary | null {
+  const journey =
+    result.journeys.find((j) => !j.cancelled) ?? result.journeys[0] ?? null;
+  if (!journey) return null;
+  const leg = journey.legs.find((l) => l.kind === "transit") ?? null;
+  return {
+    depTime: leg
+      ? (leg.from.timeEst ?? leg.from.timePlanned)
+      : (journey.departEst ?? journey.departPlanned),
+    arriveTime: journey.arriveEst ?? journey.arrivePlanned,
+    line: leg?.line ?? null,
+    platform: leg?.from.platform ?? null,
+    delayMin: journey.delayMin,
+    cancelled: journey.cancelled,
+    live: journey.live,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // time-anchor picker parts (the themed replacement for datetime-local)
 // ---------------------------------------------------------------------------

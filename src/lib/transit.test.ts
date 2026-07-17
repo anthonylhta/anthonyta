@@ -6,6 +6,7 @@ import {
   endpointParam,
   excludedClasses,
   fmtSydneyTime,
+  glanceSummary,
   groupNames,
   isDepArr,
   isModeFilter,
@@ -691,6 +692,36 @@ describe("pickJourneys", () => {
       journey(["T1", "T8"], 65),
     ];
     expect(pickJourneys(js)).toEqual([js[0], js[1]]);
+  });
+});
+
+describe("glanceSummary", () => {
+  it("collapses the first live journey to one line", () => {
+    const result = normalizeTrip(rawTrip);
+    expect(glanceSummary(result)).toEqual({
+      depTime: "2026-07-16T22:09:00Z",
+      arriveTime: "2026-07-16T22:50:00Z",
+      line: "T1",
+      platform: "1",
+      delayMin: 2,
+      cancelled: false,
+      live: true,
+    });
+  });
+
+  it("skips a cancelled first journey for a live one", () => {
+    const cancelled = journey(["T8"], 60, true);
+    const live = journey(["T1"], 65);
+    expect(
+      glanceSummary({ journeys: [cancelled, live], alerts: [] })?.line,
+    ).toBe("T1");
+  });
+
+  it("falls back to the cancelled journey rather than nothing", () => {
+    const cancelled = journey(["T8"], 60, true);
+    const s = glanceSummary({ journeys: [cancelled], alerts: [] });
+    expect(s?.cancelled).toBe(true);
+    expect(glanceSummary({ journeys: [], alerts: [] })).toBeNull();
   });
 });
 
