@@ -462,10 +462,10 @@ export async function CommandCenter({ userName }: { userName: string }) {
               riichi/
             </Link>
             <Link
-              href="/translator"
+              href="/ishin"
               className="text-muted transition-colors hover:text-amber"
             >
-              translator/
+              ishin/
             </Link>
             <Link
               href="/reader"

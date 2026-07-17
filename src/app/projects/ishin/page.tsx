@@ -3,13 +3,13 @@ import type { ReactNode } from "react";
 import { SessionStatusBar } from "@/components/SessionStatusBar";
 
 export const metadata = {
-  title: "tone translator · case study",
+  title: "ishin · case study",
 };
 
-const LIVE = "https://tone.anthonyta.dev";
-const CODE = "https://github.com/anthonylhta/tone-translator";
+const LIVE = "https://ishin.io";
+const CODE = "https://github.com/anthonylhta/ishin";
 
-export default function ToneTranslatorCaseStudy() {
+export default function IshinCaseStudy() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
@@ -27,10 +27,27 @@ export default function ToneTranslatorCaseStudy() {
 
         {/* hero */}
         <div className="border-b border-hairline px-4 py-6">
-          <h1 className="text-lg text-fg">tone translator</h1>
+          <h1 className="text-lg text-fg">
+            ishin{" "}
+            <span
+              lang="ja"
+              className="text-muted font-[family-name:var(--font-jp)]"
+            >
+              以心
+            </span>
+          </h1>
           <p className="mt-1 text-sm text-fg/80">
             A Japanese ⇄ English translator where <em>naturalness</em> is the
-            product — not literal translation.
+            product — not literal translation. Named for 以心伝心, the
+            understanding that passes between people without being spoken.
+          </p>
+          <p className="mt-2 text-xs text-muted">
+            One idea — <em>say it so it lands</em> — now split across two sides:
+            a free <strong className="text-fg">personal</strong> translator (the
+            original, deep-dived below) and a{" "}
+            <strong className="text-fg">business</strong> review layer that
+            catches messages which are grammatically correct but culturally
+            wrong (early access).
           </p>
           <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
             <a
@@ -39,7 +56,7 @@ export default function ToneTranslatorCaseStudy() {
               rel="noopener noreferrer"
               className="text-amber hover:underline"
             >
-              live ↗ tone.anthonyta.dev
+              live ↗ ishin.io
             </a>
             <a
               href={CODE}
@@ -50,7 +67,7 @@ export default function ToneTranslatorCaseStudy() {
               code ↗
             </a>
             <span className="text-muted">
-              Next.js · Clerk · Supabase · Claude (Haiku + Sonnet)
+              Next.js · Clerk · Supabase · Claude (per-direction models)
             </span>
           </div>
         </div>

@@ -293,8 +293,8 @@ test.describe("guest gating", () => {
     expect(html).not.toContain("portfolio relevance");
   });
 
-  test("/translator hides the private recent feed", async ({ request }) => {
-    const html = await (await request.get("/translator")).text();
+  test("/ishin hides the private recent feed", async ({ request }) => {
+    const html = await (await request.get("/ishin")).text();
     expect(html).not.toContain("private"); // the recent-feed badge is owner-only
   });
 

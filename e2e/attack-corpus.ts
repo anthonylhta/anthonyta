@@ -389,8 +389,8 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     note: "Public case study.",
   },
   {
-    routeKey: "/projects/tone-translator",
-    probe: "/projects/tone-translator",
+    routeKey: "/projects/ishin",
+    probe: "/projects/ishin",
     shape: "public-serving",
     methods: ["GET"],
     note: "Public case study.",
@@ -410,11 +410,11 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     note: "Fragment-key share recipient page (ADR 0058). Public by design; a malformed id 404s, a well-formed one renders the decrypt page.",
   },
   {
-    routeKey: "/translator",
-    probe: "/translator",
+    routeKey: "/ishin",
+    probe: "/ishin",
     shape: "public-serving",
     methods: ["GET"],
-    note: "Public translator stats (private feed hidden from guests).",
+    note: "Public ishin translation stats (private feed hidden from guests).",
   },
 
   // -- Auth.js catch-all + the cron endpoint (their own contracts) ---------------

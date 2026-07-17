@@ -112,7 +112,7 @@ export default async function Image() {
           }}
         >
           <div style={{ color: MUTED }}>
-            reading · riichi · briefing · translator · novels
+            reading · riichi · briefing · ishin · novels
           </div>
           <div style={{ color: AMBER }}>anthonyta.dev</div>
         </div>

@@ -83,7 +83,7 @@ const paletteItems = [
   { label: "hub", href: "/", hint: "home" },
   { label: "briefing", href: "/briefing", hint: "markets" },
   { label: "today's hand", href: "/riichi", hint: "riichi" },
-  { label: "tone translator", href: "/translator", hint: "japanese" },
+  { label: "ishin", href: "/ishin", hint: "japanese ⇄ english" },
   ...nav.filter((n) => n.ready).map((n) => ({ label: n.label, href: n.href })),
 ];
 

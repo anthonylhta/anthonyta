@@ -3,8 +3,10 @@ import postgres from "postgres";
 import type { Connector } from "./types";
 
 /**
- * translator connector — reads my Japanese tone-translator (Supabase) usage stats
- * (ADR 0003, 0015). READ-ONLY: SELECTs only; the hub never writes to a project DB.
+ * translator connector — reads my Japanese translator, ishin (Supabase), usage
+ * stats (ADR 0003, 0015). READ-ONLY: SELECTs only; the hub never writes to a
+ * project DB. (The connector key stays `translator`; only the product rebranded
+ * from tone-translator to ishin.)
  *
  * Scoped by EMAIL, not user_id: my history is split across two Clerk user_ids under
  * the same email (a re-auth artifact), so the connector joins `users` by email to
@@ -203,7 +205,7 @@ const readStats = unstable_cache(
   { revalidate: 600, tags: ["translator"] },
 );
 
-/** My tone-translator usage. Falls back to sample on missing creds / any failure. */
+/** My ishin usage. Falls back to sample on missing creds / any failure. */
 export async function getLanguageStats(): Promise<LanguageStats> {
   const email = process.env.TRANSLATOR_EMAIL;
   if (!email || !process.env.TRANSLATOR_DATABASE_URL) {

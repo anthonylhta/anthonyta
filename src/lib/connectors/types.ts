@@ -7,7 +7,7 @@
  * is "write a new connector", not "rebuild the site".
  *
  *   webnovel   → Supabase (webnovelist)      reading shelf, stats
- *   translator → Supabase (tone-translator)  vocab / language stats
+ *   translator → Supabase (ishin)            vocab / language stats
  *   riichi     → Neon (riichi)               hand of the day, streaks
  *   finance    → hub DB / risk_first_paper_bot  daily briefing, portfolio
  *

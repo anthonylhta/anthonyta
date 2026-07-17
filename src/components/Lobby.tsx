@@ -113,7 +113,7 @@ export async function Lobby() {
                 className="border-0"
                 action={
                   <Link
-                    href="/translator"
+                    href="/ishin"
                     className="text-xs text-amber hover:underline"
                   >
                     [open]
