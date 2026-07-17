@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useVault } from "@/app/files/useVault";
 import { normalizeFinConfig } from "@/lib/fin";
+import { FIN_CONTEXT } from "@/lib/aevcontext";
 import { matchBriefing, type RelevanceHit } from "@/lib/relevance";
 import type { Briefing } from "@/lib/sampleBriefing";
 
@@ -52,6 +53,7 @@ export function BriefingRelevance({
         }
         const { bytes } = await openItem(
           new Uint8Array(await res.arrayBuffer()),
+          FIN_CONTEXT,
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         const cfg = normalizeFinConfig(parsed);

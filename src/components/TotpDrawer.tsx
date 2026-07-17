@@ -11,6 +11,7 @@ import {
   type TotpConfig,
   type TotpEntry,
 } from "@/lib/totp";
+import { TOTP_CONTEXT } from "@/lib/aevcontext";
 
 /**
  * The TOTP drawer (ADR: TOTP drawer) — two-factor codes computed in the browser
@@ -85,6 +86,7 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
       try {
         const { bytes } = await openItem(
           new Uint8Array(await res.arrayBuffer()),
+          TOTP_CONTEXT,
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         if (!isTotpConfig(parsed)) throw new Error("bad shape");
@@ -109,6 +111,7 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
       const sealed = await vault.sealItem(
         { n: "totp", t: "application/json", s: json.length },
         json,
+        TOTP_CONTEXT,
       );
       const res = await fetch("/api/totp", {
         method: "PUT",

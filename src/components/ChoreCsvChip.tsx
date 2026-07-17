@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useVault } from "@/app/files/useVault";
 import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
 import { normalizeFinConfig } from "@/lib/fin";
+import { FIN_CONTEXT } from "@/lib/aevcontext";
 import { ChoreChip } from "./ChoreChip";
 
 /**
@@ -32,6 +33,7 @@ export function ChoreCsvChip({ offline }: { offline: boolean }) {
         if (res.status !== 200) return;
         const { bytes } = await openItem(
           new Uint8Array(await res.arrayBuffer()),
+          FIN_CONTEXT,
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         const cfg = normalizeFinConfig(parsed);

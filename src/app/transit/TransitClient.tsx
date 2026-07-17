@@ -28,6 +28,7 @@ import {
   type TransitTrip,
   type TripResult,
 } from "@/lib/transit";
+import { TRANSIT_CONTEXT } from "@/lib/aevcontext";
 import { useVault, type Vault } from "@/app/files/useVault";
 
 // Shared input/button idioms (FinPanel / FilesInbox).
@@ -235,7 +236,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
         } else if (res.status === 200) {
           try {
             const envelope = new Uint8Array(await res.arrayBuffer());
-            const { bytes } = await openItem(envelope);
+            const { bytes } = await openItem(envelope, TRANSIT_CONTEXT);
             const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
             config = normalizeTransitConfig(parsed);
             if (!config) throw new Error("bad shape");
@@ -275,6 +276,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
     const sealed = await vault.sealItem(
       { n: "transit.json", t: "application/json", s: bytes.length },
       bytes,
+      TRANSIT_CONTEXT,
     );
     const res = await fetch("/api/transit/config", {
       method: "PUT",
@@ -293,7 +295,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
     if (res.status === 404) return EMPTY_TRANSIT_CONFIG;
     if (res.status !== 200) throw new Error("config refetch failed");
     const envelope = new Uint8Array(await res.arrayBuffer());
-    const { bytes } = await openItem(envelope);
+    const { bytes } = await openItem(envelope, TRANSIT_CONTEXT);
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     const config = normalizeTransitConfig(parsed);
     if (!config) throw new Error("config refetch: bad shape");

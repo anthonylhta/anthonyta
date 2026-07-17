@@ -13,6 +13,7 @@ import {
   type TransitTrip,
   type TripResult,
 } from "@/lib/transit";
+import { TRANSIT_CONTEXT } from "@/lib/aevcontext";
 
 /** Refresh cadence while the tab is visible — departures go stale fast. */
 const REFRESH_MS = 60_000;
@@ -58,6 +59,7 @@ export function TransitGlance({ offline }: { offline: boolean }) {
         if (res.status !== 200) throw new Error(`config: ${res.status}`);
         const { bytes } = await openItem(
           new Uint8Array(await res.arrayBuffer()),
+          TRANSIT_CONTEXT,
         );
         const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
         const cfg = normalizeTransitConfig(parsed);

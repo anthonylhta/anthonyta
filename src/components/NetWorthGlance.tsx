@@ -11,6 +11,7 @@ import {
   pickBaseline,
   sydneyToday,
 } from "@/lib/fin";
+import { FIN_CONTEXT } from "@/lib/aevcontext";
 import { arrow, aud, tone } from "@/lib/money";
 
 /**
@@ -56,6 +57,7 @@ export function NetWorthGlance({ offline }: { offline: boolean }) {
         if (res.status === 200) {
           const { bytes } = await openItem(
             new Uint8Array(await res.arrayBuffer()),
+            FIN_CONTEXT,
           );
           const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
           cfg = normalizeFinConfig(parsed);
