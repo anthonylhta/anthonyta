@@ -6,6 +6,7 @@ import {
   isDayStats,
   newDaySalt,
   newHll,
+  pathBucket,
   visitorHash,
   type DayStats,
 } from "./analytics";
@@ -173,12 +174,16 @@ export async function recordHit(
   hllAdd(site, hash);
   day.visitors_hll_b64 = bytesToB64(site);
 
-  const stat = day.paths[path] ?? { views: 0, hll_b64: "" };
+  // Cap the distinct per-path buckets: a new path past MAX_TRACKED_PATHS folds
+  // into the overflow bucket instead of growing the record without bound (the
+  // site-wide sketch above already counted this visitor regardless of bucket).
+  const key = pathBucket(day.paths, path);
+  const stat = day.paths[key] ?? { views: 0, hll_b64: "" };
   stat.views += 1;
   const preg = stat.hll_b64 ? b64ToBytes(stat.hll_b64) : newHll();
   hllAdd(preg, hash);
   stat.hll_b64 = bytesToB64(preg);
-  day.paths[path] = stat;
+  day.paths[key] = stat;
 
   const wrote = await writeKey(dayPath(today), JSON.stringify(day), {
     overwrite: true,
