@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
 import { BriefingRelevance } from "@/components/BriefingRelevance";
+import { ChoreChip } from "@/components/ChoreChip";
+import { ChoreCsvChip } from "@/components/ChoreCsvChip";
 import { DropInbox } from "@/components/DropInbox";
 import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
@@ -21,8 +23,11 @@ import {
   dailyDeltas,
   toLevels,
 } from "@/lib/activity";
+import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
 import { getBriefing } from "@/lib/connectors/briefing";
+import { getChoreReads } from "@/lib/connectors/chores";
 import { getGithub } from "@/lib/connectors/github";
+import { getHealth } from "@/lib/connectors/health";
 import { getLayout } from "@/lib/connectors/layout";
 import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getTft, getTftHistory } from "@/lib/connectors/tft";
@@ -90,6 +95,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
     tftHistory,
     layout,
     wx,
+    choreReads,
+    health,
   ] = await Promise.all([
     getBriefing(),
     getLanguageStats(),
@@ -101,6 +108,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getTftHistory(),
     getLayout(),
     getWeather(),
+    getChoreReads(),
+    getHealth(),
   ]);
   const b = briefing ?? sampleBriefing;
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
@@ -355,6 +364,72 @@ export async function CommandCenter({ userName }: { userName: string }) {
           </>
         )}
 
+        {/* chores — maintenance freshness derived from evidence (roadmap 52):
+            vault-sync + backup are server-read; the csv chip decrypts the fin
+            envelope client-side. */}
+        {!hidden.has("chores") && (
+          <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
+            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+              chores
+            </span>
+            <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
+              <ChoreCsvChip offline={!r2Enabled()} />
+              <ChoreChip
+                label="vault-sync"
+                state={choreState(
+                  choreReads.vaultSyncedAt,
+                  CHORE_CADENCE_DAYS.vaultSync,
+                  new Date(),
+                )}
+              />
+              <ChoreChip
+                label="backup"
+                state={choreState(
+                  choreReads.backupAt,
+                  CHORE_CADENCE_DAYS.backup,
+                  new Date(),
+                )}
+              />
+            </span>
+          </div>
+        )}
+
+        {/* health — is the estate up (roadmap 55): one capped probe per
+            sibling project, cached 5 min. */}
+        {!hidden.has("health") && (
+          <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
+            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+              health
+            </span>
+            <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
+              {health.map((h) => (
+                <span key={h.key} className="text-xs">
+                  <span className="text-muted">{h.label}</span>{" "}
+                  {h.state === "down" ? (
+                    <span className="text-down">✕ down</span>
+                  ) : (
+                    <>
+                      <span
+                        className={
+                          h.state === "slow" ? "text-amber" : "text-up"
+                        }
+                      >
+                        ●
+                      </span>
+                      {h.ms !== null && (
+                        <span className="tabular-nums text-muted">
+                          {" "}
+                          {h.ms}ms
+                        </span>
+                      )}
+                    </>
+                  )}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
+
         {/* arena — the same band the lobby shows (rank, recent games, drill-down),
             so the owner doesn't have to sign out to see it. The THIS WEEK tft row
             keeps the cadence; this is the standing (deliberate 0032 dent). */}
@@ -391,6 +466,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
               className="text-muted transition-colors hover:text-amber"
             >
               translator/
+            </Link>
+            <Link
+              href="/reader"
+              className="text-amber/80 transition-colors hover:text-amber"
+            >
+              reader/
             </Link>
             <Link
               href="/transit"

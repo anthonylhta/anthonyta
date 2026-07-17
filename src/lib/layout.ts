@@ -42,6 +42,8 @@ export const CENTER_MODULES: ModuleDef[] = [
   { key: "briefing", label: "briefing glance" },
   { key: "hand", label: "today's hand" },
   { key: "week", label: "this week (activity digest)" },
+  { key: "chores", label: "chores (csv / vault-sync / backup)" },
+  { key: "health", label: "project health (riichi / webnovel / tone)" },
   { key: "tft", label: "arena (tft ladder)" },
   { key: "totp", label: "2fa codes" },
 ];

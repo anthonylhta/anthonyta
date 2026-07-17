@@ -43,6 +43,7 @@ import {
   restoreKeyAllowed,
   type BackupEntry,
 } from "../src/lib/backup";
+import { BACKUP_STAMP_PATH } from "../src/lib/chores";
 import { formatSize } from "../src/lib/files";
 import {
   r2Enabled,
@@ -167,6 +168,18 @@ async function backup(): Promise<void> {
 
   console.log(
     `backed up ${manifest.count} objects, ${formatSize(manifest.totalBytes)} → ${backupDir}`,
+  );
+
+  // Stamp the chores row (roadmap 52) — best-effort: a failed stamp never
+  // fails a completed backup, it just leaves the chip on its old date.
+  const stamped = await writeKey(BACKUP_STAMP_PATH, manifest.created, {
+    overwrite: true,
+    contentType: "text/plain",
+  });
+  console.log(
+    stamped === "ok"
+      ? `chores stamp updated (${BACKUP_STAMP_PATH})`
+      : "chores stamp write failed (the backup itself is complete)",
   );
 }
 
