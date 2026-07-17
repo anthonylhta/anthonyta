@@ -236,6 +236,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET"],
   },
   {
+    routeKey: "/reader",
+    probe: "/reader",
+    shape: "owner-page",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/system",
     probe: "/system",
     shape: "owner-page",

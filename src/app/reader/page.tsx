@@ -10,6 +10,12 @@ export const metadata = { title: "reader" };
 // Owner-only morning feeds — read on demand, cached at the data layer.
 export const dynamic = "force-dynamic";
 
+/** Render-time clock for the age column (the todayLabel() idiom — the page is
+ *  force-dynamic, so every request re-renders with a fresh read). */
+function renderNow(): number {
+  return Date.now();
+}
+
 export default async function ReaderPage() {
   // Owner-only: the feed list profiles the owner, and republishing other
   // people's headlines on a public page is a can of worms (ADR 0022 wall).
@@ -18,7 +24,7 @@ export default async function ReaderPage() {
 
   const who = session.user.name ?? "anthony";
   const { sample, items } = await getReaderItems();
-  const now = Date.now();
+  const now = renderNow();
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
