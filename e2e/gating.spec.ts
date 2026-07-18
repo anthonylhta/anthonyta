@@ -293,6 +293,20 @@ test.describe("guest gating", () => {
     expect(html).not.toContain("portfolio relevance");
   });
 
+  test("/?preview=lobby gives a guest the plain lobby, no preview banner", async ({
+    request,
+  }) => {
+    // The owner-only lobby preview (roadmap 59) must never leak an edit
+    // affordance to guests — the banner is session-gated (ADR 0022).
+    const res = await request.get("/?preview=lobby");
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("reading is live"); // still the lobby
+    expect(html).not.toContain("previewing");
+    expect(html).not.toContain("exit preview");
+    expect(html).not.toContain("command center");
+  });
+
   test("/ishin hides the private recent feed", async ({ request }) => {
     const html = await (await request.get("/ishin")).text();
     expect(html).not.toContain("private"); // the recent-feed badge is owner-only

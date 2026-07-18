@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { Bar } from "@/components/terminal/Bar";
 import { Prompt } from "@/components/terminal/Prompt";
@@ -14,7 +15,7 @@ import { getHandOfTheDay } from "@/lib/connectors/riichi";
 import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
-import { hiddenSet } from "@/lib/layout";
+import { hiddenSet, orderedUnits } from "@/lib/layout";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { me, nav, reading as mockReading, riichi } from "@/lib/mock";
 
@@ -96,6 +97,117 @@ export async function Lobby() {
       ? Math.round(((lang.tones[0]?.count ?? 0) / toneTotal) * 100)
       : null;
 
+  // Each orderable lobby unit → its node (or null when hidden), keyed by unit
+  // key; `orderedUnits` picks the sequence, and the default (empty) config
+  // reproduces the hand-tuned order below (roadmap 59).
+  const lobbyNodes: Record<string, ReactNode> = {
+    top: ["languages", "reading", "riichi"].some((k) => !hidden.has(k)) ? (
+      <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-3">
+        {!hidden.has("languages") && (
+          <Module
+            label="languages"
+            className="border-0"
+            action={
+              <Link
+                href="/ishin"
+                className="text-xs text-amber hover:underline"
+              >
+                [open]
+              </Link>
+            }
+          >
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted">jp streak</span>
+                <span className="tabular-nums text-fg">{lang.streakDays}d</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted">translations</span>
+                <span className="tabular-nums text-fg">{lang.total}</span>
+              </div>
+              <div className="flex items-baseline justify-between">
+                <span className="text-muted">this week</span>
+                <span className="tabular-nums text-fg">{lang.thisWeek}</span>
+              </div>
+              {topTonePct != null ? (
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted">tone</span>
+                  <span className="text-fg">
+                    <span className="text-amber">{lang.topTone}</span>{" "}
+                    {topTonePct}%
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          </Module>
+        )}
+
+        {!hidden.has("reading") && (
+          <Module label="reading" className="border-0">
+            <div className="space-y-2">
+              <p className="line-clamp-2 text-fg">{reading.title}</p>
+              <p className="text-xs text-muted">
+                ch. {reading.chapter}
+                {reading.total ? `/${reading.total}` : ""}
+                {reading.count > 1 ? ` · ${reading.count} in progress` : ""}
+              </p>
+              {reading.total ? (
+                <Bar value={reading.chapter} max={reading.total} width={8} />
+              ) : null}
+            </div>
+          </Module>
+        )}
+
+        {!hidden.has("riichi") && (
+          <Module
+            label="riichi"
+            className="border-0"
+            action={
+              <Link
+                href="/riichi"
+                className="text-xs text-amber hover:underline"
+              >
+                [solve]
+              </Link>
+            }
+          >
+            <div className="space-y-1">
+              <p className="text-fg">{handTeaser}</p>
+              <p className="text-xs text-muted">
+                <span lang="ja" className="font-[family-name:var(--font-jp)]">
+                  本日の一手
+                </span>
+              </p>
+            </div>
+          </Module>
+        )}
+      </div>
+    ) : null,
+    github: !hidden.has("github") ? <GithubModule gh={gh} /> : null,
+    tft: !hidden.has("tft") ? (
+      <TftModule tft={tft} history={tftHistory} />
+    ) : null,
+    briefing: !hidden.has("briefing") ? (
+      <Link
+        href="/briefing"
+        className="block border-t border-hairline px-4 py-4 transition-colors hover:bg-surface/30"
+      >
+        <div className="mb-2 flex items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-muted">
+          <span>briefing</span>
+          <span className="h-px flex-1 bg-hairline" />
+          <span className="tabular-nums">
+            {briefing.weekday} {briefing.date}
+          </span>
+        </div>
+        <Tape items={briefing.tape.slice(0, 8)} />
+        <p className="mt-3 flex items-baseline justify-between gap-3 text-sm">
+          <span className="text-fg/90">driving: {briefing.driver}</span>
+          <span className="shrink-0 text-xs text-amber">full briefing →</span>
+        </p>
+      </Link>
+    ) : null,
+  };
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
@@ -104,129 +216,11 @@ export async function Lobby() {
         {/* prompt / hero */}
         <Prompt tagline={me.tagline} subtitle={me.intro} />
 
-        {/* module grid */}
-        {["languages", "reading", "riichi"].some((k) => !hidden.has(k)) && (
-          <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-3">
-            {!hidden.has("languages") && (
-              <Module
-                label="languages"
-                className="border-0"
-                action={
-                  <Link
-                    href="/ishin"
-                    className="text-xs text-amber hover:underline"
-                  >
-                    [open]
-                  </Link>
-                }
-              >
-                <div className="space-y-2">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-muted">jp streak</span>
-                    <span className="tabular-nums text-fg">
-                      {lang.streakDays}d
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-muted">translations</span>
-                    <span className="tabular-nums text-fg">{lang.total}</span>
-                  </div>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-muted">this week</span>
-                    <span className="tabular-nums text-fg">
-                      {lang.thisWeek}
-                    </span>
-                  </div>
-                  {topTonePct != null ? (
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-muted">tone</span>
-                      <span className="text-fg">
-                        <span className="text-amber">{lang.topTone}</span>{" "}
-                        {topTonePct}%
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
-              </Module>
-            )}
-
-            {!hidden.has("reading") && (
-              <Module label="reading" className="border-0">
-                <div className="space-y-2">
-                  <p className="line-clamp-2 text-fg">{reading.title}</p>
-                  <p className="text-xs text-muted">
-                    ch. {reading.chapter}
-                    {reading.total ? `/${reading.total}` : ""}
-                    {reading.count > 1 ? ` · ${reading.count} in progress` : ""}
-                  </p>
-                  {reading.total ? (
-                    <Bar
-                      value={reading.chapter}
-                      max={reading.total}
-                      width={8}
-                    />
-                  ) : null}
-                </div>
-              </Module>
-            )}
-
-            {!hidden.has("riichi") && (
-              <Module
-                label="riichi"
-                className="border-0"
-                action={
-                  <Link
-                    href="/riichi"
-                    className="text-xs text-amber hover:underline"
-                  >
-                    [solve]
-                  </Link>
-                }
-              >
-                <div className="space-y-1">
-                  <p className="text-fg">{handTeaser}</p>
-                  <p className="text-xs text-muted">
-                    <span
-                      lang="ja"
-                      className="font-[family-name:var(--font-jp)]"
-                    >
-                      本日の一手
-                    </span>
-                  </p>
-                </div>
-              </Module>
-            )}
-          </div>
-        )}
-
-        {/* code — github activity */}
-        {!hidden.has("github") && <GithubModule gh={gh} />}
-
-        {/* arena — tft ladder */}
-        {!hidden.has("tft") && <TftModule tft={tft} history={tftHistory} />}
-
-        {/* briefing */}
-        {!hidden.has("briefing") && (
-          <Link
-            href="/briefing"
-            className="block border-t border-hairline px-4 py-4 transition-colors hover:bg-surface/30"
-          >
-            <div className="mb-2 flex items-center gap-3 text-[11px] uppercase tracking-[0.2em] text-muted">
-              <span>briefing</span>
-              <span className="h-px flex-1 bg-hairline" />
-              <span className="tabular-nums">
-                {briefing.weekday} {briefing.date}
-              </span>
-            </div>
-            <Tape items={briefing.tape.slice(0, 8)} />
-            <p className="mt-3 flex items-baseline justify-between gap-3 text-sm">
-              <span className="text-fg/90">driving: {briefing.driver}</span>
-              <span className="shrink-0 text-xs text-amber">
-                full briefing →
-              </span>
-            </p>
-          </Link>
-        )}
+        {/* modules render in the owner's layout order (roadmap 59); the default
+            order reproduces the hand-tuned lobby exactly. */}
+        {orderedUnits(layout, "lobby").map((u) => (
+          <Fragment key={u.key}>{lobbyNodes[u.key]}</Fragment>
+        ))}
 
         {/* nav */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
