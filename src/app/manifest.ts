@@ -58,9 +58,9 @@ export default function manifest(): MetadataRoute.Manifest {
       { name: "briefing", short_name: "briefing", url: "/briefing?source=pwa" },
       { name: "today's hand", short_name: "riichi", url: "/riichi?source=pwa" },
       {
-        name: "tone translator",
-        short_name: "translator",
-        url: "/translator?source=pwa",
+        name: "ishin",
+        short_name: "ishin",
+        url: "/ishin?source=pwa",
       },
     ],
     // Android share sheet → the owner-only files inbox. The action lives

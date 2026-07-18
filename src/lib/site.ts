@@ -7,7 +7,7 @@ export const SITE_URL = "https://anthonyta.dev";
 export const SITE_NAME = "Anthony Ta";
 export const SITE_TAGLINE = "builder · languages · markets";
 export const SITE_DESCRIPTION =
-  "A personal hub & portfolio: a live reading shelf, a daily riichi hand, a morning markets briefing, and a tone-aware Japanese translator — built on a read-only connector pattern.";
+  "A personal hub & portfolio: a live reading shelf, a daily riichi hand, a morning markets briefing, and a register-aware Japanese ⇄ English translator — built on a read-only connector pattern.";
 export const GITHUB_LOGIN = "anthonylhta";
 export const GITHUB_URL = `https://github.com/${GITHUB_LOGIN}`;
 
@@ -21,10 +21,10 @@ export const PUBLIC_ROUTES = [
   "",
   "/briefing",
   "/riichi",
-  "/translator",
+  "/ishin",
   "/projects",
   "/projects/riichi",
-  "/projects/tone-translator",
+  "/projects/ishin",
   "/novels",
   "/notes",
   "/contact",

@@ -39,6 +39,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // The tone-translator → ishin rebrand renamed two public routes; 308-redirect
+  // the old paths so existing links, bookmarks, and search results don't 404.
+  async redirects() {
+    return [
+      { source: "/translator", destination: "/ishin", permanent: true },
+      {
+        source: "/projects/tone-translator",
+        destination: "/projects/ishin",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

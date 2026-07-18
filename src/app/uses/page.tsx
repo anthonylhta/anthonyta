@@ -10,8 +10,8 @@ export const metadata = {
 
 const drivers = [
   {
-    label: "tone",
-    href: "https://tone.anthonyta.dev",
+    label: "ishin",
+    href: "https://ishin.io",
     desc: "texting Japanese friends",
   },
   {

@@ -13,7 +13,7 @@ import {
 // prompt) — the public face must never reveal that a logged-in mode exists (ADR
 // 0022). Reading the session makes this dynamic; the data is cached at the
 // connector (tag "translator", ADR 0014, 0016).
-export default async function TranslatorPage() {
+export default async function IshinPage() {
   const [session, stats] = await Promise.all([auth(), getLanguageStats()]);
   const isOwner = !!session?.user;
   const recent = isOwner ? await getRecentTranslations(6) : [];
@@ -31,7 +31,7 @@ export default async function TranslatorPage() {
             ← hub
           </Link>
           <span className="uppercase tracking-[0.2em] text-muted">
-            tone translator
+            ishin 以心
           </span>
           <span className="tabular-nums text-muted">
             <span lang="ja" className="font-[family-name:var(--font-jp)]">
@@ -128,7 +128,7 @@ export default async function TranslatorPage() {
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">
-        a tone-aware Japanese translator · casual → keigo
+        ishin · Japanese ⇄ English that lands as meant · casual → keigo
       </p>
     </main>
   );

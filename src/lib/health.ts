@@ -15,7 +15,7 @@ export interface HealthTarget {
 export const HEALTH_TARGETS: HealthTarget[] = [
   { key: "riichi", label: "riichi", url: "https://riichi.anthonyta.dev" },
   { key: "novel", label: "webnovel", url: "https://novel.anthonyta.dev" },
-  { key: "tone", label: "tone", url: "https://tone.anthonyta.dev" },
+  { key: "ishin", label: "ishin", url: "https://ishin.io" },
 ];
 
 /** A 2xx slower than this reads as degraded, not healthy. */

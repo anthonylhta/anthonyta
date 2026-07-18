@@ -38,7 +38,7 @@ so the build is always green and one source going down never takes the page down
 | `webnovel`   | Supabase                      | current reading shelf, plus live % on the curated `/novels` list         |
 | `riichi`     | riichi's public API + Neon    | the daily mahjong hand, re-rendered natively, plus my solve streak       |
 | `github`     | GitHub GraphQL                | public contributions heatmap, streak, latest push                        |
-| `translator` | Supabase                      | Japanese translation stats + tone breakdown                              |
+| `translator` | Supabase                      | ishin's Japanese ⇄ English translation stats + register breakdown        |
 | `briefing`   | scheduled ingestion           | a daily markets briefing (the hub never calls a model — zero token cost) |
 | `portfolio`  | end-to-end encrypted envelope | holdings, P&L, and a net-worth trend — decrypted only in my browser      |
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { SessionStatusBar } from "@/components/SessionStatusBar";
 
 // Static page — a scannable index. A `caseStudy` link is added per project only
-// once its write-up page exists (e.g. /projects/tone-translator), so nothing 404s.
+// once its write-up page exists (e.g. /projects/ishin), so nothing 404s.
 type Project = {
   name: string;
   desc: string;
@@ -15,12 +15,12 @@ type Project = {
 
 const projects: Project[] = [
   {
-    name: "tone translator",
-    desc: "Japanese ⇄ English translation with tone control — pick a politeness register, translate, and check whether your Japanese sounds natural.",
+    name: "ishin 以心",
+    desc: "Japanese ⇄ English communication that lands the way it was meant — pick a register, translate either direction, and check whether your own Japanese sounds native. Now two-sided: a free personal translator and a business review layer (early access).",
     tech: ["Next.js", "Clerk", "Supabase", "Claude"],
-    live: "https://tone.anthonyta.dev",
-    code: "https://github.com/anthonylhta/tone-translator",
-    caseStudy: "/projects/tone-translator",
+    live: "https://ishin.io",
+    code: "https://github.com/anthonylhta/ishin",
+    caseStudy: "/projects/ishin",
   },
   {
     name: "riichi",
