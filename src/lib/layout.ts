@@ -87,6 +87,12 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "weather", label: "weather (sydney)" }],
   },
   {
+    key: "steps",
+    zone: "today",
+    label: "steps (samsung health)",
+    modules: [{ key: "steps", label: "steps (samsung health)" }],
+  },
+  {
     key: "transit-next",
     zone: "today",
     label: "next trip (transit)",

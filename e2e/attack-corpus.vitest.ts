@@ -44,10 +44,12 @@ describe("route manifest", () => {
         ).toBeTruthy();
       }
     }
-    // The two owner-api routes that deviate structurally still carry a note.
+    // The owner-api routes that deviate structurally still carry a note.
     const briefing = byKey("/api/briefing/ingest");
+    const steps = byKey("/api/daily/steps");
     const shareTarget = byKey("/files/share-target");
     expect(briefing.note).toBeTruthy();
+    expect(steps.note).toBeTruthy();
     expect(shareTarget.note).toBeTruthy();
   });
 
@@ -70,17 +72,17 @@ describe("route manifest", () => {
   it("partitions cleanly into the expected shape counts", () => {
     const count = (s: RouteEntry["shape"]) =>
       ROUTE_MANIFEST.filter((r) => r.shape === s).length;
-    expect(count("owner-api")).toBe(22);
+    expect(count("owner-api")).toBe(23);
     expect(count("owner-page")).toBe(8);
     expect(count("public-inert")).toBe(2);
     expect(count("public-serving")).toBe(18);
     expect(count("auth-handler")).toBe(1);
     expect(count("cron")).toBe(1);
-    expect(ROUTE_MANIFEST.length).toBe(52);
+    expect(ROUTE_MANIFEST.length).toBe(53);
   });
 
   it("exposes the shape helpers matching the partition", () => {
-    expect(ownerApiRoutes().length).toBe(22);
+    expect(ownerApiRoutes().length).toBe(23);
     expect(ownerPageRoutes().length).toBe(8);
     expect(publicInertRoutes().length).toBe(2);
   });

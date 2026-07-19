@@ -30,6 +30,7 @@ import { getGithub } from "@/lib/connectors/github";
 import { getHealth } from "@/lib/connectors/health";
 import { getLayout } from "@/lib/connectors/layout";
 import { getRiichiStats } from "@/lib/connectors/riichi";
+import { getSteps } from "@/lib/connectors/steps";
 import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getWeather } from "@/lib/connectors/weather";
@@ -41,6 +42,12 @@ import {
   type SnapIndexDay,
 } from "@/lib/fin";
 import { hiddenSet, orderedUnitsInZone } from "@/lib/layout";
+import {
+  commas,
+  STEPS_STRIP_DAYS,
+  stepsForDay,
+  trailingSeries,
+} from "@/lib/steps";
 import { uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
@@ -97,6 +104,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     wx,
     choreReads,
     health,
+    steps,
   ] = await Promise.all([
     getBriefing(),
     getLanguageStats(),
@@ -110,6 +118,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getWeather(),
     getChoreReads(),
     getHealth(),
+    getSteps(today),
   ]);
   const b = briefing ?? sampleBriefing;
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
@@ -117,6 +126,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
   const hidden = hiddenSet(layout, "center");
   const todayVisible = [
     "weather",
+    "steps",
     "transit-next",
     "networth",
     "vault-today",
@@ -124,6 +134,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
     "briefing",
     "hand",
   ].some((k) => !hidden.has(k));
+
+  // Steps (roadmap: the daily section) — plaintext, server-rendered off the phone's
+  // daily push; today's count + a trailing fortnight strip. `null` today = nothing
+  // posted yet (the honest empty state).
+  const stepsToday = stepsForDay(steps, today);
+  const stepsLevels = toLevels(trailingSeries(steps, STEPS_STRIP_DAYS, today));
 
   // Reading week-over-week + trend now ride the sealed reading index (the cron's
   // plaintext day series), not the retired snapshot store. A store miss or a bad
@@ -237,6 +253,29 @@ export async function CommandCenter({ userName }: { userName: string }) {
             wx.todayMaxC !== null &&
             ` · ${Math.round(wx.todayMinC)}–${Math.round(wx.todayMaxC)}°`}
         </span>
+      </div>
+    ) : null,
+
+    /* steps — the daily count off the phone's plaintext push (Samsung Health →
+       Health Connect); today's number + a trailing 14-day strip. "no data yet"
+       until the first post lands (an absent store, not a fake number). */
+    steps: !hidden.has("steps") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          steps
+        </span>
+        <span className="min-w-0 flex-1 text-fg/90">
+          {stepsToday !== null ? (
+            <span className="tabular-nums text-fg">{commas(stepsToday)}</span>
+          ) : (
+            <span className="text-muted">no data yet</span>
+          )}
+        </span>
+        {stepsLevels.some((l) => l > 0) && (
+          <span className="w-24 shrink-0">
+            <ActivityStrip levels={stepsLevels} label="steps, last 14 days" />
+          </span>
+        )}
       </div>
     ) : null,
 
