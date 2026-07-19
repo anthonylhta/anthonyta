@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
 import { BriefingRelevance } from "@/components/BriefingRelevance";
@@ -40,7 +40,7 @@ import {
   sydneyDaysAgo,
   type SnapIndexDay,
 } from "@/lib/fin";
-import { hiddenSet } from "@/lib/layout";
+import { hiddenSet, orderedUnitsInZone } from "@/lib/layout";
 import { uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
@@ -199,6 +199,241 @@ export async function CommandCenter({ userName }: { userName: string }) {
     },
   ];
 
+  const weekVisible = ["week", "chores", "health", "tft", "totp"].some(
+    (k) => !hidden.has(k),
+  );
+
+  // Each command-center module keyed by its layout UNIT key so the zones can
+  // render in the owner's configured order (roadmap 59). The values are the
+  // exact blocks that used to sit inline, a ternary yielding the JSX when
+  // visible.
+  const centerNodes: Record<string, ReactNode> = {
+    dropbox: !hidden.has("dropbox") ? (
+      <DropInbox offline={!r2Enabled()} />
+    ) : null,
+
+    /* the morning glance rows (roadmap 50+51): Sydney weather is public
+       data server-rendered off the keyless Open-Meteo connector; the
+       next-trip line is a vault island over the sealed saved trips. */
+    weather: !hidden.has("weather") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          weather
+        </span>
+        <span className="min-w-0 flex-1 text-fg/90">
+          <span className="tabular-nums text-fg">{Math.round(wx.tempC)}°</span>{" "}
+          {weatherCodeText(wx.code)}
+          {wx.feelsC !== null && ` · feels ${Math.round(wx.feelsC)}°`}
+          {wx.uv !== null && (
+            <>
+              {" · uv "}
+              <span className={wx.uv >= 3 ? "text-amber" : "text-fg/90"}>
+                {Math.round(wx.uv)}
+              </span>{" "}
+              {uvLabel(wx.uv)}
+            </>
+          )}
+          {wx.todayMinC !== null &&
+            wx.todayMaxC !== null &&
+            ` · ${Math.round(wx.todayMinC)}–${Math.round(wx.todayMaxC)}°`}
+        </span>
+      </div>
+    ) : null,
+
+    "transit-next": !hidden.has("transit-next") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          transit
+        </span>
+        <span className="min-w-0 flex-1">
+          <TransitGlance offline={!r2Enabled()} />
+        </span>
+      </div>
+    ) : null,
+
+    /* net worth — a glance; full holdings + cash live on /portfolio. The
+       numbers are a client island: everything rides the E2EE fin envelope
+       (ADR 0061) and decrypts in the browser — sealed dots until unlocked. */
+    networth: !hidden.has("networth") ? (
+      <div className="border-b border-hairline px-4 py-4">
+        <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
+          <span>net worth</span>
+          <Link
+            href="/portfolio"
+            className="normal-case tracking-normal text-amber hover:underline"
+          >
+            portfolio →
+          </Link>
+        </div>
+        <NetWorthGlance offline={!r2Enabled()} />
+      </div>
+    ) : null,
+
+    /* today's daily note, parsed: headline + planner + a journal peek. A
+       client island — the note is sealed in the E2EE vault, so it's fetched +
+       decrypted in the browser (unlock in files/), never server-rendered. */
+    "vault-today": !hidden.has("vault-today") ? (
+      <VaultTodayGlance offline={!r2Enabled()} date={today} />
+    ) : null,
+
+    /* quick capture — the E2EE todo list (roadmap 53). A client island:
+       captures seal into the meta/todo envelope in the browser; sealed
+       dots until the key is in hand. */
+    todo: !hidden.has("todo") ? (
+      <div className="border-b border-hairline px-4 py-4">
+        <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+          capture
+        </div>
+        <TodoGlance offline={!r2Enabled()} />
+      </div>
+    ) : null,
+
+    "briefing-hand":
+      !hidden.has("briefing") || !hidden.has("hand") ? (
+        <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
+          {!hidden.has("briefing") && (
+            <Module
+              label="briefing"
+              className="border-0 sm:col-span-2"
+              action={
+                <Link
+                  href="/briefing"
+                  className="text-xs text-amber hover:underline"
+                >
+                  [full]
+                </Link>
+              }
+            >
+              <p className="text-fg">{b.driver}</p>
+              <Tape items={ticks} className="mt-2" />
+              <BriefingRelevance briefing={b} offline={!r2Enabled()} />
+            </Module>
+          )}
+
+          {!hidden.has("hand") && (
+            <Module
+              label="today's hand"
+              className="border-0 sm:col-span-2"
+              action={
+                <Link
+                  href="/riichi"
+                  className="text-xs text-amber hover:underline"
+                >
+                  [solve]
+                </Link>
+              }
+            >
+              <p className="text-fg">
+                <span lang="ja" className="font-[family-name:var(--font-jp)]">
+                  本日の一手
+                </span>{" "}
+                — {riichi.todaySolved ? "solved ✓" : "unsolved"}
+              </p>
+              <p className="mt-1.5 text-xs text-muted">
+                solve to keep the streak
+              </p>
+            </Module>
+          )}
+        </div>
+      ) : null,
+
+    week: !hidden.has("week") ? (
+      <div className="px-4 py-2">
+        {rows.map((r) => (
+          <ActivityRow
+            key={r.k}
+            k={r.k}
+            value={r.value}
+            levels={r.levels}
+            last={false}
+          />
+        ))}
+        {/* journal — a client island (the count + trend come from the sealed
+              vault index), always the final, borderless row. */}
+        <JournalActivityRow offline={!r2Enabled()} today={today} />
+      </div>
+    ) : null,
+
+    /* chores — maintenance freshness derived from evidence (roadmap 52):
+       vault-sync + backup are server-read; the csv chip decrypts the fin
+       envelope client-side. */
+    chores: !hidden.has("chores") ? (
+      <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          chores
+        </span>
+        <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
+          <ChoreCsvChip offline={!r2Enabled()} />
+          <ChoreChip
+            label="vault-sync"
+            state={choreState(
+              choreReads.vaultSyncedAt,
+              CHORE_CADENCE_DAYS.vaultSync,
+              new Date(),
+            )}
+          />
+          <ChoreChip
+            label="backup"
+            state={choreState(
+              choreReads.backupAt,
+              CHORE_CADENCE_DAYS.backup,
+              new Date(),
+            )}
+          />
+        </span>
+      </div>
+    ) : null,
+
+    /* health — is the estate up (roadmap 55): one capped probe per
+       sibling project, cached 5 min. */
+    health: !hidden.has("health") ? (
+      <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          health
+        </span>
+        <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
+          {health.map((h) => (
+            <span key={h.key} className="text-xs">
+              <span className="text-muted">{h.label}</span>{" "}
+              {h.state === "down" ? (
+                <span className="text-down">✕ down</span>
+              ) : (
+                <>
+                  <span
+                    className={h.state === "slow" ? "text-amber" : "text-up"}
+                  >
+                    ●
+                  </span>
+                  {h.ms !== null && (
+                    <span className="tabular-nums text-muted"> {h.ms}ms</span>
+                  )}
+                </>
+              )}
+            </span>
+          ))}
+        </span>
+      </div>
+    ) : null,
+
+    /* arena — the same band the lobby shows (rank, recent games, drill-down),
+       so the owner doesn't have to sign out to see it. The THIS WEEK tft row
+       keeps the cadence; this is the standing (deliberate 0032 dent). */
+    tft: !hidden.has("tft") ? (
+      <TftModule tft={tft} history={tftHistory} />
+    ) : null,
+
+    /* 2fa — seeds sealed in the vault, codes computed in-browser behind the
+       unlock (ADR: TOTP drawer); the server never sees a seed or a code. */
+    totp: !hidden.has("totp") ? (
+      <div className="border-t border-hairline px-4 py-4">
+        <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+          2fa
+        </div>
+        <TotpDrawer offline={!r2Enabled()} />
+      </div>
+    ) : null,
+  };
+
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
@@ -213,238 +448,19 @@ export async function CommandCenter({ userName }: { userName: string }) {
 
         {/* encrypted drop box — a client island behind the vault unlock; sealed
             messages left on /contact open here and nowhere else (ADR: sealed box). */}
-        {!hidden.has("dropbox") && <DropInbox offline={!r2Enabled()} />}
+        {centerNodes.dropbox}
 
-        {/* ───────────── TODAY ───────────── */}
+        {/* zones render from the owner's layout order (roadmap 59); the default
+            order reproduces the hand-tuned layout exactly. */}
         {todayVisible && <Zone label="today" right={todayLabel()} />}
+        {orderedUnitsInZone(layout, "center", "today").map((u) => (
+          <Fragment key={u.key}>{centerNodes[u.key]}</Fragment>
+        ))}
 
-        {/* the morning glance rows (roadmap 50+51): Sydney weather is public
-            data server-rendered off the keyless Open-Meteo connector; the
-            next-trip line is a vault island over the sealed saved trips. */}
-        {!hidden.has("weather") && (
-          <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-              weather
-            </span>
-            <span className="min-w-0 flex-1 text-fg/90">
-              <span className="tabular-nums text-fg">
-                {Math.round(wx.tempC)}°
-              </span>{" "}
-              {weatherCodeText(wx.code)}
-              {wx.feelsC !== null && ` · feels ${Math.round(wx.feelsC)}°`}
-              {wx.uv !== null && (
-                <>
-                  {" · uv "}
-                  <span className={wx.uv >= 3 ? "text-amber" : "text-fg/90"}>
-                    {Math.round(wx.uv)}
-                  </span>{" "}
-                  {uvLabel(wx.uv)}
-                </>
-              )}
-              {wx.todayMinC !== null &&
-                wx.todayMaxC !== null &&
-                ` · ${Math.round(wx.todayMinC)}–${Math.round(wx.todayMaxC)}°`}
-            </span>
-          </div>
-        )}
-        {!hidden.has("transit-next") && (
-          <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-              transit
-            </span>
-            <span className="min-w-0 flex-1">
-              <TransitGlance offline={!r2Enabled()} />
-            </span>
-          </div>
-        )}
-
-        {/* net worth — a glance; full holdings + cash live on /portfolio. The
-            numbers are a client island: everything rides the E2EE fin envelope
-            (ADR 0061) and decrypts in the browser — sealed dots until unlocked. */}
-        {!hidden.has("networth") && (
-          <div className="border-b border-hairline px-4 py-4">
-            <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
-              <span>net worth</span>
-              <Link
-                href="/portfolio"
-                className="normal-case tracking-normal text-amber hover:underline"
-              >
-                portfolio →
-              </Link>
-            </div>
-            <NetWorthGlance offline={!r2Enabled()} />
-          </div>
-        )}
-
-        {/* today's daily note, parsed: headline + planner + a journal peek. A
-            client island — the note is sealed in the E2EE vault, so it's fetched +
-            decrypted in the browser (unlock in files/), never server-rendered. */}
-        {!hidden.has("vault-today") && (
-          <VaultTodayGlance offline={!r2Enabled()} date={today} />
-        )}
-
-        {/* quick capture — the E2EE todo list (roadmap 53). A client island:
-            captures seal into the meta/todo envelope in the browser; sealed
-            dots until the key is in hand. */}
-        {!hidden.has("todo") && (
-          <div className="border-b border-hairline px-4 py-4">
-            <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-              capture
-            </div>
-            <TodoGlance offline={!r2Enabled()} />
-          </div>
-        )}
-
-        {(!hidden.has("briefing") || !hidden.has("hand")) && (
-          <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
-            {!hidden.has("briefing") && (
-              <Module
-                label="briefing"
-                className="border-0 sm:col-span-2"
-                action={
-                  <Link
-                    href="/briefing"
-                    className="text-xs text-amber hover:underline"
-                  >
-                    [full]
-                  </Link>
-                }
-              >
-                <p className="text-fg">{b.driver}</p>
-                <Tape items={ticks} className="mt-2" />
-                <BriefingRelevance briefing={b} offline={!r2Enabled()} />
-              </Module>
-            )}
-
-            {!hidden.has("hand") && (
-              <Module
-                label="today's hand"
-                className="border-0 sm:col-span-2"
-                action={
-                  <Link
-                    href="/riichi"
-                    className="text-xs text-amber hover:underline"
-                  >
-                    [solve]
-                  </Link>
-                }
-              >
-                <p className="text-fg">
-                  <span lang="ja" className="font-[family-name:var(--font-jp)]">
-                    本日の一手
-                  </span>{" "}
-                  — {riichi.todaySolved ? "solved ✓" : "unsolved"}
-                </p>
-                <p className="mt-1.5 text-xs text-muted">
-                  solve to keep the streak
-                </p>
-              </Module>
-            )}
-          </div>
-        )}
-
-        {/* ──────────── THIS WEEK ──────────── */}
-        {!hidden.has("week") && (
-          <>
-            <Zone label="this week" right={weekRange()} />
-            <div className="px-4 py-2">
-              {rows.map((r) => (
-                <ActivityRow
-                  key={r.k}
-                  k={r.k}
-                  value={r.value}
-                  levels={r.levels}
-                  last={false}
-                />
-              ))}
-              {/* journal — a client island (the count + trend come from the sealed
-              vault index), always the final, borderless row. */}
-              <JournalActivityRow offline={!r2Enabled()} today={today} />
-            </div>
-          </>
-        )}
-
-        {/* chores — maintenance freshness derived from evidence (roadmap 52):
-            vault-sync + backup are server-read; the csv chip decrypts the fin
-            envelope client-side. */}
-        {!hidden.has("chores") && (
-          <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
-            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-              chores
-            </span>
-            <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
-              <ChoreCsvChip offline={!r2Enabled()} />
-              <ChoreChip
-                label="vault-sync"
-                state={choreState(
-                  choreReads.vaultSyncedAt,
-                  CHORE_CADENCE_DAYS.vaultSync,
-                  new Date(),
-                )}
-              />
-              <ChoreChip
-                label="backup"
-                state={choreState(
-                  choreReads.backupAt,
-                  CHORE_CADENCE_DAYS.backup,
-                  new Date(),
-                )}
-              />
-            </span>
-          </div>
-        )}
-
-        {/* health — is the estate up (roadmap 55): one capped probe per
-            sibling project, cached 5 min. */}
-        {!hidden.has("health") && (
-          <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
-            <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-              health
-            </span>
-            <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
-              {health.map((h) => (
-                <span key={h.key} className="text-xs">
-                  <span className="text-muted">{h.label}</span>{" "}
-                  {h.state === "down" ? (
-                    <span className="text-down">✕ down</span>
-                  ) : (
-                    <>
-                      <span
-                        className={
-                          h.state === "slow" ? "text-amber" : "text-up"
-                        }
-                      >
-                        ●
-                      </span>
-                      {h.ms !== null && (
-                        <span className="tabular-nums text-muted">
-                          {" "}
-                          {h.ms}ms
-                        </span>
-                      )}
-                    </>
-                  )}
-                </span>
-              ))}
-            </span>
-          </div>
-        )}
-
-        {/* arena — the same band the lobby shows (rank, recent games, drill-down),
-            so the owner doesn't have to sign out to see it. The THIS WEEK tft row
-            keeps the cadence; this is the standing (deliberate 0032 dent). */}
-        {!hidden.has("tft") && <TftModule tft={tft} history={tftHistory} />}
-
-        {/* 2fa — seeds sealed in the vault, codes computed in-browser behind the
-            unlock (ADR: TOTP drawer); the server never sees a seed or a code. */}
-        {!hidden.has("totp") && (
-          <div className="border-t border-hairline px-4 py-4">
-            <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-              2fa
-            </div>
-            <TotpDrawer offline={!r2Enabled()} />
-          </div>
-        )}
+        {weekVisible && <Zone label="this week" right={weekRange()} />}
+        {orderedUnitsInZone(layout, "center", "week").map((u) => (
+          <Fragment key={u.key}>{centerNodes[u.key]}</Fragment>
+        ))}
 
         {/* quick jumps */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
