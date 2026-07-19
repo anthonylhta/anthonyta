@@ -15,7 +15,14 @@ const LEVELS = [
 const STEP = 6;
 const CW = 4.6;
 
-export function ActivityStrip({ levels }: { levels: number[] }) {
+export function ActivityStrip({
+  levels,
+  label = "activity, last 10 weeks",
+}: {
+  levels: number[];
+  /** aria-label for the plot; defaults to the this-week rows' wording. */
+  label?: string;
+}) {
   const w = Math.max(1, levels.length) * STEP;
   return (
     <svg
@@ -23,7 +30,7 @@ export function ActivityStrip({ levels }: { levels: number[] }) {
       preserveAspectRatio="none"
       className="h-3.5 w-full"
       role="img"
-      aria-label="activity, last 10 weeks"
+      aria-label={label}
     >
       {levels.map((lvl, i) => (
         <rect

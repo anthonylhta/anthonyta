@@ -197,6 +197,35 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
+  // The steps ingest is the same bearer-gated hidden surface as the briefing one:
+  // secretless CI is production with no STEPS_INGEST_SECRET → fail CLOSED → every
+  // call 404s, including a perfectly-shaped body. No route-exists / validation oracle.
+  test("POST /api/daily/steps with no auth is 404 for a guest", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/daily/steps", { data: {} });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/daily/steps with a junk bearer is 404", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/daily/steps", {
+      headers: { authorization: "Bearer not-the-secret" },
+      data: { steps: 6240 },
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/daily/steps 404s even for a valid-shaped body (the wall holds)", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/daily/steps", {
+      data: { steps: 6240, date: "2026-07-20" },
+    });
+    expect(res.status()).toBe(404);
+  });
+
   // Passkey enrollment is owner-gated: no unauthenticated path may exist to
   // plant a credential, and the endpoints must be invisible (ADR 0022).
   for (const path of [

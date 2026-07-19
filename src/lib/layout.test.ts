@@ -146,6 +146,7 @@ describe("orderedUnits", () => {
     );
     expect(today).toEqual([
       "weather",
+      "steps",
       "transit-next",
       "networth",
       "vault-today",
@@ -159,8 +160,9 @@ describe("moveUnit + canMove", () => {
   it("moves a unit down within its zone", () => {
     const c = moveUnit(EMPTY_LAYOUT, "center", "weather", 1);
     expect(orderedUnitsInZone(c, "center", "today").map((u) => u.key)).toEqual([
-      "transit-next",
+      "steps",
       "weather",
+      "transit-next",
       "networth",
       "vault-today",
       "todo",
