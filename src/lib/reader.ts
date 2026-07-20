@@ -8,7 +8,14 @@
  *
  * The feed list lives IN CODE like the /novels list: the server must know
  * the URLs to fetch them (so the list can't be E2EE), and editing it is a
- * one-line PR. This is a starter set — swap freely.
+ * one-line PR.
+ *
+ * Curated to the owner's interests — tech, Japan, gaming, genre fiction — and
+ * to what a server can actually fetch. The obvious hobby-specific sources are
+ * RSS-hostile from a datacenter IP: Reddit (r/CompetitiveTFT, r/rational) 403s
+ * then 429s any non-browser / cloud request, and Dot Esports / ScribbleHub sit
+ * behind a Cloudflare bot challenge. So the two "closest reachable" stand-ins:
+ * Dexerto for Riot/esports, Reactor (Tor) for serialized/genre fiction.
  */
 
 export interface Feed {
@@ -18,17 +25,20 @@ export interface Feed {
 }
 
 export const FEEDS: Feed[] = [
+  // tech / programming
   { key: "hn", label: "hn", url: "https://news.ycombinator.com/rss" },
+  { key: "lobsters", label: "lobsters", url: "https://lobste.rs/rss" },
+  // japan — anime + language
   {
-    key: "ars",
-    label: "ars",
-    url: "https://feeds.arstechnica.com/arstechnica/index",
+    key: "ann",
+    label: "anime news",
+    url: "https://www.animenewsnetwork.com/all/rss.xml",
   },
-  {
-    key: "guardian",
-    label: "guardian au",
-    url: "https://www.theguardian.com/au/rss",
-  },
+  { key: "tofugu", label: "tofugu", url: "https://www.tofugu.com/feed.xml" },
+  // gaming — riot / esports (TFT-specific feeds are all bot-blocked)
+  { key: "dexerto", label: "dexerto", url: "https://www.dexerto.com/feed/" },
+  // fiction — serialized / genre (web-serial sites have no server-fetchable feed)
+  { key: "reactor", label: "reactor", url: "https://reactormag.com/feed/" },
 ];
 
 export interface FeedItem {

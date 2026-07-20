@@ -17,18 +17,30 @@ import {
 
 const FETCH_TIMEOUT_MS = 5000;
 
+// Keep only a few items per feed before the merge, so one high-volume source
+// (ANN publishes 100+/day) can't crowd out the quieter ones — the "cap each
+// feed, drop the firehose" shape.
+const PER_FEED = 5;
+
+// A descriptive User-Agent — several feeds 403/429 an unidentified client, and
+// it's the polite way to identify the fetcher.
+const USER_AGENT = "anthonyta.dev reader (+https://anthonyta.dev)";
+
 async function fetchFeed(url: string, label: string): Promise<FeedItem[]> {
   try {
     const res = await fetch(url, {
       cache: "no-store",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: { accept: "application/rss+xml, application/atom+xml, */*" },
+      headers: {
+        accept: "application/rss+xml, application/atom+xml, */*",
+        "user-agent": USER_AGENT,
+      },
     });
     if (!res.ok) {
       console.error("[connector:reader] http", res.status, label);
       return [];
     }
-    return parseFeed(await res.text(), label);
+    return parseFeed(await res.text(), label, PER_FEED);
   } catch (err) {
     console.error("[connector:reader]", label, "failed:", err);
     return [];
