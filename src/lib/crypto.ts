@@ -411,6 +411,18 @@ function startsWith(bytes: Uint8Array, prefix: Uint8Array): boolean {
 }
 
 /**
+ * True if `bytes` begin with one of our sealed-envelope magics (AEV1 or AEV2).
+ * The fixed-config PUT routes (fin/transit/todo/totp) use this as their frame
+ * check: the server can never decrypt, but it can refuse anything that isn't one
+ * of our envelopes. Accepting BOTH magics is load-bearing — a store may still hold
+ * an old AEV1 blob while every new write is AEV2 (context-bound, ADR 0099), and a
+ * check that only knew AEV1 would silently 404 every AEV2 write.
+ */
+export function hasAevMagic(bytes: Uint8Array): boolean {
+  return startsWith(bytes, MAGIC_BYTES) || startsWith(bytes, MAGIC_V2_BYTES);
+}
+
+/**
  * meta + plaintext → one self-describing ciphertext envelope (the stored blob).
  *
  * With no `context`, this is AEV1 byte-for-byte — the magic is the only AAD — so every
