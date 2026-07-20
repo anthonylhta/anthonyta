@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { MAGIC } from "@/lib/crypto";
+import { hasAevMagic, MAGIC } from "@/lib/crypto";
 import { getTotpConfig, putTotpConfig, TOTP_MAX_BYTES } from "@/lib/totpstore";
 
 export const dynamic = "force-dynamic";
@@ -55,9 +55,7 @@ export async function PUT(request: Request) {
     // Frame sanity only — the server can't (and must never) decrypt.
     if (bytes.byteLength > TOTP_MAX_BYTES) return nf();
     if (bytes.byteLength < MIN_ENVELOPE_BYTES) return nf();
-    for (let i = 0; i < MAGIC_BYTES.length; i++) {
-      if (bytes[i] !== MAGIC_BYTES[i]) return nf();
-    }
+    if (!hasAevMagic(bytes)) return nf();
 
     const overwrite = request.headers.get("x-totp-overwrite") === "1";
     const result = await putTotpConfig(bytes, overwrite);
