@@ -12,6 +12,7 @@ import {
   generateBoxKeypair,
   generateMk,
   generateShareKey,
+  hasAevMagic,
   importBoxPriv,
   importShareKey,
   isKeystore,
@@ -191,6 +192,21 @@ describe("envelope context binding (AEV2)", () => {
     expect(new TextDecoder().decode(v1.subarray(0, 4))).toBe("AEV1");
     expect(new TextDecoder().decode(v2.subarray(0, 4))).toBe(MAGIC_V2);
     expect(MAGIC_V2).toBe("AEV2");
+  });
+
+  // The fixed-config PUT routes frame-check with `hasAevMagic`. It MUST accept a
+  // context-sealed (AEV2) envelope — the regression: the routes only knew AEV1, so
+  // every write from a context-sealing client (fin/transit/todo/totp) 404'd.
+  it("hasAevMagic accepts what a context-seal emits (AEV1 and AEV2)", async () => {
+    const { mk } = await setupKeys();
+    const v1 = await seal(mk, META, new Uint8Array([1]));
+    const v2 = await seal(mk, META, new Uint8Array([1]), "meta/todo");
+    expect(hasAevMagic(v1)).toBe(true);
+    expect(hasAevMagic(v2)).toBe(true);
+    expect(hasAevMagic(new TextEncoder().encode("XXXXnot an envelope"))).toBe(
+      false,
+    );
+    expect(hasAevMagic(new Uint8Array([0x41, 0x45, 0x56]))).toBe(false); // "AEV" only
   });
 
   it("THE SWAP TEST: sealed at path A, refuses to open as path B", async () => {

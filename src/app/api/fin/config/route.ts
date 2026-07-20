@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { MAGIC } from "@/lib/crypto";
+import { hasAevMagic, MAGIC } from "@/lib/crypto";
 import { FIN_MAX_BYTES } from "@/lib/fin";
 import { getFinConfig, putFinConfig } from "@/lib/finstore";
 
@@ -55,13 +55,12 @@ export async function PUT(request: Request) {
 
     // Frame sanity only — the server can't (and must never) decrypt. Reject an
     // oversize blob, one too short to even hold the envelope header, or one whose
-    // first four bytes aren't the `AEV1` magic. Compare the magic byte-for-byte
-    // rather than decoding the whole buffer to a string.
+    // first four bytes aren't a sealed-envelope magic (AEV1, or the context-bound
+    // AEV2 the client now seals — ADR 0099). The server checks the frame, never
+    // the contents.
     if (bytes.byteLength > FIN_MAX_BYTES) return nf();
     if (bytes.byteLength < MIN_ENVELOPE_BYTES) return nf();
-    for (let i = 0; i < MAGIC_BYTES.length; i++) {
-      if (bytes[i] !== MAGIC_BYTES[i]) return nf();
-    }
+    if (!hasAevMagic(bytes)) return nf();
 
     const overwrite = request.headers.get("x-fin-overwrite") === "1";
     const result = await putFinConfig(bytes, overwrite);
