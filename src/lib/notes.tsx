@@ -1058,6 +1058,70 @@ export const notes: Note[] = [
       </>
     ),
   },
+  {
+    slug: "end-to-end-has-a-server-in-the-middle",
+    title: "end-to-end has a server in the middle",
+    oneLiner:
+      "Browser E2EE trusts the origin to serve honest code — the one gap crypto can’t close, and why I wrote the caveat instead of building the theater.",
+    updated: "2026-07-22",
+    related: [
+      "safe-by-construction-not-by-runbook",
+      "a-cron-that-writes-secrets-it-cant-read",
+    ],
+    body: (
+      <>
+        <p>
+          The private half of this site is end-to-end encrypted: the server
+          stores sealed blobs it can’t read, and the key only ever exists in my
+          browser. True — with one asterisk I don’t get to skip. The same origin
+          that holds my ciphertext also serves the JavaScript that turns my
+          passphrase into that key. “The server can’t read your data” holds{" "}
+          <em>only as long as it keeps serving honest code.</em> A malicious
+          deploy could ship a key-derivation that quietly pockets the
+          passphrase, and no envelope format in the world would notice — every
+          ciphertext would still verify perfectly.
+        </p>
+        <p>
+          There’s a known move against this, and I drafted the whole thing:{" "}
+          <strong>build attestation.</strong> Hash every script chunk into a
+          signed manifest, commit it to the public repo so the git history
+          becomes a transparency log, and have the service worker verify what
+          the browser actually runs against what was published. Then I asked the
+          question that decides whether a control is real:{" "}
+          <em>who does it fire on?</em> Build attestation protects a user from
+          an operator they don’t control. On this site I <em>am</em> the
+          operator — I write the code, I push the deploys, I own the repo. The
+          only attacker it imagines is one who has taken my account, and that
+          same attacker serves the forged manifest and force-pushes the log. The
+          service worker would be checking malicious code against a malicious
+          manifest, and nodding.
+        </p>
+        <p>
+          Which is worse than doing nothing, because it doesn’t <em>look</em>{" "}
+          like nothing. A “build attestation ✓” line on a security page signals
+          a guarantee the crypto doesn’t back. The real cost isn’t the wasted
+          build step or the enforcement path — it’s that the next person reading
+          the page trusts the site a notch more than it has earned. A feature
+          that manufactures confidence out of proportion to what it prevents is
+          a net negative, however clever the mechanism. Attestation is a genuine
+          control when you and your users are different people; here it’s a
+          badge.
+        </p>
+        <p>
+          So I shipped the sentence instead of the system — the note you’re
+          reading is the artifact. In a plain web app I can’t close this gap,
+          only make its abuse loud and permanent, and on a site I alone deploy
+          even that is thin. That’s worth stating outright rather than papering
+          over with machinery that resembles a fix.{" "}
+          <strong>
+            When a control can’t fire on the threat it names, the honest caveat
+            protects the reader better than the mechanism that looks like
+            protection.
+          </strong>
+        </p>
+      </>
+    ),
+  },
 ];
 
 export function getNote(slug: string): Note | undefined {
