@@ -96,6 +96,13 @@ export function RecoveryShares({ offline }: { offline: boolean }) {
         return;
       }
       const ks = parsed as Keystore;
+      // Mid-rotation (ADR 0090) the primary MK is on its way out — shares
+      // printed now would encode a key that promotion retires. Refuse rather
+      // than hand out paper that's stale by construction.
+      if (ks.v === 3 && ks.pending) {
+        setError("a key rotation is in flight — finish it, then arm shares");
+        return;
+      }
       const kek = await deriveKekForKdf(ks.kdf, pass);
       // Momentarily-extractable unwrap — the only honest path to raw bytes. A
       // wrong passphrase fails this GCM check and throws.
@@ -407,6 +414,19 @@ export function RecoverWithShares() {
     setWorking(true);
     setError(null);
     try {
+      // This overwrite rebuilds the keystore from scratch — if a rotation is
+      // mid-flight (ADR 0090) the live keystore carries the ONLY wrap of the
+      // new MK in `pending`, and clobbering it orphans every blob already
+      // re-sealed under MK2. Read the live keystore first and refuse; better
+      // locked out with data intact than unlocked over a torn rotation.
+      const live = await fetch("/api/files/keystore");
+      if (live.ok) {
+        const parsed: unknown = await live.json();
+        if (isKeystore(parsed) && parsed.v === 3 && parsed.pending) {
+          setError("a key rotation is in flight — resume it before recovering");
+          return;
+        }
+      }
       const kdf = await freshKdf();
       const kek = await deriveKekForKdf(kdf, newPass);
       const { wrapped, iv } = await wrapMk(mk, kek);

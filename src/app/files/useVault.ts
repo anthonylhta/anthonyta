@@ -200,7 +200,10 @@ async function putKeystore(
  * keystore is now at rest.
  */
 async function healCanary(mk: CryptoKey, ks: Keystore): Promise<Keystore> {
-  if (ks.v === 2) return ks;
+  // Strictly the v1 → v2 heal: a v2 already has its canary, and a v3 (the
+  // rotation-era shape, ADR 0090) must NOT be "healed" — rebuilding it as v2
+  // would strip a mid-rotation `pending` wrap, the only copy of the new MK.
+  if (ks.v !== 1) return ks;
   try {
     const next: Keystore = { ...ks, v: 2, canary_b64: await sealCanary(mk) };
     if ((await putKeystore(next, true)) === "ok") return next;
@@ -226,6 +229,11 @@ async function migrateKdf(
   passphrase: string,
 ): Promise<Keystore> {
   if (isArgonKdf(ks.kdf)) return ks;
+  // Never migrate a v3 keystore: the kdf swap derives a NEW KEK, and a
+  // mid-rotation `pending` wrap sits under the OLD one — re-wrapping only the
+  // primary would orphan the new MK. Deferred until the keystore is back to v2
+  // (rotation promotion / the next passphrase change normalizes it).
+  if (ks.v === 3) return ks;
   try {
     const kdf = await freshKdf();
     if (!isArgonKdf(kdf)) return ks; // WASM unavailable — stay on pbkdf2
@@ -480,6 +488,16 @@ export function useVault(offline: boolean): Vault {
     async (oldPass: string, newPass: string) => {
       const ks = ksRef.current;
       if (!ks) return false;
+      // Mid-rotation the keystore holds the ONLY wrap of the new MK, and this
+      // path rebuilds the keystore from scratch (buildKeystore emits v2) —
+      // proceeding would drop `pending` and orphan every blob already
+      // re-sealed under MK2. Refuse until the rotation completes. A v3
+      // WITHOUT pending (post-promotion) is fine: the rebuild normalizes it
+      // back to v2 around the same MK.
+      if (ks.v === 3 && ks.pending) {
+        setError("a key rotation is in flight — finish it first");
+        return false;
+      }
       setWorking(true);
       setError(null);
       try {
