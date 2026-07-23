@@ -60,9 +60,12 @@ test.describe("notes tags", () => {
     const html = await res.text();
     // The prompt echoes the command form…
     expect(html).toContain("--tag");
-    // …an e2ee note is present, an agents note is not.
+    // …an e2ee note is present; the newest non-e2ee note (which tops the
+    // unfiltered page 1) is not.
     expect(html).toContain("/notes/one-store-every-door");
-    expect(html).not.toContain("/notes/keep-the-model-in-its-lane");
+    expect(html).not.toContain(
+      "/notes/retry-before-you-write-the-root-cause-down",
+    );
     // Escaping the filter is a real link back to the canonical index.
     expect(html).toContain('href="/notes"');
   });
@@ -74,7 +77,10 @@ test.describe("notes tags", () => {
       const res = await request.get(`/notes${q}`);
       expect(res.status(), q).toBe(200);
       const html = await res.text();
-      expect(html, q).toContain("/notes/keep-the-model-in-its-lane");
+      // Structural, note-proof marker: the prompt echoes "--tag" ONLY when a
+      // filter is active, so its absence IS the unfiltered index — no slug
+      // assertion to rot as entries paginate over the years.
+      expect(html, q).not.toContain("--tag");
     }
   });
 
