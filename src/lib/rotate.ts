@@ -257,6 +257,32 @@ export function recordVerified(
 }
 
 /**
+ * verifying|promoting → walking: the ONE sanctioned backward transition, and
+ * only on proof of a mid-rotation writer — a path in the live listing that was
+ * never rewritten (another device, still unlocked under MK1, wrote a new blob
+ * after the walk passed it). The module doc's "no backward transition" holds
+ * for progress (`rewritten`/`verified` never shrink); the PHASE may step back
+ * because the true point of no return is the keystore promotion WRITE, not the
+ * journal phase — until `pending` is dropped, walking again is always safe
+ * under the invariant. Throws without that proof, so it can never be used to
+ * casually rewind a rotation.
+ */
+export function resumeWalking(
+  j: RotationJournal,
+  listing: string[],
+): RotationJournal {
+  if (j.phase !== "verifying" && j.phase !== "promoting")
+    throw new Error(
+      `resumeWalking: expected phase "verifying" or "promoting", got "${j.phase}"`,
+    );
+  const rewritten = new Set(j.rewritten);
+  const missing = listing.filter((p) => !rewritten.has(p));
+  if (missing.length === 0)
+    throw new Error("resumeWalking: no un-rewritten path in the listing");
+  return { ...j, phase: "walking" };
+}
+
+/**
  * verifying → promoting. THROWS unless every path in the live listing has been
  * verified — the precondition for the point of no return, where the caller drops
  * the old wrap. After this, only MK2 survives, so every blob MUST already open
