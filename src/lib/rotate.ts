@@ -21,94 +21,40 @@
  * records progress so any device can crash and resume from exactly where it left
  * off, and refuses to trample a rotation another device started.
  *
- * No store, no `next` import, no `crypto` — this layer is data transforms only, so
- * it runs unchanged in the window, a worker, and Node-vitest, and is unit-testable
- * on its own (mirrors lib/merkle + lib/authlog, minus the hashing).
+ * No store, no `next` import, no WebCrypto — this layer is data transforms only,
+ * so it runs unchanged in the window, a worker, and Node-vitest, and is
+ * unit-testable on its own (mirrors lib/merkle + lib/authlog, minus the hashing).
+ * The one import is `crypto.ts`'s keystore shape + guard — pure data checks from
+ * a module that is itself side-effect-free.
  */
+
+import { isKeystore, type Keystore } from "./crypto";
 
 // ---------------------------------------------------------------------------
 // keystore v3 — the two-wrap, rotation-era keystore shape
 // ---------------------------------------------------------------------------
 
 /**
- * The keystore's rotation-era shape. v3 carries the everyday primary wrap plus,
- * ONLY during a rotation, a `pending` wrap of the NEW master key under the SAME
- * KEK — so a single passphrase unlocks either MK while the walk is in flight. The
- * `kdf`/`canary` fields mirror v2 (see `crypto.ts` `Keystore`). Outside a rotation
- * `pending` is absent and v3 is structurally a v2 with a bumped version.
+ * The keystore's rotation-era shape. v3 carries the everyday primary wrap
+ * (`wrapped_mk_b64` — the OLD MK for the duration of a rotation, MK2 after
+ * promotion) plus, ONLY during a rotation, a `pending` wrap of the NEW master key
+ * under the SAME KEK — so a single passphrase unlocks either MK while the walk is
+ * in flight. Outside a rotation `pending` is absent and v3 is structurally a v2
+ * with a bumped version.
+ *
+ * The shape itself now lives in `crypto.ts`'s `Keystore` union (both kdfs, the
+ * per-version field rules) so there is exactly ONE guard for every acceptance
+ * point — the server PUT gate, the client parses, and this module. The original
+ * self-contained guard here modelled only the pbkdf2 kdf, which would have
+ * rejected every real (Argon2id) keystore the moment a rotation started.
  */
-export interface KeystoreV3 {
-  v: 3;
-  kdf: { salt_b64: string; iterations: number };
-  /** The primary wrap — the OLD MK for the duration of a rotation, MK2 after
-   *  promotion. What everyday reads unwrap. */
-  wrapped_mk_b64: string;
-  iv_b64: string;
-  /** v2-style canary sealed under the PRIMARY MK; optional, mirrors v2. */
-  canary_b64?: string;
-  /** Present ONLY mid-rotation: the NEW MK wrapped under the same KEK, tied to the
-   *  journal by `rotation_id`. Dropped at promotion. */
-  pending?: {
-    wrapped_mk_b64: string;
-    iv_b64: string;
-    rotation_id: string;
-  };
-}
+export type KeystoreV3 = Keystore & { v: 3 };
 
-/**
- * Shape guard for a v3 keystore (server PUT gate + client parse). Bounds mirror
- * `crypto.ts` `isKeystore`. `canary_b64` is optional and, unlike v1/v2 where its
- * presence GATES the version, here it's independent (v3 already names its version).
- * `pending` is optional too, but when present ALL THREE of its fields are required
- * — a half-written pending wrap is malformed, not a partial success. Extra unknown
- * keys ride through untouched (forward-compat, like the sibling guards), so an
- * older client never rejects a newer keystore.
- */
+/** Shape guard for a v3 keystore — `crypto.ts`'s `isKeystore` narrowed to the
+ *  rotation-era version. All field rules (canary optional, pending complete-or-
+ *  absent, either kdf, forward-compat extra keys) are enforced there. */
 export function isKeystoreV3(x: unknown): x is KeystoreV3 {
-  if (typeof x !== "object" || x === null) return false;
-  const k = x as Record<string, unknown>;
-  if (k.v !== 3) return false;
-  const kdf = k.kdf as Record<string, unknown> | undefined;
-  const baseOk =
-    typeof kdf === "object" &&
-    kdf !== null &&
-    typeof kdf.salt_b64 === "string" &&
-    typeof kdf.iterations === "number" &&
-    Number.isInteger(kdf.iterations) &&
-    kdf.iterations >= 100_000 &&
-    kdf.iterations <= 10_000_000 &&
-    typeof k.wrapped_mk_b64 === "string" &&
-    k.wrapped_mk_b64.length > 0 &&
-    k.wrapped_mk_b64.length <= 128 &&
-    typeof k.iv_b64 === "string" &&
-    k.iv_b64.length > 0 &&
-    k.iv_b64.length <= 32;
-  if (!baseOk) return false;
-  if (k.canary_b64 !== undefined) {
-    if (
-      typeof k.canary_b64 !== "string" ||
-      k.canary_b64.length === 0 ||
-      k.canary_b64.length > 256
-    )
-      return false;
-  }
-  if (k.pending !== undefined) {
-    const p = k.pending as Record<string, unknown>;
-    if (typeof p !== "object" || p === null) return false;
-    if (
-      typeof p.wrapped_mk_b64 !== "string" ||
-      p.wrapped_mk_b64.length === 0 ||
-      p.wrapped_mk_b64.length > 128 ||
-      typeof p.iv_b64 !== "string" ||
-      p.iv_b64.length === 0 ||
-      p.iv_b64.length > 32 ||
-      typeof p.rotation_id !== "string" ||
-      p.rotation_id.length === 0 ||
-      p.rotation_id.length > 128
-    )
-      return false;
-  }
-  return true;
+  return isKeystore(x) && x.v === 3;
 }
 
 // ---------------------------------------------------------------------------

@@ -448,6 +448,20 @@ describe("isKeystoreV3", () => {
     expect(isKeystoreV3({ ...valid, note: "forward-compat" })).toBe(true);
   });
 
+  it("accepts an Argon2id kdf — every real keystore since ADR 0089", () => {
+    // The original self-contained guard modelled only pbkdf2, which would have
+    // rejected every live keystore the moment a rotation tried to start.
+    const argon = {
+      algo: "argon2id",
+      salt_b64: "s",
+      m: 65_536,
+      t: 3,
+      p: 1,
+    };
+    expect(isKeystoreV3({ ...valid, kdf: argon })).toBe(true);
+    expect(isKeystoreV3({ ...withPending, kdf: argon })).toBe(true);
+  });
+
   it("rejects a v2-shaped keystore (and other wrong versions)", () => {
     expect(
       isKeystoreV3({

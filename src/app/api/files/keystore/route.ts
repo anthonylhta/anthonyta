@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { recordAuthEvent } from "@/lib/authlogstore";
-import { isArgonKdf, isKeystore } from "@/lib/crypto";
+import { isKeystore, normalizeKeystore } from "@/lib/crypto";
 import { getKeystore, KEYSTORE_MAX_BYTES, putKeystore } from "@/lib/inbox";
 
 export const dynamic = "force-dynamic";
@@ -47,31 +47,14 @@ export async function PUT(request: Request) {
     if (!isKeystore(parsed)) return nf();
 
     // Rebuild from the validated fields so what's at rest is exactly the
-    // keystore shape, never a superset smuggled past the type guard — per KDF
-    // shape, so an argon2id keystore survives the rebuild intact. A v2
-    // keystore carries the sealed canary (isKeystore guaranteed it's present);
-    // v1 has none, so the field is only included when the version calls for it.
-    const kdf = isArgonKdf(parsed.kdf)
-      ? {
-          algo: parsed.kdf.algo,
-          salt_b64: parsed.kdf.salt_b64,
-          m: parsed.kdf.m,
-          t: parsed.kdf.t,
-          p: parsed.kdf.p,
-        }
-      : {
-          salt_b64: parsed.kdf.salt_b64,
-          iterations: parsed.kdf.iterations,
-        };
+    // keystore shape, never a superset smuggled past the type guard.
+    // `normalizeKeystore` is the client-shared, unit-tested rebuild — per KDF
+    // shape and per version, INCLUDING v3's `pending` second wrap (ADR 0090):
+    // a rebuild that lagged the client's format and quietly dropped `pending`
+    // would destroy the only wrap of a mid-rotation MK2 (#119's failure class).
     const overwrite = request.headers.get("x-keystore-overwrite") === "1";
     const result = await putKeystore(
-      JSON.stringify({
-        v: parsed.v,
-        kdf,
-        wrapped_mk_b64: parsed.wrapped_mk_b64,
-        iv_b64: parsed.iv_b64,
-        ...(parsed.v === 2 ? { canary_b64: parsed.canary_b64 } : {}),
-      }),
+      JSON.stringify(normalizeKeystore(parsed)),
       overwrite,
     );
     if (result === "conflict") return new Response("Conflict", { status: 409 });

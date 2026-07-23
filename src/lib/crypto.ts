@@ -98,12 +98,22 @@ export interface KdfArgon2id {
 }
 
 export interface Keystore {
-  v: 1 | 2;
+  v: 1 | 2 | 3;
   kdf: KdfPbkdf2 | KdfArgon2id;
   wrapped_mk_b64: string;
   iv_b64: string;
-  /** v2 only: the canary envelope (`sealCanary`), base64url. Absent on v1. */
+  /** v2: the canary envelope (`sealCanary`), base64url. Absent on v1; optional
+   *  on v3 (which names its version instead of gating it on this field). */
   canary_b64?: string;
+  /** v3 only, and only mid-rotation (ADR 0090): the NEW master key wrapped
+   *  under the SAME KEK, tied to the rotation journal by `rotation_id`. Dropped
+   *  at promotion. A `pending` on a v1/v2 keystore is malformed — a torn state,
+   *  never a valid one. */
+  pending?: {
+    wrapped_mk_b64: string;
+    iv_b64: string;
+    rotation_id: string;
+  };
 }
 
 /** Discriminates the kdf union — the `algo` field is the whole signal. */
@@ -285,17 +295,22 @@ function isValidKdf(kdf: Record<string, unknown>): boolean {
 
 /**
  * Shape check for anything claiming to be a keystore (server PUT gate + client
- * parse). Accepts both versions and both KDFs: v2 MUST carry a `canary_b64`
- * string, v1 MUST NOT — the field is exactly what distinguishes the two, so a
- * v2 without it (or a v1 with one) is malformed. The kdf block is either
- * legacy pbkdf2 (no `algo`) or argon2id — a half-and-half hybrid is rejected.
+ * parse). Accepts all three versions and both KDFs: v2 MUST carry a
+ * `canary_b64` string, v1 MUST NOT — the field is exactly what distinguishes
+ * those two. v3 (the rotation-era shape, ADR 0090) names its version instead,
+ * so its canary is independent (optional), and it alone may carry a `pending`
+ * second wrap — optional, but when present ALL THREE of its fields are
+ * required (a half-written pending wrap is malformed, not a partial success).
+ * A `pending` on v1/v2 is rejected outright: no writer ever emits that, so it
+ * can only be a torn or forged state. The kdf block is either legacy pbkdf2
+ * (no `algo`) or argon2id — a half-and-half hybrid is rejected.
  */
 export function isKeystore(x: unknown): x is Keystore {
   if (typeof x !== "object" || x === null) return false;
   const k = x as Record<string, unknown>;
   const kdf = k.kdf as Record<string, unknown> | undefined;
   const baseOk =
-    (k.v === 1 || k.v === 2) &&
+    (k.v === 1 || k.v === 2 || k.v === 3) &&
     typeof kdf === "object" &&
     kdf !== null &&
     isValidKdf(kdf) &&
@@ -306,11 +321,70 @@ export function isKeystore(x: unknown): x is Keystore {
     k.iv_b64.length > 0 &&
     k.iv_b64.length <= 32;
   if (!baseOk) return false;
-  return k.v === 2
-    ? typeof k.canary_b64 === "string" &&
-        k.canary_b64.length > 0 &&
-        k.canary_b64.length <= 256
-    : k.canary_b64 === undefined;
+  const canaryOk =
+    typeof k.canary_b64 === "string" &&
+    k.canary_b64.length > 0 &&
+    k.canary_b64.length <= 256;
+  if (k.v === 1 && k.canary_b64 !== undefined) return false;
+  if (k.v === 2 && !canaryOk) return false;
+  if (k.v === 3 && k.canary_b64 !== undefined && !canaryOk) return false;
+  if (k.v !== 3) return k.pending === undefined;
+  if (k.pending === undefined) return true;
+  const p = k.pending as Record<string, unknown>;
+  return (
+    typeof p === "object" &&
+    p !== null &&
+    typeof p.wrapped_mk_b64 === "string" &&
+    p.wrapped_mk_b64.length > 0 &&
+    p.wrapped_mk_b64.length <= 128 &&
+    typeof p.iv_b64 === "string" &&
+    p.iv_b64.length > 0 &&
+    p.iv_b64.length <= 32 &&
+    typeof p.rotation_id === "string" &&
+    p.rotation_id.length > 0 &&
+    p.rotation_id.length <= 128
+  );
+}
+
+/**
+ * Rebuild a validated keystore from its allow-listed fields ONLY — what the
+ * server persists is exactly the keystore shape, never a superset smuggled past
+ * the type guard. Per KDF shape and per version: v2 carries the canary
+ * (`isKeystore` guaranteed it), v3 carries whichever of canary/`pending` it
+ * legitimately has — `pending` rebuilt field-by-field, because silently
+ * dropping it here would destroy the only wrap of a mid-rotation MK2
+ * (the exact failure class ADR 0099's #119 regression taught: a server frame
+ * check that lags the client's format loses data quietly).
+ */
+export function normalizeKeystore(ks: Keystore): Keystore {
+  const kdf: Keystore["kdf"] = isArgonKdf(ks.kdf)
+    ? {
+        algo: ks.kdf.algo,
+        salt_b64: ks.kdf.salt_b64,
+        m: ks.kdf.m,
+        t: ks.kdf.t,
+        p: ks.kdf.p,
+      }
+    : {
+        salt_b64: ks.kdf.salt_b64,
+        iterations: ks.kdf.iterations,
+      };
+  return {
+    v: ks.v,
+    kdf,
+    wrapped_mk_b64: ks.wrapped_mk_b64,
+    iv_b64: ks.iv_b64,
+    ...(ks.canary_b64 !== undefined ? { canary_b64: ks.canary_b64 } : {}),
+    ...(ks.v === 3 && ks.pending !== undefined
+      ? {
+          pending: {
+            wrapped_mk_b64: ks.pending.wrapped_mk_b64,
+            iv_b64: ks.pending.iv_b64,
+            rotation_id: ks.pending.rotation_id,
+          },
+        }
+      : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -361,15 +435,17 @@ export async function sealCanary(mk: CryptoKey): Promise<string> {
 /**
  * Does `mk` open `ks`'s canary? `true` when it does (the cached key belongs to
  * this keystore), `false` when it doesn't (a stale key from a reset elsewhere —
- * drop it), and `"absent"` for a v1 keystore that carries no canary (skip the
- * check and behave as before). Any malformation or tamper reads as `false`, the
- * same fail-closed verdict as a wrong key.
+ * drop it), and `"absent"` for a keystore that carries no canary (a v1, or a
+ * canary-less v3 — skip the check and behave as before). Gated on the FIELD,
+ * not the version, so a v3 keystore's canary protects exactly like a v2's.
+ * Any malformation or tamper reads as `false`, the same fail-closed verdict as
+ * a wrong key.
  */
 export async function checkCanary(
   mk: CryptoKey,
   ks: Keystore,
 ): Promise<boolean | "absent"> {
-  if (ks.v !== 2 || ks.canary_b64 === undefined) return "absent";
+  if (ks.canary_b64 === undefined) return "absent";
   try {
     await open(mk, fromB64url(ks.canary_b64), CANARY_CONTEXT);
     return true;
