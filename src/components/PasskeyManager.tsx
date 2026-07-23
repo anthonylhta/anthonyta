@@ -265,7 +265,7 @@ async function fetchKeystore(): Promise<Keystore | null> {
   return isKeystore(parsed) ? parsed : null;
 }
 
-type EnrollState = "idle" | "busy" | "done" | "badpass" | "failed";
+type EnrollState = "idle" | "busy" | "done" | "badpass" | "noprf" | "failed";
 
 /** A short, human device name for the enrolled passkey — the platform where
  *  available, lowercased and bounded. Purely cosmetic; never trusted. */
@@ -336,7 +336,11 @@ function VaultUnlockManager() {
       }
       const prf = await runPrfCeremony();
       if (!prf) {
-        setEnroll("failed");
+        // The tap happened but the credential yielded no PRF output — on some
+        // authenticators (Android/GPM) only a passkey CREATED with the prf
+        // extension ever will. Name that; "couldn't enable" sent the owner
+        // hunting a passphrase problem that wasn't one.
+        setEnroll("noprf");
         return;
       }
       const prfKek = await deriveKekFromPrf(prf.secret);
@@ -381,9 +385,11 @@ function VaultUnlockManager() {
         ? "passkey unlock on ✓"
         : enroll === "badpass"
           ? "wrong passphrase"
-          : enroll === "failed"
-            ? "couldn't enable"
-            : null;
+          : enroll === "noprf"
+            ? "this passkey gave no PRF output — add a fresh passkey above, then retry"
+            : enroll === "failed"
+              ? "couldn't enable"
+              : null;
 
   const input =
     "border border-hairline bg-transparent px-2 py-1 font-mono text-[13px] text-fg placeholder:text-muted focus:border-amber focus:outline-none disabled:opacity-50";
