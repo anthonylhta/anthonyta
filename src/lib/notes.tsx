@@ -1168,6 +1168,124 @@ export const notes: Note[] = [
       </>
     ),
   },
+  {
+    slug: "rotate-the-key-keep-every-promise",
+    title: "rotate the key, keep every promise",
+    oneLiner:
+      "Re-encrypting everything is easy; never having a moment where something can’t decrypt is the job.",
+    updated: "2026-07-24",
+    tag: "e2ee",
+    related: [
+      "save-the-work-then-mark-it-done",
+      "one-store-every-door",
+      "safe-by-construction-not-by-runbook",
+    ],
+    body: (
+      <>
+        <p>
+          If a master key is ever suspected burned, every encrypted blob has to
+          be re-sealed under a fresh one. The re-encryption loop is the easy
+          part. The hard part is that the naive order — swap the keystore to the
+          new key, then walk the blobs — has a crash window where a power loss
+          orphans everything not yet rewritten: sealed under a key that no
+          longer exists anywhere.{" "}
+          <strong>
+            The invariant that forbids the window: at every instant, every blob
+            is decryptable by a key the keystore still wraps.
+          </strong>
+        </p>
+        <p>
+          So the order inverts. The keystore holds <em>two</em> wraps for the
+          whole rotation — the old key stays primary while the new one rides
+          along as pending — and a sealed journal records progress blob by blob.
+          Retiring the old wrap is one write, gated behind a verify pass that
+          re-downloads everything and proves it opens under the new key.
+          Everything before that write is resumable from any death; everything
+          after it needs nothing the death could have lost. One subtlety earns
+          its own sentence: the two-wrap keystore must be written{" "}
+          <em>before</em> the journal, because the journal is sealed under the
+          new key — in the other order, a crash between the writes leaves the
+          only progress record encrypted under a key that exists nowhere.
+        </p>
+        <p>
+          Proving it meant killing the run at every single mutation — once dying
+          before the write applies, once after — then asserting the invariant
+          with nothing but the passphrase (exactly a crashed device’s position)
+          and resuming to completion. Writing that matrix caught two real bugs
+          before any hardware ran a rotation: an I/O error swallowed by a
+          too-wide catch and re-reported as blob corruption, and a resume path
+          that mis-routed a nearly-finished rotation.{" "}
+          <strong>
+            The crash matrix isn’t testing the code so much as executing the
+            spec.
+          </strong>
+        </p>
+        <p>
+          The part nobody talks about is enumeration: <em>which</em> blobs are
+          key-sealed? A hand-maintained list can’t be validated by CI against a
+          live store, and one missed entry means silent data loss at the point
+          of no return. So the burden inverts there too — every key in the store
+          gets classified, and a single unrecognized one refuses the whole
+          rotation. A future store that forgets to register blocks loudly at the
+          start instead of losing data quietly at the end. Fail closed, then
+          walk.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "retry-before-you-write-the-root-cause-down",
+    title: "retry before you write the root cause down",
+    oneLiner:
+      "A confident diagnosis confirmed by a confounded fix is still a guess.",
+    updated: "2026-07-24",
+    tag: "engineering",
+    related: [
+      "the-happy-path-hides-the-hardest-input",
+      "absent-and-error-are-different-nothings",
+    ],
+    body: (
+      <>
+        <p>
+          After rotating the master key, each device re-enrolls its biometric
+          unlock. The desktop enrolled fine; the phone answered a bare{" "}
+          <em>“couldn’t enable”</em>. What followed was a proper investigation:
+          rule out the passphrase, rule out the key derivation, rule out a stale
+          app bundle — and then a genuine find in the code: a WebAuthn
+          capability that some platforms only grant if it was requested when the
+          credential was <em>created</em>, which this registration never did.
+          Plausible mechanism, real spec gap,
+          strict-platform-versus-lenient-platform story that fit every symptom.
+          I shipped the fix and wrote the root cause down.
+        </p>
+        <p>
+          The next day the phone enrolled successfully —{" "}
+          <strong>
+            with the old credential, never touching the fixed path.
+          </strong>{" "}
+          The original failure had been a flaky ceremony behind a generic error,
+          cured by a retry. My “confirmation” was confounded: the fix and the
+          retry landed together, and the retry was the cure. The fix stayed
+          merged — it’s what the spec wants regardless — but the written
+          diagnosis needed a correction, because{" "}
+          <em>
+            a plausible mechanism plus a coincident recovery is not a root
+            cause.
+          </em>
+        </p>
+        <p>
+          Two disciplines came out of it. For an intermittent failure, the first
+          experiment isn’t code archaeology — it’s{" "}
+          <strong>retry once and watch closely</strong>, the cheapest test there
+          is, and the one I skipped. And error messages must name their stage:
+          “couldn’t enable” collapsed a cancelled prompt, a missing capability,
+          and a failed write into one shrug, and a day of wrong-path debugging
+          was the price of that ambiguity. The honest version of this note is
+          that the second lesson caused the need for the first.
+        </p>
+      </>
+    ),
+  },
 ];
 
 export function getNote(slug: string): Note | undefined {
