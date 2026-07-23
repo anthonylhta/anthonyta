@@ -6,20 +6,45 @@ import type { ReactNode } from "react";
  * renders these; add one by appending to the array. Bodies are plain JSX
  * (paragraphs / strong / em); styling is applied by the page wrapper.
  */
+/** The curated tag vocabulary — small on purpose (a filter, not a folksonomy).
+ *  Adding a tag here is a deliberate act; every note carries exactly one. */
+export const NOTE_TAGS = ["agents", "e2ee", "engineering"] as const;
+export type NoteTag = (typeof NOTE_TAGS)[number];
+
 export type Note = {
   slug: string;
   title: string;
   oneLiner: string;
   /** ISO date (YYYY-MM-DD) — drives ordering + the "updated" stamp */
   updated: string;
+  /** exactly one tag from NOTE_TAGS — drives the /notes filter chips */
+  tag: NoteTag;
   body: ReactNode;
   /** slugs of related notes */
   related?: string[];
 };
 
+/** Narrow an arbitrary query-param string to a known tag; anything else
+ *  (absent, junk, probing) reads as "no filter" — never an error, never an
+ *  empty page. */
+export function isNoteTag(x: unknown): x is NoteTag {
+  return typeof x === "string" && (NOTE_TAGS as readonly string[]).includes(x);
+}
+
+/** Note count per tag, for the chip row — computed, never hand-maintained. */
+export function tagCounts(all: Note[]): Record<NoteTag, number> {
+  const counts = Object.fromEntries(NOTE_TAGS.map((t) => [t, 0])) as Record<
+    NoteTag,
+    number
+  >;
+  for (const n of all) counts[n.tag]++;
+  return counts;
+}
+
 export const notes: Note[] = [
   {
     slug: "keep-the-model-in-its-lane",
+    tag: "agents",
     title: "keep the model in its lane",
     oneLiner:
       "Let the model do the fuzzy part; compute everything that can be computed.",
@@ -72,6 +97,7 @@ export const notes: Note[] = [
   },
   {
     slug: "a-prompt-is-a-vote",
+    tag: "agents",
     title: "a prompt is a vote, not a checklist",
     oneLiner: "Why a soft “…unless…” clause loses to the paragraph around it.",
     updated: "2026-06-15",
@@ -105,6 +131,7 @@ export const notes: Note[] = [
   },
   {
     slug: "evals-turn-a-demo-into-a-product",
+    tag: "agents",
     title: "evals turn a demo into a product",
     oneLiner:
       "A golden set, an LLM judge, and trusting the delta — not the score.",
@@ -140,6 +167,7 @@ export const notes: Note[] = [
   },
   {
     slug: "deterministic-state-machines-pay-for-themselves",
+    tag: "engineering",
     title: "deterministic state machines pay for themselves",
     oneLiner:
       "Make the core pure and the features you haven’t thought of get easier.",
@@ -175,6 +203,7 @@ export const notes: Note[] = [
   },
   {
     slug: "validate-your-environment-at-the-edge",
+    tag: "engineering",
     title: "validate your environment at the edge",
     oneLiner:
       "Fail loud and early on bad config — but be precise about which edge.",
@@ -207,6 +236,7 @@ export const notes: Note[] = [
   },
   {
     slug: "casual-is-the-hardest-register",
+    tag: "agents",
     title: "casual is the hardest register",
     oneLiner:
       "The impressive case is the messy, unwritten one — so build for it.",
@@ -242,6 +272,7 @@ export const notes: Note[] = [
   },
   {
     slug: "graceful-degradation-is-an-invariant",
+    tag: "engineering",
     title: "graceful degradation is an invariant, not a vibe",
     oneLiner:
       "A fallback only counts if the try starts at the first fallible line.",
@@ -295,6 +326,7 @@ export const notes: Note[] = [
   },
   {
     slug: "the-happy-path-hides-the-hardest-input",
+    tag: "engineering",
     title: "the happy path hides the hardest input",
     oneLiner:
       "A Japanese-input app shipped an Enter-to-send that broke for anyone typing Japanese.",
@@ -342,6 +374,7 @@ export const notes: Note[] = [
   },
   {
     slug: "save-the-work-then-mark-it-done",
+    tag: "engineering",
     title: "save the work, then mark it done",
     oneLiner:
       "A blip on a cosmetic stats call threw away 38 paid AI judgments — a side-effect ordering bug.",
@@ -399,6 +432,7 @@ export const notes: Note[] = [
   },
   {
     slug: "the-cheapest-model-call-is-the-one-you-delete",
+    tag: "agents",
     title: "the cheapest model call is the one you delete",
     oneLiner:
       "When you’ve built a pile of machinery to make a model behave, that’s the signal it shouldn’t be there.",
@@ -451,6 +485,7 @@ export const notes: Note[] = [
   },
   {
     slug: "refusing-an-injection-is-also-a-leak",
+    tag: "agents",
     title: "refusing an injection is also a leak",
     oneLiner:
       "For a tool that transforms untrusted text, the safe-looking fix creates a second leak.",
@@ -503,6 +538,7 @@ export const notes: Note[] = [
   },
   {
     slug: "a-library-relocates-the-bug",
+    tag: "engineering",
     title: "a library relocates the bug",
     oneLiner:
       "Reaching for a battle-tested dependency doesn’t delete your bugs — it moves them all to how you call it.",
@@ -559,6 +595,7 @@ export const notes: Note[] = [
   },
   {
     slug: "absent-and-error-are-different-nothings",
+    tag: "engineering",
     title: "absent and error are different nothings",
     oneLiner:
       "When absence arms destructive setup, a flaky read must never be allowed to look like an empty store.",
@@ -620,6 +657,7 @@ export const notes: Note[] = [
   },
   {
     slug: "safe-by-construction-not-by-runbook",
+    tag: "e2ee",
     title: "safe by construction, not by runbook",
     oneLiner:
       "A safety rule that lives in an operator’s discipline eventually gets skipped; encode it in what the code can express.",
@@ -676,6 +714,7 @@ export const notes: Note[] = [
   },
   {
     slug: "a-cron-that-writes-secrets-it-cant-read",
+    tag: "e2ee",
     title: "a cron that writes secrets it can’t read",
     oneLiner:
       "Asymmetric crypto decouples the right to record from the right to read — a keyless server can append to a diary it can never open.",
@@ -739,6 +778,7 @@ export const notes: Note[] = [
   },
   {
     slug: "one-store-every-door",
+    tag: "e2ee",
     title: "one store, every door",
     oneLiner:
       "A bulk write to one feature suspended the store holding every private surface — including the record that signs me in.",
@@ -796,6 +836,7 @@ export const notes: Note[] = [
   },
   {
     slug: "prove-the-new-door-before-closing-the-old",
+    tag: "e2ee",
     title: "prove the new door before closing the old",
     oneLiner:
       "Migrations are two acts, not one: add and prove in parallel, then remove in a step small enough to skip.",
@@ -842,6 +883,7 @@ export const notes: Note[] = [
   },
   {
     slug: "right-bytes-wrong-address",
+    tag: "e2ee",
     title: "right bytes, wrong address",
     oneLiner:
       "A valid auth tag proves the ciphertext is intact — not that it’s the one you asked for.",
@@ -897,6 +939,7 @@ export const notes: Note[] = [
   },
   {
     slug: "when-my-test-suite-showed-up-in-my-analytics",
+    tag: "engineering",
     title: "when my test suite showed up in my analytics",
     oneLiner:
       "A test that exercises a public recorder is a write — local runs must be forced secretless, not merely tolerated-with-secrets.",
@@ -952,6 +995,7 @@ export const notes: Note[] = [
   },
   {
     slug: "the-backup-that-needed-no-encryption",
+    tag: "e2ee",
     title: "the backup that needed no encryption",
     oneLiner:
       "When everything is ciphertext, a backup is the server’s own bytes on a different disk — safe anywhere, by construction.",
@@ -1006,6 +1050,7 @@ export const notes: Note[] = [
   },
   {
     slug: "the-counter-that-never-counts",
+    tag: "e2ee",
     title: "the counter that never counts",
     oneLiner:
       "Synced passkeys report signature counter 0 forever — design for the credential that lies.",
@@ -1060,6 +1105,7 @@ export const notes: Note[] = [
   },
   {
     slug: "end-to-end-has-a-server-in-the-middle",
+    tag: "e2ee",
     title: "end-to-end has a server in the middle",
     oneLiner:
       "Browser E2EE trusts the origin to serve honest code — the one gap crypto can’t close, and why I wrote the caveat instead of building the theater.",
