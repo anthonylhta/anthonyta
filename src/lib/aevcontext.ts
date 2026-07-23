@@ -25,3 +25,5 @@ export const FIN_CONTEXT = "meta/fin";
 export const TRANSIT_CONTEXT = "meta/transit";
 export const TODO_CONTEXT = "meta/todo";
 export const TOTP_CONTEXT = "meta/totp";
+/** The MK-rotation journal (ADR 0090/0103) — AEV2 from birth; no AEV1 legacy. */
+export const ROTATION_CONTEXT = "meta/rotation";

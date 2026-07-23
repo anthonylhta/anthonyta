@@ -19,7 +19,12 @@ const nf = () => new Response("Not found", { status: 404 });
  * flake must never masquerade as "no box yet" and lure a re-seed that orphans every
  * message sealed to the old key. PUT validates the record shape with the same
  * `isDropboxKey` the client uses and writes no-clobber (conflict → 409), so setup
- * physically cannot overwrite an existing box.
+ * physically cannot overwrite an existing box. The ONE legitimate overwrite —
+ * explicit `x-dropboxkey-overwrite: 1` — exists for the rotation walk (ADR 0090/
+ * 0103), which re-seals the record's MK-sealed private half under the new master
+ * key while carrying the public point through byte-identical (strangers encrypt
+ * to it; changing it would orphan nothing but IS a different keypair — the walk
+ * never mints one).
  */
 export async function GET() {
   const session = await auth();
@@ -53,9 +58,11 @@ export async function PUT(request: Request) {
       pub_b64: parsed.pub_b64,
       sealed_priv_b64: parsed.sealed_priv_b64,
     };
-    // No-clobber always: the box is minted once. A second setup finds the record
-    // already there and refuses (conflict → 409) rather than orphaning messages.
-    const result = await putDropboxKey(rec, false);
+    // No-clobber by default: the box is minted once, and a second setup finds
+    // the record already there and refuses (conflict → 409) rather than
+    // orphaning messages. Overwrite only on the explicit rotation-walk header.
+    const overwrite = request.headers.get("x-dropboxkey-overwrite") === "1";
+    const result = await putDropboxKey(rec, overwrite);
     if (result === "conflict") return new Response("Conflict", { status: 409 });
     return result === "ok" ? Response.json({ ok: true }) : nf();
   } catch (err) {
