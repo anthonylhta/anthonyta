@@ -63,6 +63,17 @@ export async function POST(request: Request) {
       residentKey: "required",
       userVerification: "required",
     },
+    // Enable the PRF extension AT CREATION. Some authenticators (Android /
+    // Google Password Manager, spec-strictly) only ever produce PRF output for
+    // credentials that requested it when they were made — without this line a
+    // passkey can sign in but silently can never do vault tap-unlock (ADR
+    // 0064), which is exactly how the phone's "couldn't enable" presented.
+    // Harmless where unsupported (the extension is ignored). The installed
+    // @simplewebauthn/server type predates the prf field, hence the cast; the
+    // value rides through to the browser's create() untouched.
+    extensions: { prf: {} } as NonNullable<
+      Parameters<typeof generateRegistrationOptions>[0]["extensions"]
+    >,
   });
 
   return Response.json(options, {

@@ -415,9 +415,21 @@ export function useVault(offline: boolean): Vault {
     if (!ks) return;
     setWorking(true);
     setError(null);
+    // Derive with whatever the keystore says — pbkdf2 or argon2id. Fenced on
+    // its own: a derivation failure (the argon2id WASM refusing to run on this
+    // device) is NOT a passphrase verdict, and reporting it as "wrong
+    // passphrase" sends the owner chasing a password they typed correctly.
+    let kek: CryptoKey;
     try {
-      // Derive with whatever the keystore says — pbkdf2 or argon2id.
-      const kek = await deriveKekForKdf(ks.kdf, passphrase);
+      kek = await deriveKekForKdf(ks.kdf, passphrase);
+    } catch {
+      setError(
+        "key derivation failed on this device — not a passphrase problem",
+      );
+      setWorking(false);
+      return;
+    }
+    try {
       // A wrong passphrase fails this unwrap's GCM auth check — that throw IS
       // the passphrase verdict; there's no verifier to compare against.
       const mk = await unwrapMk(
