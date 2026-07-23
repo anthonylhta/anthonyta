@@ -5,7 +5,7 @@ import { useRef, useState, useEffect, type ReactNode } from "react";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import {
-  buildStepSeries,
+  buildFullSeries,
   importPortfolioCsv,
   investedAt,
   latestEntry,
@@ -256,7 +256,9 @@ export function FinPanel({ offline }: { offline: boolean }) {
   const cash = latest?.cash ?? 0;
   const hisa = latest?.hisa ?? 0;
   const rate = latest?.rate ?? null;
-  const series = buildStepSeries(cfg, 30, today);
+  // The WHOLE history, not a window: a 30-day slice of a savings staircase is
+  // mostly flat between paydays and reads as stagnation. All-time is the story.
+  const series = buildFullSeries(cfg, today);
 
   return (
     <>
@@ -432,15 +434,21 @@ function PlaceholderRows() {
   );
 }
 
-/** The net-worth trend: the step-function series (invested + cash, ADR 0061),
- *  valued (cents → dollars) and drawn as the same sparkline as always. */
+/** The net-worth trend: the full step-function series (invested + cash, ADR
+ *  0061) since the first entry, valued (cents → dollars) and drawn as the same
+ *  sparkline as always. The header Δ is therefore all-time too. */
 function TrendChart({ series }: { series: NetWorthPoint[] }) {
   const values = series.map((p) => p.totalCents / 100);
   const delta = values[values.length - 1] - values[0];
+  const first = series[0].date;
+  const last = series[series.length - 1].date;
+  // Bookends: MM-DD within one year; once the chart spans years, keep them.
+  const label = (d: string) =>
+    first.slice(0, 4) === last.slice(0, 4) ? d.slice(5) : d;
   return (
     <div className="mt-4">
       <div className="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-[0.2em] text-muted">
-        <span>trend</span>
+        <span>trend · all time</span>
         <span className={`tabular-nums ${tone(delta)}`}>
           {arrow(delta)} {delta >= 0 ? "+" : ""}
           {aud(delta)}
@@ -448,8 +456,8 @@ function TrendChart({ series }: { series: NetWorthPoint[] }) {
       </div>
       <Sparkline values={values} delta={delta} />
       <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted/60">
-        <span>{series[0].date.slice(5)}</span>
-        <span>{series[series.length - 1].date.slice(5)}</span>
+        <span>{label(first)}</span>
+        <span>{label(last)}</span>
       </div>
     </div>
   );

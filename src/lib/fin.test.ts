@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFullSeries,
   buildStepSeries,
   cashAt,
   importPortfolioCsv,
@@ -9,6 +10,7 @@ import {
   isPortfolioSnapshot,
   isSnapIndex,
   latestEntry,
+  monthToDateBaseline,
   normalizeFinConfig,
   pickBaseline,
   SNAP_INDEX_MAX_DAYS,
@@ -490,6 +492,49 @@ describe("buildStepSeries", () => {
       "2026-06-26",
     ]);
     expect(series[0].totalCents).toBe(1010); // round(10.1 * 100), no float leak
+  });
+});
+
+describe("buildFullSeries", () => {
+  const cfg = cfg2({
+    entries: [{ date: "2026-06-20", cash: 3317, hisa: 1000, rate: 4.5 }],
+    invested: [
+      { date: "2026-06-18", investedCents: 400000 },
+      { date: "2026-06-25", investedCents: 500000 },
+    ],
+  });
+
+  it("spans from the very first entry to today, whatever the gap", () => {
+    const series = buildFullSeries(cfg, "2026-07-24");
+    expect(series[0].date).toBe("2026-06-18"); // the oldest dated entry
+    expect(series.at(-1)?.date).toBe("2026-07-24");
+    expect(series).toHaveLength(37); // 06-18 … 07-24 inclusive
+    expect(series.at(-1)?.totalCents).toBe(500000 + 331700 + 100000);
+  });
+
+  it("is empty on a fresh config, and safe when today predates the data", () => {
+    expect(buildFullSeries(cfg2({}), "2026-07-24")).toEqual([]);
+    expect(buildFullSeries(cfg, "2026-06-01")).toEqual([]);
+  });
+});
+
+describe("monthToDateBaseline", () => {
+  const series: NetWorthPoint[] = [
+    { date: "2026-06-12", totalCents: 100 },
+    { date: "2026-06-30", totalCents: 200 },
+    { date: "2026-07-01", totalCents: 250 },
+    { date: "2026-07-15", totalCents: 300 },
+  ];
+
+  it("picks where the ledger stood as last month ended", () => {
+    expect(monthToDateBaseline(series, "2026-07-24")?.date).toBe("2026-06-30");
+    // The 1st itself is IN the month — it must not become its own baseline.
+    expect(monthToDateBaseline(series, "2026-07-01")?.date).toBe("2026-06-30");
+  });
+
+  it("null during the first month of data — no fake Δ", () => {
+    expect(monthToDateBaseline(series, "2026-06-20")).toBeNull();
+    expect(monthToDateBaseline([], "2026-07-24")).toBeNull();
   });
 });
 
