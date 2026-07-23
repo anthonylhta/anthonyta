@@ -344,6 +344,30 @@ export function buildStepSeries(
 }
 
 /**
+ * The all-time trend series: every day from the FIRST dated entry (invested or
+ * cash, whichever is older) through `today`. The savings staircase is the whole
+ * story — a windowed slice of a step function is mostly flat and reads as "no
+ * progress" between paydays — so the portfolio chart draws the full duration
+ * and simply gets better every month.
+ */
+export function buildFullSeries(
+  cfg: FinConfig,
+  today: string,
+): NetWorthPoint[] {
+  const firstData = [cfg.invested[0]?.date, cfg.entries[0]?.date]
+    .filter((d): d is string => d !== undefined)
+    .sort()[0];
+  if (!firstData || firstData > today) return [];
+  const span =
+    Math.round(
+      (Date.parse(`${today}T00:00:00Z`) -
+        Date.parse(`${firstData}T00:00:00Z`)) /
+        86_400_000,
+    ) + 1;
+  return buildStepSeries(cfg, span, today);
+}
+
+/**
  * The delta baseline: the newest point on or before `today` minus `days` calendar
  * days. The cutoff is derived via UTC date math on the `YYYY-MM-DD` (no timezone
  * dependence), and a point that's exactly `days` old counts. Scans for the max
@@ -358,6 +382,25 @@ export function pickBaseline(
   let found: NetWorthPoint | null = null;
   for (const p of series) {
     if (p.date <= cutoff && (!found || p.date > found.date)) found = p;
+  }
+  return found;
+}
+
+/**
+ * The month-to-date baseline: the newest point BEFORE the first of `today`'s
+ * month — i.e. where the ledger stood as last month ended. On weekly pay a
+ * 7-day Δ just echoes whether payday happened yet; "saved this month" resets
+ * at a boundary that means something. Null during the first month of data
+ * (no full boundary crossed yet — the glance hides the Δ rather than fake one).
+ */
+export function monthToDateBaseline(
+  series: NetWorthPoint[],
+  today: string,
+): NetWorthPoint | null {
+  const monthStart = `${today.slice(0, 7)}-01`;
+  let found: NetWorthPoint | null = null;
+  for (const p of series) {
+    if (p.date < monthStart && (!found || p.date > found.date)) found = p;
   }
   return found;
 }

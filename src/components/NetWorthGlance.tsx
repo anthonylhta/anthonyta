@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import {
-  buildStepSeries,
+  buildFullSeries,
   investedAt,
   latestEntry,
   normalizeFinConfig,
-  pickBaseline,
+  monthToDateBaseline,
   sydneyToday,
 } from "@/lib/fin";
 import { FIN_CONTEXT } from "@/lib/aevcontext";
@@ -17,7 +17,7 @@ import { arrow, aud, tone } from "@/lib/money";
 /**
  * The command center's net-worth numbers as a small client island — the only part of
  * the TODAY zone that isn't server-rendered (ADR 0054; fully envelope-sourced since
- * ADR 0061). Everything financial — invested, cash/HISA, the week-over-week Δ —
+ * ADR 0061). Everything financial — invested, cash/HISA, the month-to-date Δ —
  * rides the E2EE fin layer, so figures only surface once the vault is unlocked in
  * this browser (the IDB key cache usually means it already is). Any miss — offline,
  * locked, a fetch/decrypt hiccup — degrades to placeholder dots: never a crash,
@@ -28,7 +28,7 @@ interface Loaded {
   invested: number;
   cash: number;
   hisa: number;
-  /** Week-over-week Δ in dollars; null when history can't reach back a week. */
+  /** Month-to-date Δ in dollars; null during the first month of data. */
   delta: number | null;
 }
 
@@ -74,11 +74,13 @@ export function NetWorthGlance({ offline }: { offline: boolean }) {
         const cash = entry?.cash ?? 0;
         const hisa = entry?.hisa ?? 0;
 
-        // Week Δ from the step-function series (ADR 0061) — same envelope, no
-        // extra round-trips, no boxes to unseal.
+        // Month-to-date Δ from the step-function series (ADR 0061) — same
+        // envelope, no extra round-trips. On weekly pay a 7-day Δ just echoed
+        // whether payday had happened yet; "this month" accumulates the
+        // paychecks + interest into a number that means saved-so-far.
         let delta: number | null = null;
-        const series = buildStepSeries(cfg, 14, today);
-        const base = pickBaseline(series, 7, today);
+        const series = buildFullSeries(cfg, today);
+        const base = monthToDateBaseline(series, today);
         const latest = series.at(-1);
         if (base && latest) delta = (latest.totalCents - base.totalCents) / 100;
 
@@ -105,7 +107,7 @@ export function NetWorthGlance({ offline }: { offline: boolean }) {
           </span>
           {delta !== null && (
             <span className={`text-sm tabular-nums ${tone(delta)}`}>
-              {arrow(delta)} {aud(Math.abs(delta))} this week
+              {arrow(delta)} {aud(Math.abs(delta))} this month
             </span>
           )}
         </div>
