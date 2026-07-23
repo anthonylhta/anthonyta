@@ -19,6 +19,7 @@ import {
   ITERATIONS,
   IV_LEN,
   MAGIC_V2,
+  normalizeKeystore,
   open,
   randomId,
   randomSalt,
@@ -29,6 +30,7 @@ import {
   unwrapMk,
   wrapMk,
   type EnvelopeMeta,
+  type Keystore,
 } from "./crypto";
 
 // Tests run the real KDF but at a tiny iteration count — the production count is
@@ -427,6 +429,98 @@ describe("keystore", () => {
     // …and v1 must NOT carry one — the field is exactly what the version gates.
     expect(isKeystore({ ...v1, canary_b64: "Y2FuYXJ5" })).toBe(false);
   });
+
+  it("isKeystore accepts v3 — either kdf, optional canary, optional pending", () => {
+    const v3 = {
+      v: 3,
+      kdf: { salt_b64: "abc", iterations: ITERATIONS },
+      wrapped_mk_b64: "abc",
+      iv_b64: "abc",
+    };
+    const pending = {
+      wrapped_mk_b64: "def",
+      iv_b64: "def",
+      rotation_id: "rot-1",
+    };
+    // Canary independent of the version (v3 names itself), pending optional.
+    expect(isKeystore(v3)).toBe(true);
+    expect(isKeystore({ ...v3, canary_b64: "Y2FuYXJ5" })).toBe(true);
+    expect(isKeystore({ ...v3, pending })).toBe(true);
+    expect(isKeystore({ ...v3, canary_b64: "Y2FuYXJ5", pending })).toBe(true);
+    // The kdf-shape gap that parked the rotation wiring: every real keystore is
+    // argon2id (ADR 0089) — a v3 must accept that kdf or no rotation can start.
+    const argon = { algo: "argon2id", salt_b64: "abc", m: 65_536, t: 3, p: 1 };
+    expect(isKeystore({ ...v3, kdf: argon, pending })).toBe(true);
+    // Canary bounds still apply when present.
+    expect(isKeystore({ ...v3, canary_b64: "" })).toBe(false);
+    expect(isKeystore({ ...v3, canary_b64: "x".repeat(300) })).toBe(false);
+  });
+
+  it("isKeystore rejects a half-written pending, and any pending on v1/v2", () => {
+    const v3 = {
+      v: 3,
+      kdf: { salt_b64: "abc", iterations: ITERATIONS },
+      wrapped_mk_b64: "abc",
+      iv_b64: "abc",
+    };
+    const pending = {
+      wrapped_mk_b64: "def",
+      iv_b64: "def",
+      rotation_id: "rot-1",
+    };
+    // All three pending fields required — a partial wrap is malformed.
+    expect(isKeystore({ ...v3, pending: {} })).toBe(false);
+    for (const missing of Object.keys(pending)) {
+      const partial: Record<string, unknown> = { ...pending };
+      delete partial[missing];
+      expect(isKeystore({ ...v3, pending: partial })).toBe(false);
+    }
+    expect(isKeystore({ ...v3, pending: { ...pending, iv_b64: "" } })).toBe(
+      false,
+    );
+    expect(isKeystore({ ...v3, pending: { ...pending, rotation_id: 7 } })).toBe(
+      false,
+    );
+    // No writer ever puts a pending on v1/v2 — it can only be torn or forged.
+    expect(isKeystore({ ...v3, v: 1, pending })).toBe(false);
+    expect(isKeystore({ ...v3, v: 2, canary_b64: "Y2FuYXJ5", pending })).toBe(
+      false,
+    );
+  });
+
+  it("normalizeKeystore preserves pending field-for-field, strips smuggled keys", () => {
+    const pending = {
+      wrapped_mk_b64: "def",
+      iv_b64: "ghi",
+      rotation_id: "rot-1",
+    };
+    const v3 = {
+      v: 3 as const,
+      kdf: { salt_b64: "abc", iterations: ITERATIONS },
+      wrapped_mk_b64: "abc",
+      iv_b64: "abc",
+      canary_b64: "Y2FuYXJ5",
+      pending,
+    };
+    // The mid-rotation shape survives EXACTLY — dropping pending here would
+    // destroy the only wrap of MK2 (#119's silent-write failure class).
+    expect(normalizeKeystore(v3)).toEqual(v3);
+    // A superset smuggled past the guard is cut back to the allow-list…
+    const smuggled = {
+      ...v3,
+      extra: "x",
+      pending: { ...pending, extra: "y" },
+    } as unknown as Keystore;
+    expect(normalizeKeystore(smuggled)).toEqual(v3);
+    // …and the v1/v2 rebuilds stay byte-identical to what the route always did.
+    const v1 = {
+      v: 1 as const,
+      kdf: { algo: "argon2id" as const, salt_b64: "s", m: 65_536, t: 3, p: 1 },
+      wrapped_mk_b64: "abc",
+      iv_b64: "abc",
+    };
+    expect(normalizeKeystore(v1)).toEqual(v1);
+  });
 });
 
 describe("keystore canary", () => {
@@ -464,6 +558,24 @@ describe("keystore canary", () => {
     const v1 = buildKeystore(pbkdf(salt, FAST), wrapped, iv); // no canary arg → v1
     expect(v1.v).toBe(1);
     expect(await checkCanary(mk, v1)).toBe("absent");
+  });
+
+  it("a v3 canary is checked exactly like a v2's — the field, not the version", async () => {
+    const a = await setupKeys("pass-a");
+    const b = await setupKeys("pass-b");
+    const v3: Keystore = {
+      v: 3,
+      kdf: pbkdf(a.salt, FAST),
+      wrapped_mk_b64: toB64url(a.wrapped),
+      iv_b64: toB64url(a.iv),
+      canary_b64: await sealCanary(a.mk),
+    };
+    expect(await checkCanary(a.mk, v3)).toBe(true);
+    expect(await checkCanary(b.mk, v3)).toBe(false);
+    // A canary-less v3 skips the check (mirrors v1), never fails it.
+    const bare: Keystore = { ...v3 };
+    delete bare.canary_b64;
+    expect(await checkCanary(a.mk, bare)).toBe("absent");
   });
 
   it("survives a passphrase change: the canary is under the MK, not the KEK", async () => {
