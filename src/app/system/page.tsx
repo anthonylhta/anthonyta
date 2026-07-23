@@ -5,6 +5,7 @@ import { AuthJournalPanel } from "@/components/AuthJournal";
 import { LayoutPanel } from "@/components/LayoutPanel";
 import { PasskeyManager } from "@/components/PasskeyManager";
 import { RecoveryShares } from "@/components/RecoveryShares";
+import { RotationPanel } from "@/components/RotationPanel";
 import {
   AnalyticsPanel,
   CspPanel,
@@ -82,6 +83,12 @@ export default async function SystemPage() {
         <Section label="csp" right="last 7 days" />
         <div className="px-4 py-3">
           <CspPanel today={today} />
+        </div>
+
+        {/* ───────────── ROTATION ───────────── */}
+        <Section label="rotation" right="master key" />
+        <div className="px-4 py-3">
+          <RotationPanel offline={!r2Enabled()} />
         </div>
       </div>
 

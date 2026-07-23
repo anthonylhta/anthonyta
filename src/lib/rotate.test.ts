@@ -448,6 +448,30 @@ describe("isKeystoreV3", () => {
     expect(isKeystoreV3({ ...valid, note: "forward-compat" })).toBe(true);
   });
 
+  it("resumeWalking steps back only on proof of a mid-rotation writer", async () => {
+    const {
+      beginWalking,
+      beginVerifying,
+      newJournal,
+      recordRewritten,
+      resumeWalking,
+    } = await import("./rotate");
+    let j = beginWalking(newJournal("id", "t"));
+    j = recordRewritten(j, "a");
+    j = beginVerifying(j, ["a"]);
+    // A new listed path that was never rewritten IS the proof.
+    expect(resumeWalking(j, ["a", "b"]).phase).toBe("walking");
+    // Progress sets never shrink through the step-back.
+    expect(resumeWalking(j, ["a", "b"]).rewritten).toEqual(["a"]);
+    // Without proof it refuses — no casual rewind.
+    expect(() => resumeWalking(j, ["a"])).toThrow();
+    // And never from the forward phases.
+    expect(() => resumeWalking(newJournal("id", "t"), ["a", "b"])).toThrow();
+    expect(() =>
+      resumeWalking(beginWalking(newJournal("id", "t")), ["a", "b"]),
+    ).toThrow();
+  });
+
   it("accepts an Argon2id kdf — every real keystore since ADR 0089", () => {
     // The original self-contained guard modelled only pbkdf2, which would have
     // rejected every live keystore the moment a rotation tried to start.
