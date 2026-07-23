@@ -172,6 +172,18 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/rotation",
+    probe: "/api/rotation",
+    shape: "owner-api",
+    methods: ["GET", "PUT", "DELETE"],
+  },
+  {
+    routeKey: "/api/rotation/listing",
+    probe: "/api/rotation/listing",
+    shape: "owner-api",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/api/todo",
     probe: "/api/todo",
     shape: "owner-api",
@@ -200,6 +212,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     probe: "/api/transit/trip?from=stop%3A1&to=stop%3A2",
     shape: "owner-api",
     methods: ["GET"],
+  },
+  {
+    routeKey: "/api/vault/upload",
+    probe: "/api/vault/upload",
+    shape: "owner-api",
+    methods: ["POST"],
   },
   {
     routeKey: "/api/vault/raw",

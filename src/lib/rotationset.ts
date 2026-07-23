@@ -40,9 +40,10 @@ import {
   VAULT_PREFIX,
 } from "./vaultblob";
 
-/** The rotation journal's fixed R2 key (the store/route bind to this; the
- *  envelope binds it as AAD via `ROTATION_CONTEXT` — pinned equal in tests). */
-export const ROTATION_PATH = "meta/rotation";
+/** The rotation journal's fixed R2 key — DEFINED as its AEV2 context (a store
+ *  born AEV2 has no reason to let path and AAD drift; equality is by
+ *  construction, not by test pin). */
+export const ROTATION_PATH = ROTATION_CONTEXT;
 
 /** Size cap for the sealed journal envelope: two path arrays over a ~700-blob
  *  estate is ~50KB of JSON — 256KB leaves generous headroom without admitting
