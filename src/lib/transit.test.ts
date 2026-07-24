@@ -68,6 +68,16 @@ describe("normalizeTransitConfig", () => {
     );
   });
 
+  it("carries seq through the rebuild and rejects an invalid one (58b)", () => {
+    expect(normalizeTransitConfig({ v: 1, trips: [], seq: 7 })).toEqual({
+      v: 1,
+      trips: [],
+      seq: 7,
+    });
+    expect(normalizeTransitConfig({ v: 1, trips: [], seq: -1 })).toBeNull();
+    expect(normalizeTransitConfig({ v: 1, trips: [], seq: "7" })).toBeNull();
+  });
+
   it("rejects anything unrecognizable rather than degrading to empty", () => {
     expect(normalizeTransitConfig(null)).toBeNull();
     expect(normalizeTransitConfig({ v: 2, trips: [] })).toBeNull();

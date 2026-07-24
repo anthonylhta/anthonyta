@@ -271,6 +271,12 @@ describe("isTotpConfig", () => {
     expect(isTotpConfig({ v: 1, entries: [] })).toBe(true); // empty is valid
     expect(isTotpConfig({ ...cfg, note: "forward-compat" })).toBe(true);
   });
+
+  it("accepts a valid seq and rejects an invalid one (58b)", () => {
+    expect(isTotpConfig({ ...cfg, seq: 4 })).toBe(true);
+    expect(isTotpConfig({ ...cfg, seq: -4 })).toBe(false);
+    expect(isTotpConfig({ ...cfg, seq: "4" })).toBe(false);
+  });
   it("rejects non-objects and the wrong version", () => {
     expect(isTotpConfig(null)).toBe(false);
     expect(isTotpConfig("x")).toBe(false);

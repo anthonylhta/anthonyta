@@ -104,6 +104,23 @@ export async function bumpSeenEpoch(epoch: number): Promise<void> {
   await withStore("readwrite", (s) => s.put(epoch, EPOCH_ROW));
 }
 
+/** The highest sealed `seq` this device has seen for one of the fixed config
+ *  stores (58b, lib/seqrule) — null = no memory yet (first read is trusted by
+ *  design, like the manifest epoch). Keyed per store name. */
+export async function getSeenSeq(store: string): Promise<number | null> {
+  const v = await withStore("readonly", (s) => s.get(`seq:${store}`));
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+/** Remember a served/saved seq — monotonic, never regresses (a lower value is
+ *  exactly the rollback signal the memory exists to catch). Best-effort. */
+export async function bumpSeenSeq(store: string, seq: number): Promise<void> {
+  if (!Number.isFinite(seq) || seq < 0) return;
+  const seen = await getSeenSeq(store);
+  if (seen !== null && seen >= seq) return;
+  await withStore("readwrite", (s) => s.put(seq, `seq:${store}`));
+}
+
 /** The newest auth-journal tip this device has verified, or null when it has
  *  never verified one (first visit — trusted by design, like the manifest
  *  epoch). Shape-checked on the way out so IDB garbage reads as "no memory". */

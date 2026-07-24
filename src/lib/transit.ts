@@ -17,6 +17,8 @@
  *     them into wall-clock text, always in Australia/Sydney.
  */
 
+import { isValidSeq } from "./seqrule";
+
 // ---------------------------------------------------------------------------
 // saved-trips config — the E2EE envelope payload (server never parses this)
 // ---------------------------------------------------------------------------
@@ -51,6 +53,8 @@ export interface TransitTrip {
 export interface TransitConfig {
   v: 1;
   trips: TransitTrip[];
+  /** Sealed write counter (58b rollback detection) — see lib/seqrule. */
+  seq?: number;
 }
 
 export const EMPTY_TRANSIT_CONFIG: TransitConfig = { v: 1, trips: [] };
@@ -97,7 +101,14 @@ export function normalizeTransitConfig(x: unknown): TransitConfig | null {
   if (!isObj(x) || x.v !== 1) return null;
   if (!Array.isArray(x.trips) || x.trips.length > MAX_TRIPS) return null;
   if (!x.trips.every(isTrip)) return null;
-  return { v: 1, trips: x.trips };
+  if (!isValidSeq(x.seq)) return null;
+  // The rebuild must carry `seq` through — a rebuild that drops it would reset
+  // the rollback counter on every read (the prf-label lesson, same day).
+  return {
+    v: 1,
+    trips: x.trips,
+    ...(x.seq !== undefined ? { seq: x.seq as number } : {}),
+  };
 }
 
 /** Insertion-ordered unique group names — the tab row. */
