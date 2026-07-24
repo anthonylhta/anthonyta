@@ -29,6 +29,12 @@ import {
   type TripResult,
 } from "@/lib/transit";
 import { TRANSIT_CONTEXT } from "@/lib/aevcontext";
+import { nextSeq } from "@/lib/seqrule";
+import {
+  checkSeqAndRemember,
+  rememberSavedSeq,
+  SeqAlarm,
+} from "@/components/SeqAlarm";
 import { useVault, type Vault } from "@/app/files/useVault";
 
 // Shared input/button idioms (FinPanel / FilesInbox).
@@ -66,6 +72,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
   const [cfg, setCfg] = useState<TransitConfig | null>(null);
   const [configExisted, setConfigExisted] = useState(false);
   const [cfgErr, setCfgErr] = useState<"unreachable" | "tamper" | null>(null);
+  const [seqAlarm, setSeqAlarm] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
   // Planner endpoints + journeys.
@@ -257,6 +264,10 @@ export function TransitClient({ offline }: { offline: boolean }) {
       if (cancelled) return;
       setCfg(config);
       setConfigExisted(existed);
+      // Rollback check (58b) — a 404 for trips this device has seen alarms too.
+      void checkSeqAndRemember("transit", config).then((rolled) => {
+        if (rolled && !cancelled) setSeqAlarm(true);
+      });
       const first = config.trips[0];
       if (first) void plan(first.from, first.to, first.modes, tripTitle(first));
     })();
@@ -272,6 +283,9 @@ export function TransitClient({ offline }: { offline: boolean }) {
     next: TransitConfig,
     existed: boolean,
   ): Promise<"ok" | "conflict" | "failed"> {
+    // Bump the sealed write counter (58b); prior = the newer of loaded state
+    // and next itself (a 409-dance rebuild carries the fresher seq).
+    next = { ...next, seq: Math.max(nextSeq(cfg ?? {}), nextSeq(next)) };
     const bytes = new TextEncoder().encode(JSON.stringify(next));
     const sealed = await vault.sealItem(
       { n: "transit.json", t: "application/json", s: bytes.length },
@@ -287,6 +301,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
       body: new Blob([sealed as BlobPart]),
     });
     if (res.status === 409) return "conflict";
+    if (res.ok) rememberSavedSeq("transit", next);
     return res.ok ? "ok" : "failed";
   }
 
@@ -580,6 +595,7 @@ export function TransitClient({ offline }: { offline: boolean }) {
           <p className="text-xs text-muted">decrypting…</p>
         )}
 
+        {unlocked && seqAlarm && <SeqAlarm what="saved-trips config" />}
         {unlocked && cfg && (
           <>
             {groups.length > 1 && (
