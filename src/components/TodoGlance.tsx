@@ -5,6 +5,12 @@ import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import { randomId } from "@/lib/crypto";
 import { TODO_CONTEXT } from "@/lib/aevcontext";
+import { nextSeq } from "@/lib/seqrule";
+import {
+  checkSeqAndRemember,
+  rememberSavedSeq,
+  SeqAlarm,
+} from "@/components/SeqAlarm";
 import {
   EMPTY_TODO_CONFIG,
   addItem,
@@ -41,6 +47,7 @@ export function TodoGlance({ offline }: { offline: boolean }) {
   const [cfg, setCfg] = useState<TodoConfig | null>(null);
   const [configExisted, setConfigExisted] = useState(false);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
+  const [seqAlarm, setSeqAlarm] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -90,6 +97,10 @@ export function TodoGlance({ offline }: { offline: boolean }) {
       if (cancelled) return;
       setCfg(config);
       setConfigExisted(existed);
+      // Rollback check (58b) — a 404 for a list this device has seen alarms too.
+      void checkSeqAndRemember("todo", config).then((rolled) => {
+        if (rolled && !cancelled) setSeqAlarm(true);
+      });
     })();
     return () => {
       cancelled = true;
@@ -100,6 +111,9 @@ export function TodoGlance({ offline }: { offline: boolean }) {
     next: TodoConfig,
     existed: boolean,
   ): Promise<"ok" | "conflict" | "failed"> {
+    // Bump the sealed write counter (58b); prior = the newer of loaded state
+    // and next itself (a 409-dance rebuild carries the fresher seq).
+    next = { ...next, seq: Math.max(nextSeq(cfg ?? {}), nextSeq(next)) };
     const bytes = new TextEncoder().encode(JSON.stringify(next));
     const sealed = await vault.sealItem(
       { n: "todo.json", t: "application/json", s: bytes.length },
@@ -115,6 +129,7 @@ export function TodoGlance({ offline }: { offline: boolean }) {
       body: new Blob([sealed as BlobPart]),
     });
     if (res.status === 409) return "conflict";
+    if (res.ok) rememberSavedSeq("todo", next);
     return res.ok ? "ok" : "failed";
   }
 
@@ -188,12 +203,14 @@ export function TodoGlance({ offline }: { offline: boolean }) {
   }
 
   const open = openItems(cfg);
+  const alarm = seqAlarm && <SeqAlarm what="capture list" />;
   const shown = showAll ? open : open.slice(0, GLANCE_COUNT);
   const hiddenCount = open.length - shown.length;
   const done = doneCount(cfg);
 
   return (
     <div className="flex flex-col gap-1 text-sm">
+      {alarm}
       <div className="flex items-center gap-2">
         <input
           type="text"

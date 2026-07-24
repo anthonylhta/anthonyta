@@ -12,6 +12,12 @@ import {
   type TotpEntry,
 } from "@/lib/totp";
 import { TOTP_CONTEXT } from "@/lib/aevcontext";
+import { nextSeq } from "@/lib/seqrule";
+import {
+  checkSeqAndRemember,
+  rememberSavedSeq,
+  SeqAlarm,
+} from "@/components/SeqAlarm";
 
 /**
  * The TOTP drawer (ADR: TOTP drawer) — two-factor codes computed in the browser
@@ -49,6 +55,7 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
   const [existed, setExisted] = useState(false);
   const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [seqAlarm, setSeqAlarm] = useState(false);
 
   // Render-phase reset on the lock/unlock edge (the lint-blessed pattern).
   const [prevUnlocked, setPrevUnlocked] = useState(unlocked);
@@ -71,12 +78,16 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
         return;
       }
       if (res.status === 404) {
-        // A healthy empty drawer — first entry arms it.
+        // A healthy empty drawer — first entry arms it. Still seq-checked: a
+        // 404 for a drawer this device has seen is the rollback alarm (58b).
         if (!cancelled) {
           setCfg({ v: 1, entries: [] });
           setExisted(false);
           setLoad("ready");
         }
+        void checkSeqAndRemember("totp", null).then((rolled) => {
+          if (rolled && !cancelled) setSeqAlarm(true);
+        });
         return;
       }
       if (res.status !== 200) {
@@ -95,6 +106,9 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
           setExisted(true);
           setLoad("ready");
         }
+        void checkSeqAndRemember("totp", parsed).then((rolled) => {
+          if (rolled && !cancelled) setSeqAlarm(true);
+        });
       } catch {
         if (!cancelled) setLoad("tamper");
       }
@@ -107,6 +121,9 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
   /** Seal + PUT the whole config — no-clobber on the very first write. */
   const save = useCallback(
     async (next: TotpConfig): Promise<boolean> => {
+      // Bump the sealed write counter (58b); prior = the newer of loaded
+      // state and next itself.
+      next = { ...next, seq: Math.max(nextSeq(cfg ?? {}), nextSeq(next)) };
       const json = new TextEncoder().encode(JSON.stringify(next));
       const sealed = await vault.sealItem(
         { n: "totp", t: "application/json", s: json.length },
@@ -129,9 +146,10 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
       setCfg(next);
       setExisted(true);
       setErr(null);
+      rememberSavedSeq("totp", next);
       return true;
     },
-    [vault, existed],
+    [vault, existed, cfg],
   );
 
   if (vault.status === "offline") return null;
@@ -152,6 +170,7 @@ export function TotpDrawer({ offline }: { offline: boolean }) {
 
   return (
     <div className="text-xs">
+      {seqAlarm && <SeqAlarm what="2fa drawer" />}
       {cfg.entries.length === 0 && !adding && (
         <p className="text-muted">no seeds yet — add one from a QR export.</p>
       )}

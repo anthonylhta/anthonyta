@@ -12,6 +12,8 @@
  * timestamp — `created` is display metadata, not a key.
  */
 
+import { isValidSeq } from "./seqrule";
+
 /** Envelope frame cap for the PUT — hundreds of items fit comfortably. */
 export const TODO_MAX_BYTES = 65536;
 
@@ -30,6 +32,8 @@ export interface TodoItem {
 export interface TodoConfig {
   v: 1;
   items: TodoItem[];
+  /** Sealed write counter (58b rollback detection) — see lib/seqrule. */
+  seq?: number;
 }
 
 export const EMPTY_TODO_CONFIG: TodoConfig = { v: 1, items: [] };
@@ -60,7 +64,14 @@ export function normalizeTodoConfig(x: unknown): TodoConfig | null {
   if (!isObj(x) || x.v !== 1) return null;
   if (!Array.isArray(x.items) || x.items.length > MAX_ITEMS) return null;
   if (!x.items.every(isItem)) return null;
-  return { v: 1, items: x.items };
+  if (!isValidSeq(x.seq)) return null;
+  // Carry `seq` through the rebuild — dropping it would reset the rollback
+  // counter on every read (the prf-label lesson).
+  return {
+    v: 1,
+    items: x.items,
+    ...(x.seq !== undefined ? { seq: x.seq as number } : {}),
+  };
 }
 
 /**

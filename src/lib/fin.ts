@@ -1,4 +1,5 @@
 import { parseCmcCsv, type Portfolio } from "./portfolio";
+import { isValidSeq } from "./seqrule";
 
 /**
  * Pure helpers + types for the E2EE financial layer (ADR 0054; holdings folded in
@@ -42,6 +43,9 @@ export interface FinConfig {
   entries: FinEntry[];
   invested: InvestedEntry[];
   portfolio: Portfolio | null;
+  /** Sealed write counter (58b rollback detection) — absent on pre-seq blobs,
+   *  bumped by every save; the panel compares it to a device high-water mark. */
+  seq?: number;
 }
 /** One day of the (unsealed) reading index — the week-over-week baseline source. */
 export interface SnapIndexDay {
@@ -170,6 +174,7 @@ export function isFinConfig(x: unknown): x is FinConfig {
   return (
     isObj(x) &&
     x.v === 2 &&
+    isValidSeq(x.seq) &&
     isEntries(x.entries) &&
     isInvested(x.invested) &&
     (x.portfolio === null || isPortfolioSnapshot(x.portfolio))

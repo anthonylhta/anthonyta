@@ -495,6 +495,21 @@ describe("buildStepSeries", () => {
   });
 });
 
+describe("isFinConfig seq (58b)", () => {
+  const base = { v: 2, entries: [], invested: [], portfolio: null };
+  it("accepts absent or non-negative integer seq, rejects junk", () => {
+    expect(isFinConfig(base)).toBe(true);
+    expect(isFinConfig({ ...base, seq: 9 })).toBe(true);
+    expect(isFinConfig({ ...base, seq: -9 })).toBe(false);
+    expect(isFinConfig({ ...base, seq: "9" })).toBe(false);
+    // Verbatim passthrough: normalize returns the object with seq intact.
+    expect(normalizeFinConfig({ ...base, seq: 9 })).toEqual({
+      ...base,
+      seq: 9,
+    });
+  });
+});
+
 describe("buildFullSeries", () => {
   const cfg = cfg2({
     entries: [{ date: "2026-06-20", cash: 3317, hisa: 1000, rate: 4.5 }],

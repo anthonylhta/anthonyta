@@ -13,6 +13,8 @@
  * reproducible to the second.
  */
 
+import { isValidSeq } from "./seqrule";
+
 /** One stored seed + its parameters, in the exact shape a QR payload carries. */
 export interface TotpEntry {
   /** The service name, e.g. "GitHub". */
@@ -33,6 +35,8 @@ export interface TotpEntry {
 export interface TotpConfig {
   v: 1;
   entries: TotpEntry[];
+  /** Sealed write counter (58b rollback detection) — see lib/seqrule. */
+  seq?: number;
 }
 
 const ALGOS: ReadonlySet<string> = new Set(["SHA-1", "SHA-256", "SHA-512"]);
@@ -49,6 +53,7 @@ export function isTotpConfig(x: unknown): x is TotpConfig {
   if (typeof x !== "object" || x === null) return false;
   const c = x as Record<string, unknown>;
   if (c.v !== 1) return false;
+  if (!isValidSeq(c.seq)) return false;
   if (!Array.isArray(c.entries)) return false;
   for (const e of c.entries) {
     if (typeof e !== "object" || e === null) return false;

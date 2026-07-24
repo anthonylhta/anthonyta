@@ -3,6 +3,12 @@
 import Link from "next/link";
 import { useRef, useState, useEffect, type ReactNode } from "react";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
+import {
+  checkSeqAndRemember,
+  rememberSavedSeq,
+  SeqAlarm,
+} from "@/components/SeqAlarm";
+import { nextSeq } from "@/lib/seqrule";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import {
   buildFullSeries,
@@ -59,6 +65,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
   const [cfg, setCfg] = useState<FinConfig | null>(null);
   const [configExisted, setConfigExisted] = useState(false);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
+  const [seqAlarm, setSeqAlarm] = useState(false);
   const [editing, setEditing] = useState(false);
 
   // Render-phase adjustment (not an effect): reset the per-unlock state on the
@@ -111,6 +118,11 @@ export function FinPanel({ offline }: { offline: boolean }) {
       if (cancelled) return;
       setCfg(config);
       setConfigExisted(existed);
+      // Rollback check (58b): both branches land here — a 404 for a ledger
+      // this device has seen reads as seq 0 and trips the same alarm.
+      if (await checkSeqAndRemember("fin", config)) {
+        if (!cancelled) setSeqAlarm(true);
+      }
     })();
 
     return () => {
@@ -123,6 +135,10 @@ export function FinPanel({ offline }: { offline: boolean }) {
     next: FinConfig,
     existed: boolean,
   ): Promise<"ok" | "conflict" | "failed"> {
+    // Bump the sealed write counter (58b). The prior is whichever is newer of
+    // the loaded state and `next` itself (a 409-dance rebuild derives from a
+    // fresh fetch that carries the fresher seq).
+    next = { ...next, seq: Math.max(nextSeq(cfg ?? {}), nextSeq(next)) };
     const bytes = new TextEncoder().encode(JSON.stringify(next));
     const sealed = await vault.sealItem(
       { n: "fin.json", t: "application/json", s: bytes.length },
@@ -138,6 +154,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
       body: new Blob([sealed as BlobPart]),
     });
     if (res.status === 409) return "conflict";
+    if (res.ok) rememberSavedSeq("fin", next);
     return res.ok ? "ok" : "failed";
   }
 
@@ -251,6 +268,11 @@ export function FinPanel({ offline }: { offline: boolean }) {
 
   // --- unlocked, decrypted ---
   const today = sydneyToday();
+  const seqBanner = seqAlarm && (
+    <div className="border-t border-hairline px-4 pt-4">
+      <SeqAlarm what="portfolio ledger" />
+    </div>
+  );
   const invested = investedAt(cfg, today) / 100;
   const latest = latestEntry(cfg);
   const cash = latest?.cash ?? 0;
@@ -276,6 +298,8 @@ export function FinPanel({ offline }: { offline: boolean }) {
           </p>
         )}
       </NetWorthHeader>
+
+      {seqBanner}
 
       <HoldingsSection cfg={cfg} onImport={importCsv} />
 

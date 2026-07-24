@@ -33,6 +33,15 @@ describe("normalizeTodoConfig", () => {
     expect(normalizeTodoConfig({ v: 1, items: [] })).toEqual(EMPTY_TODO_CONFIG);
   });
 
+  it("carries seq through the rebuild and rejects an invalid one (58b)", () => {
+    expect(normalizeTodoConfig({ v: 1, items: [], seq: 3 })).toEqual({
+      v: 1,
+      items: [],
+      seq: 3,
+    });
+    expect(normalizeTodoConfig({ v: 1, items: [], seq: 1.5 })).toBeNull();
+  });
+
   it("rejects anything unrecognizable rather than degrading to empty", () => {
     expect(normalizeTodoConfig(null)).toBeNull();
     expect(normalizeTodoConfig({ v: 2, items: [] })).toBeNull();
