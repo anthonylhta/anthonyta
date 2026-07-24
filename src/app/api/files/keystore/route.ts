@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { recordAuthEvent } from "@/lib/authlogstore";
 import { isKeystore, normalizeKeystore } from "@/lib/crypto";
+import { anchorHash, withAnchor } from "@/lib/stateanchor";
 import { getKeystore, KEYSTORE_MAX_BYTES, putKeystore } from "@/lib/inbox";
 
 export const dynamic = "force-dynamic";
@@ -53,19 +54,23 @@ export async function PUT(request: Request) {
     // a rebuild that lagged the client's format and quietly dropped `pending`
     // would destroy the only wrap of a mid-rotation MK2 (#119's failure class).
     const overwrite = request.headers.get("x-keystore-overwrite") === "1";
-    const result = await putKeystore(
-      JSON.stringify(normalizeKeystore(parsed)),
-      overwrite,
-    );
+    const persisted = JSON.stringify(normalizeKeystore(parsed));
+    const result = await putKeystore(persisted, overwrite);
     if (result === "conflict") return new Response("Conflict", { status: 409 });
     if (result === "ok")
       // A keystore overwrite is an attacker's favorite move (rotate the
-      // passphrase, lock the owner out "mysteriously") — journal both paths.
+      // passphrase, lock the owner out "mysteriously") — journal both paths,
+      // anchored with a hash of the EXACT string persisted (58b): the journal's
+      // newest keystore event now attests what the record should look like, so
+      // a store serving stale state fails the in-browser anchor check.
       await recordAuthEvent(
         "keystore",
-        overwrite
-          ? "overwritten (passphrase change / re-wrap)"
-          : "first-run setup",
+        withAnchor(
+          overwrite
+            ? "overwritten (passphrase change / re-wrap)"
+            : "first-run setup",
+          await anchorHash(persisted),
+        ),
       );
     return result === "ok" ? Response.json({ ok: true }) : nf();
   } catch (err) {
