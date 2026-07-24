@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { recordAuthEvent } from "@/lib/authlogstore";
 import { isPrfWrapSet } from "@/lib/prf";
+import { anchorHash, withAnchor } from "@/lib/stateanchor";
 import {
   getPrfWrapSet,
   PRF_WRAP_MAX_BYTES,
@@ -61,20 +62,32 @@ export async function PUT(request: Request) {
     const priorCount = prior.state === "ok" ? prior.value.wraps.length : 0;
 
     // Rebuild from the validated fields so what's at rest is exactly the wrap-set
-    // shape, never a superset smuggled past the type guard.
-    const ok = await putPrfWrapSet({
-      v: 1,
+    // shape, never a superset smuggled past the type guard. `label` is a
+    // validated optional field and rides through (it silently vanished on every
+    // save when this rebuild predated it — the #75 device labels never
+    // persisted through a PUT until now).
+    const rebuilt = {
+      v: 1 as const,
       wraps: parsed.wraps.map((w) => ({
-        v: 1,
+        v: 1 as const,
         credential_id_b64: w.credential_id_b64,
         wrapped_mk_b64: w.wrapped_mk_b64,
         iv_b64: w.iv_b64,
+        ...(w.label !== undefined ? { label: w.label } : {}),
       })),
-    });
+    };
+    // The store persists JSON.stringify(rebuilt) byte-for-byte (prfstore), and
+    // the GET re-serializes the same key-ordered shape — so this string IS what
+    // the reader will hash. Anchor it into the journal event (58b).
+    const persisted = JSON.stringify(rebuilt);
+    const ok = await putPrfWrapSet(rebuilt);
     if (ok)
       await recordAuthEvent(
         parsed.wraps.length < priorCount ? "prf-remove" : "prf-add",
-        `wraps ${priorCount} → ${parsed.wraps.length}`,
+        withAnchor(
+          `wraps ${priorCount} → ${parsed.wraps.length}`,
+          await anchorHash(persisted),
+        ),
       );
     return ok
       ? Response.json({ ok: true })
