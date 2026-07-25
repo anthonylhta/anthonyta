@@ -38,8 +38,18 @@ type KeyStatus = "loading" | "absent" | "ready" | "error";
  * every message opens IN THE BROWSER only while the vault is unlocked. The server only
  * ever held ciphertext. The box is minted once (generate keypair → seal the private
  * half → publish the public point); after that the panel lists, opens, and deletes.
+ *
+ * On the command center it's a one-line row that only exists when there's mail:
+ * `count` is the server's object count (metadata, never an envelope), and the
+ * panel below only opens on demand.
  */
-export function DropInbox({ offline }: { offline: boolean }) {
+export function DropInbox({
+  offline,
+  count,
+}: {
+  offline: boolean;
+  count: number;
+}) {
   const vault = useVault(offline);
   const { openItem, sealItem } = vault;
   const unlocked = vault.status === "unlocked";
@@ -47,6 +57,7 @@ export function DropInbox({ offline }: { offline: boolean }) {
   const [keyStatus, setKeyStatus] = useState<KeyStatus>("loading");
   const [messages, setMessages] = useState<Opened[]>([]);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   // The recovered private key never outlives the unlock effect: it's unsealed, used
   // to open the whole listing right there, and dropped. Nothing retains it across a
   // render, so there's no key material to wipe on lock beyond the master key itself.
@@ -141,86 +152,106 @@ export function DropInbox({ offline }: { offline: boolean }) {
     setMessages((prev) => prev.filter((m) => m.path !== path));
   }
 
-  // --- pre-unlock: nothing sensitive renders before the key ---
-  if (!unlocked) {
-    if (vault.status === "offline") return null; // store off — feature simply absent
-    return (
-      <Shell>
-        {vault.status === "setup" && (
-          <p className="text-muted">
-            set a vault passphrase in{" "}
-            <Link href="/files" className="text-amber hover:underline">
-              files/
-            </Link>{" "}
-            first
+  /** The expanded panel's states, unchanged. Called rather than rendered as a
+   *  component, so it owns no state of its own. */
+  function panel(): React.ReactNode {
+    // --- pre-unlock: nothing sensitive renders before the key ---
+    if (!unlocked)
+      return (
+        <>
+          {vault.status === "setup" && (
+            <p className="text-muted">
+              set a vault passphrase in{" "}
+              <Link href="/files" className="text-amber hover:underline">
+                files/
+              </Link>{" "}
+              first
+            </p>
+          )}
+          {vault.status === "locked" && <UnlockBox vault={vault} />}
+          {vault.status === "error" && (
+            <p className="text-down">{UNREACHABLE}</p>
+          )}
+          {vault.status === "loading" && <p className="text-muted">…</p>}
+        </>
+      );
+
+    // --- unlocked ---
+    if (keyStatus === "loading")
+      return <p className="text-muted">decrypting…</p>;
+    if (keyStatus === "error")
+      return <p className="text-down">{UNREACHABLE}</p>;
+    if (keyStatus === "absent")
+      return (
+        <>
+          <p className="mb-2 text-muted">
+            the drop box isn&apos;t enabled yet — mint a keypair to start
+            receiving sealed messages on{" "}
+            <Link href="/contact" className="text-amber hover:underline">
+              contact/
+            </Link>
+            .
           </p>
-        )}
-        {vault.status === "locked" && <UnlockBox vault={vault} />}
-        {vault.status === "error" && <p className="text-down">{UNREACHABLE}</p>}
-        {vault.status === "loading" && <p className="text-muted">…</p>}
-      </Shell>
+          <button
+            type="button"
+            onClick={enable}
+            disabled={busy}
+            className={btn}
+          >
+            {busy ? "minting…" : "enable drop box"}
+          </button>
+        </>
+      );
+
+    if (messages.length === 0) return <p className="text-muted">no messages</p>;
+    return (
+      <ul className="flex flex-col gap-3">
+        {messages.map((m) => (
+          <li key={m.path} className="border border-hairline px-3 py-2">
+            <div className="mb-1 flex items-center justify-between text-[11px] text-muted">
+              <span className="tabular-nums">{stamp(m.at)}</span>
+              <button
+                type="button"
+                onClick={() => dismiss(m.path)}
+                className="transition-colors hover:text-amber"
+              >
+                delete
+              </button>
+            </div>
+            <p className="whitespace-pre-wrap break-words text-sm text-fg/90">
+              {m.body}
+            </p>
+            {m.contact && (
+              <p className="mt-1.5 text-xs text-amber/90">↩ {m.contact}</p>
+            )}
+          </li>
+        ))}
+      </ul>
     );
   }
 
-  // --- unlocked ---
-  if (keyStatus === "loading")
-    return (
-      <Shell>
-        <p className="text-muted">decrypting…</p>
-      </Shell>
-    );
-  if (keyStatus === "error")
-    return (
-      <Shell>
-        <p className="text-down">{UNREACHABLE}</p>
-      </Shell>
-    );
-  if (keyStatus === "absent")
-    return (
-      <Shell>
-        <p className="mb-2 text-muted">
-          the drop box isn&apos;t enabled yet — mint a keypair to start
-          receiving sealed messages on{" "}
-          <Link href="/contact" className="text-amber hover:underline">
-            contact/
-          </Link>
-          .
-        </p>
-        <button type="button" onClick={enable} disabled={busy} className={btn}>
-          {busy ? "minting…" : "enable drop box"}
-        </button>
-      </Shell>
-    );
+  if (vault.status === "offline") return null; // store off — feature simply absent
 
   return (
-    <Shell count={messages.length}>
-      {messages.length === 0 ? (
-        <p className="text-muted">no messages</p>
-      ) : (
-        <ul className="flex flex-col gap-3">
-          {messages.map((m) => (
-            <li key={m.path} className="border border-hairline px-3 py-2">
-              <div className="mb-1 flex items-center justify-between text-[11px] text-muted">
-                <span className="tabular-nums">{stamp(m.at)}</span>
-                <button
-                  type="button"
-                  onClick={() => dismiss(m.path)}
-                  className="transition-colors hover:text-amber"
-                >
-                  delete
-                </button>
-              </div>
-              <p className="whitespace-pre-wrap break-words text-sm text-fg/90">
-                {m.body}
-              </p>
-              {m.contact && (
-                <p className="mt-1.5 text-xs text-amber/90">↩ {m.contact}</p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Shell>
+    <>
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          drop box
+        </span>
+        <span className="min-w-0 flex-1 text-fg/90">
+          <span className="tabular-nums text-amber">{count}</span> sealed
+          message{count === 1 ? "" : "s"}
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="shrink-0 text-xs text-amber hover:underline"
+        >
+          {open ? "[close]" : "[open]"}
+        </button>
+      </div>
+      {open && <Shell>{panel()}</Shell>}
+    </>
   );
 }
 
@@ -273,24 +304,10 @@ function stamp(iso: string): string {
   });
 }
 
-/** The panel chrome — a labelled block matching the command center's rows. */
-function Shell({
-  children,
-  count,
-}: {
-  children: React.ReactNode;
-  count?: number;
-}) {
+/** The expanded panel's chrome — the row above already carries the label. */
+function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border-b border-hairline px-4 py-3 text-xs">
-      <p className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-        drop box
-        {count != null && count > 0 && (
-          <span className="text-amber">· {count}</span>
-        )}
-      </p>
-      {children}
-    </div>
+    <div className="border-b border-hairline px-4 py-3 text-xs">{children}</div>
   );
 }
 

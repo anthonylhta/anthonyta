@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useVault } from "@/app/files/useVault";
-import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
+import { CHORE_CADENCE_DAYS, choreState, type ChoreState } from "@/lib/chores";
 import { normalizeFinConfig } from "@/lib/fin";
 import { FIN_CONTEXT } from "@/lib/aevcontext";
-import { ChoreChip } from "./ChoreChip";
 
 /**
- * The CSV-import chore chip (roadmap 52) — its evidence is the newest
+ * The CSV-import chore's state (roadmap 52) — its evidence is the newest
  * invested[] date inside the E2EE fin envelope, so unlike its two server-side
- * siblings this chip decrypts in the browser. Sealed dots until the key is in
- * hand; any miss reads as "no record", never an error.
+ * siblings this one decrypts in the browser. A locked vault, a sealed read, or
+ * any miss reads as "no record", never an error — which the exception-only
+ * chores row treats as quiet.
  */
-export function ChoreCsvChip({ offline }: { offline: boolean }) {
+export function useCsvChore(offline: boolean): ChoreState {
   const { status, openItem } = useVault(offline);
   const unlocked = status === "unlocked";
   const [lastImport, setLastImport] = useState<string | null>(null);
@@ -53,13 +53,6 @@ export function ChoreCsvChip({ offline }: { offline: boolean }) {
     };
   }, [unlocked, openItem]);
 
-  if (!unlocked)
-    return <span className="text-xs text-muted/50">csv import ·····</span>;
-
-  return (
-    <ChoreChip
-      label="csv import"
-      state={choreState(lastImport, CHORE_CADENCE_DAYS.csv, new Date())}
-    />
-  );
+  if (!unlocked) return { ageDays: null, status: "unknown" };
+  return choreState(lastImport, CHORE_CADENCE_DAYS.csv, new Date());
 }
