@@ -14,8 +14,8 @@
  *   - MODULES are the hideable blocks (each `[x]` toggle in the panel).
  *   - UNITS are the orderable blocks. A unit is usually one module, but a few
  *     are visually GROUPED and move together (the lobby's languages+reading+
- *     riichi card, the command center's briefing+hand row). The command center's
- *     `dropbox` is a FIXED unit — hideable, but pinned above both zones.
+ *     riichi card). The command center's `dropbox` is a FIXED unit — hideable,
+ *     but pinned above both zones.
  *
  * Forward-compat that keeps deploys safe: the config names HIDDEN keys only (a
  * module added later is visible by default — a config predating it can't hide
@@ -117,13 +117,16 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "todo", label: "quick capture (todo list)" }],
   },
   {
-    key: "briefing-hand",
+    key: "briefing",
     zone: "today",
-    label: "briefing + hand",
-    modules: [
-      { key: "briefing", label: "briefing glance" },
-      { key: "hand", label: "today's hand" },
-    ],
+    label: "briefing (one-line glance)",
+    modules: [{ key: "briefing", label: "briefing (one-line glance)" }],
+  },
+  {
+    key: "hand",
+    zone: "today",
+    label: "today's hand (riichi)",
+    modules: [{ key: "hand", label: "today's hand (riichi)" }],
   },
   {
     key: "week",
@@ -144,18 +147,6 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [
       { key: "health", label: "project health (riichi / webnovel / ishin)" },
     ],
-  },
-  {
-    key: "tft",
-    zone: "week",
-    label: "arena (tft ladder)",
-    modules: [{ key: "tft", label: "arena (tft ladder)" }],
-  },
-  {
-    key: "totp",
-    zone: "week",
-    label: "2fa codes",
-    modules: [{ key: "totp", label: "2fa codes" }],
   },
 ];
 

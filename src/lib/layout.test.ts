@@ -45,16 +45,16 @@ describe("normalizeLayout", () => {
   it("round-trips a full v2 config", () => {
     const c = cfg({
       lobby: ["tft"],
-      center: ["totp"],
+      center: ["health"],
       centerOrder: ["chores"],
     });
     expect(normalizeLayout(JSON.parse(JSON.stringify(c)))).toEqual(c);
   });
 
   it("reads a legacy v1 config as v2 with empty order", () => {
-    expect(normalizeLayout({ v: 1, lobby: ["tft"], center: ["totp"] })).toEqual(
-      cfg({ lobby: ["tft"], center: ["totp"] }),
-    );
+    expect(
+      normalizeLayout({ v: 1, lobby: ["tft"], center: ["health"] }),
+    ).toEqual(cfg({ lobby: ["tft"], center: ["health"] }));
   });
 
   it("accepts a v2 that omits the order fields (defaults empty)", () => {
@@ -75,6 +75,20 @@ describe("normalizeLayout", () => {
     ).toEqual(
       cfg({ lobby: ["tft"], lobbyOrder: ["github"], centerOrder: ["chores"] }),
     );
+  });
+
+  it("drops retired command-center keys — no migration needed", () => {
+    // `tft`/`totp` left the command center and `briefing-hand` split into two
+    // units; a config written before that still reads clean.
+    expect(
+      normalizeLayout({
+        v: 2,
+        lobby: [],
+        center: ["tft", "totp", "briefing"],
+        lobbyOrder: [],
+        centerOrder: ["briefing-hand", "week", "totp"],
+      }),
+    ).toEqual(cfg({ center: ["briefing"], centerOrder: ["week"] }));
   });
 
   it("dedupes repeated keys", () => {
@@ -98,10 +112,10 @@ describe("normalizeLayout", () => {
 
 describe("hiddenSet + setHidden", () => {
   it("reads the right surface", () => {
-    const c = cfg({ lobby: ["tft"], center: ["totp"] });
+    const c = cfg({ lobby: ["tft"], center: ["health"] });
     expect(hiddenSet(c, "lobby").has("tft")).toBe(true);
-    expect(hiddenSet(c, "lobby").has("totp")).toBe(false);
-    expect(hiddenSet(c, "center").has("totp")).toBe(true);
+    expect(hiddenSet(c, "lobby").has("health")).toBe(false);
+    expect(hiddenSet(c, "center").has("health")).toBe(true);
   });
 
   it("hides and shows idempotently, leaving order + the other surface alone", () => {
@@ -134,7 +148,7 @@ describe("orderedUnits", () => {
 
   it("keeps the fixed dropbox pinned at the front regardless of order", () => {
     const keys = orderedUnits(
-      cfg({ centerOrder: ["totp", "week"] }),
+      cfg({ centerOrder: ["health", "week"] }),
       "center",
     ).map((u) => u.key);
     expect(keys[0]).toBe("dropbox");
@@ -151,7 +165,8 @@ describe("orderedUnits", () => {
       "networth",
       "vault-today",
       "todo",
-      "briefing-hand",
+      "briefing",
+      "hand",
     ]);
   });
 });
@@ -166,7 +181,8 @@ describe("moveUnit + canMove", () => {
       "networth",
       "vault-today",
       "todo",
-      "briefing-hand",
+      "briefing",
+      "hand",
     ]);
   });
 
@@ -176,8 +192,6 @@ describe("moveUnit + canMove", () => {
       "chores",
       "week",
       "health",
-      "tft",
-      "totp",
     ]);
   });
 
@@ -186,8 +200,8 @@ describe("moveUnit + canMove", () => {
     expect(moveUnit(EMPTY_LAYOUT, "center", "weather", -1)).toEqual(
       EMPTY_LAYOUT,
     );
-    // totp is last in THIS WEEK; moving it down is a no-op
-    expect(moveUnit(EMPTY_LAYOUT, "center", "totp", 1)).toEqual(EMPTY_LAYOUT);
+    // health is last in THIS WEEK; moving it down is a no-op
+    expect(moveUnit(EMPTY_LAYOUT, "center", "health", 1)).toEqual(EMPTY_LAYOUT);
   });
 
   it("refuses to move a fixed or unknown unit", () => {
@@ -207,7 +221,7 @@ describe("moveUnit + canMove", () => {
   it("canMove greys the arrows at the zone edges", () => {
     expect(canMove(EMPTY_LAYOUT, "center", "weather", -1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "weather", 1)).toBe(true);
-    expect(canMove(EMPTY_LAYOUT, "center", "totp", 1)).toBe(false);
+    expect(canMove(EMPTY_LAYOUT, "center", "health", 1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "dropbox", 1)).toBe(false);
   });
 

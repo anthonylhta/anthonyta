@@ -12,6 +12,7 @@ import {
   LastSignIn,
 } from "@/components/SystemPanels";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { TotpDrawer } from "@/components/TotpDrawer";
 import { readDays } from "@/lib/anastore";
 import { getAuthLog } from "@/lib/authlogstore";
 import { sydneyToday } from "@/lib/fin";
@@ -57,6 +58,12 @@ export default async function SystemPage() {
         <PasskeyManager />
         <LastSignIn />
         <RecoveryShares offline={!r2Enabled()} />
+
+        {/* ───────────── 2FA ───────────── */}
+        <Section label="2fa" right="totp" />
+        <div className="px-4 py-3">
+          <TotpDrawer offline={!r2Enabled()} />
+        </div>
 
         {/* ───────────── LAYOUT ───────────── */}
         <Section label="layout" right="visibility" />

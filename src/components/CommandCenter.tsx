@@ -1,20 +1,14 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { SignOut } from "@/components/auth-buttons";
-import { BriefingRelevance } from "@/components/BriefingRelevance";
-import { ChoreChip } from "@/components/ChoreChip";
-import { ChoreCsvChip } from "@/components/ChoreCsvChip";
+import { ChoresRow } from "@/components/ChoresRow";
 import { DropInbox } from "@/components/DropInbox";
 import { JournalActivityRow } from "@/components/JournalActivityRow";
 import { NetWorthGlance } from "@/components/NetWorthGlance";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { CommandK } from "@/components/terminal/CommandPalette";
-import { Module } from "@/components/terminal/Module";
 import { StatusBar } from "@/components/terminal/StatusBar";
-import { Tape } from "@/components/terminal/Tape";
-import { TftModule } from "@/components/TftModule";
 import { TodoGlance } from "@/components/TodoGlance";
-import { TotpDrawer } from "@/components/TotpDrawer";
 import { TransitGlance } from "@/components/TransitGlance";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import {
@@ -31,10 +25,11 @@ import { getHealth } from "@/lib/connectors/health";
 import { getLayout } from "@/lib/connectors/layout";
 import { getRiichiStats } from "@/lib/connectors/riichi";
 import { getSteps } from "@/lib/connectors/steps";
-import { getTft, getTftHistory } from "@/lib/connectors/tft";
+import { getTft } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getWeather } from "@/lib/connectors/weather";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
+import { listDrops } from "@/lib/dropstore";
 import {
   indexBaseline,
   isSnapIndex,
@@ -50,7 +45,7 @@ import {
 } from "@/lib/steps";
 import { uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
-import { sampleBriefing, type TapeItem } from "@/lib/sampleBriefing";
+import { sampleBriefing } from "@/lib/sampleBriefing";
 import { r2Enabled } from "@/lib/r2";
 
 /** Today's date in Sydney as YYYY-MM-DD (matches the vault's daily-note titles). */
@@ -68,6 +63,21 @@ function todayLabel(): string {
     day: "numeric",
     month: "short",
   }).format(new Date());
+}
+
+/**
+ * How many sealed drop-box messages are waiting. METADATA ONLY — the count of
+ * objects under the prefix, the same thing the owner-gated list route exposes;
+ * no envelope is ever read here. Any miss (store off, a failed list) reads as
+ * zero, which simply means the row doesn't render.
+ */
+async function dropCount(): Promise<number> {
+  try {
+    const { objects } = await listDrops();
+    return objects.length;
+  } catch {
+    return 0;
+  }
 }
 
 /** A "15 Jun – 21 Jun" label for the trailing week. */
@@ -99,12 +109,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
     indexRead,
     riichi,
     tft,
-    tftHistory,
     layout,
     wx,
     choreReads,
     health,
     steps,
+    drops,
   ] = await Promise.all([
     getBriefing(),
     getLanguageStats(),
@@ -113,12 +123,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getSnapIndex(),
     getRiichiStats(),
     getTft(),
-    getTftHistory(),
     getLayout(),
     getWeather(),
     getChoreReads(),
     getHealth(),
     getSteps(today),
+    dropCount(),
   ]);
   const b = briefing ?? sampleBriefing;
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
@@ -159,11 +169,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
     readingBaseline && reading.length > 0
       ? readingChapters - readingBaseline.readingChapters
       : null;
-
-  const curated = ["ASX 200", "S&P 500", "BTC"]
-    .map((label) => b.tape.find((tk) => tk.label === label))
-    .filter((tk): tk is TapeItem => Boolean(tk));
-  const ticks = curated.length ? curated : b.tape.slice(0, 3);
 
   // THIS WEEK rows — number = this week, strip = the trailing ~10-week trend.
   // riichi reads `puzzle_results` (the same table its app's streak uses), so its
@@ -215,18 +220,18 @@ export async function CommandCenter({ userName }: { userName: string }) {
     },
   ];
 
-  const weekVisible = ["week", "chores", "health", "tft", "totp"].some(
-    (k) => !hidden.has(k),
-  );
+  const weekVisible = ["week", "chores", "health"].some((k) => !hidden.has(k));
 
   // Each command-center module keyed by its layout UNIT key so the zones can
   // render in the owner's configured order (roadmap 59). The values are the
   // exact blocks that used to sit inline, a ternary yielding the JSX when
   // visible.
   const centerNodes: Record<string, ReactNode> = {
-    dropbox: !hidden.has("dropbox") ? (
-      <DropInbox offline={!r2Enabled()} />
-    ) : null,
+    /* exception-only: nothing waiting, nothing on the page. */
+    dropbox:
+      !hidden.has("dropbox") && drops > 0 ? (
+        <DropInbox offline={!r2Enabled()} count={drops} />
+      ) : null,
 
     /* the morning glance rows (roadmap 50+51): Sydney weather is public
        data server-rendered off the keyless Open-Meteo connector; the
@@ -257,27 +262,30 @@ export async function CommandCenter({ userName }: { userName: string }) {
     ) : null,
 
     /* steps — the daily count off the phone's plaintext push (Samsung Health →
-       Health Connect); today's number + a trailing 14-day strip. "no data yet"
-       until the first post lands (an absent store, not a fake number). */
-    steps: !hidden.has("steps") ? (
-      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          steps
-        </span>
-        <span className="min-w-0 flex-1 text-fg/90">
-          {stepsToday !== null ? (
-            <span className="tabular-nums text-fg">{commas(stepsToday)}</span>
-          ) : (
-            <span className="text-muted">no data yet</span>
-          )}
-        </span>
-        {stepsLevels.some((l) => l > 0) && (
-          <span className="w-24 shrink-0">
-            <ActivityStrip levels={stepsLevels} label="steps, last 14 days" />
+       Health Connect); today's number + a trailing 14-day strip. Exception-only:
+       with nothing pushed yet there's no row at all rather than an empty state,
+       and a today-less strip reads as a muted dash. */
+    steps:
+      !hidden.has("steps") &&
+      (stepsToday !== null || stepsLevels.some((l) => l > 0)) ? (
+        <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+          <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+            steps
           </span>
-        )}
-      </div>
-    ) : null,
+          <span className="min-w-0 flex-1 text-fg/90">
+            {stepsToday !== null ? (
+              <span className="tabular-nums text-fg">{commas(stepsToday)}</span>
+            ) : (
+              <span className="text-muted">—</span>
+            )}
+          </span>
+          {stepsLevels.some((l) => l > 0) && (
+            <span className="w-24 shrink-0">
+              <ActivityStrip levels={stepsLevels} label="steps, last 14 days" />
+            </span>
+          )}
+        </div>
+      ) : null,
 
     "transit-next": !hidden.has("transit-next") ? (
       <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
@@ -308,8 +316,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
       </div>
     ) : null,
 
-    /* today's daily note, parsed: headline + planner + a journal peek. A
-       client island — the note is sealed in the E2EE vault, so it's fetched +
+    /* today's daily note, parsed: headline + what's still open. A client
+       island — the note is sealed in the E2EE vault, so it's fetched +
        decrypted in the browser (unlock in files/), never server-rendered. */
     "vault-today": !hidden.has("vault-today") ? (
       <VaultTodayGlance offline={!r2Enabled()} date={today} />
@@ -327,54 +335,53 @@ export async function CommandCenter({ userName }: { userName: string }) {
       </div>
     ) : null,
 
-    "briefing-hand":
-      !hidden.has("briefing") || !hidden.has("hand") ? (
-        <div className="grid grid-cols-1 gap-px bg-hairline sm:grid-cols-2">
-          {!hidden.has("briefing") && (
-            <Module
-              label="briefing"
-              className="border-0 sm:col-span-2"
-              action={
-                <Link
-                  href="/briefing"
-                  className="text-xs text-amber hover:underline"
-                >
-                  [full]
-                </Link>
-              }
-            >
-              <p className="text-fg">{b.driver}</p>
-              <Tape items={ticks} className="mt-2" />
-              <BriefingRelevance briefing={b} offline={!r2Enabled()} />
-            </Module>
-          )}
+    /* briefing — one line, the day's driver. The tape, the relevance
+       annotation and the rest of the read live on /briefing. */
+    briefing: !hidden.has("briefing") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          briefing
+        </span>
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-fg/90">
+          {b.driver}
+        </span>
+        <Link
+          href="/briefing"
+          className="shrink-0 text-xs text-amber hover:underline"
+        >
+          [full]
+        </Link>
+      </div>
+    ) : null,
 
-          {!hidden.has("hand") && (
-            <Module
-              label="today's hand"
-              className="border-0 sm:col-span-2"
-              action={
-                <Link
-                  href="/riichi"
-                  className="text-xs text-amber hover:underline"
-                >
-                  [solve]
-                </Link>
-              }
-            >
-              <p className="text-fg">
-                <span lang="ja" className="font-[family-name:var(--font-jp)]">
-                  本日の一手
-                </span>{" "}
-                — {riichi.todaySolved ? "solved ✓" : "unsolved"}
-              </p>
-              <p className="mt-1.5 text-xs text-muted">
-                solve to keep the streak
-              </p>
-            </Module>
+    /* today's hand — solved or not, and a way in. Solving happens in the
+       riichi app; nothing here needs more than the state. */
+    hand: !hidden.has("hand") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          riichi
+        </span>
+        <span className="min-w-0 flex-1 text-fg/90">
+          <span lang="ja" className="font-[family-name:var(--font-jp)]">
+            本日の一手
+          </span>{" "}
+          ·{" "}
+          {riichi.todaySolved ? (
+            <span className="text-up">solved ✓</span>
+          ) : (
+            "unsolved"
           )}
-        </div>
-      ) : null,
+        </span>
+        {!riichi.todaySolved && (
+          <Link
+            href="/riichi"
+            className="shrink-0 text-xs text-amber hover:underline"
+          >
+            [solve →]
+          </Link>
+        )}
+      </div>
+    ) : null,
 
     week: !hidden.has("week") ? (
       <div className="px-4 py-2">
@@ -394,96 +401,64 @@ export async function CommandCenter({ userName }: { userName: string }) {
     ) : null,
 
     /* chores — maintenance freshness derived from evidence (roadmap 52):
-       vault-sync + backup are server-read; the csv chip decrypts the fin
-       envelope client-side. */
+       vault-sync + backup are server-read, the csv chore decrypts the fin
+       envelope client-side, so the whole row is an island. Exception-only —
+       it names what's gone due and stays silent otherwise. */
     chores: !hidden.has("chores") ? (
-      <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          chores
-        </span>
-        <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
-          <ChoreCsvChip offline={!r2Enabled()} />
-          <ChoreChip
-            label="vault-sync"
-            state={choreState(
-              choreReads.vaultSyncedAt,
-              CHORE_CADENCE_DAYS.vaultSync,
-              new Date(),
-            )}
-          />
-          <ChoreChip
-            label="backup"
-            state={choreState(
-              choreReads.backupAt,
-              CHORE_CADENCE_DAYS.backup,
-              new Date(),
-            )}
-          />
-        </span>
-      </div>
+      <ChoresRow
+        offline={!r2Enabled()}
+        vaultSync={choreState(
+          choreReads.vaultSyncedAt,
+          CHORE_CADENCE_DAYS.vaultSync,
+          new Date(),
+        )}
+        backup={choreState(
+          choreReads.backupAt,
+          CHORE_CADENCE_DAYS.backup,
+          new Date(),
+        )}
+      />
     ) : null,
 
-    /* health — is the estate up (roadmap 55): one capped probe per
-       sibling project, cached 5 min. */
-    health: !hidden.has("health") ? (
-      <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          health
-        </span>
-        <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
-          {health.map((h) => (
-            <span key={h.key} className="text-xs">
-              <span className="text-muted">{h.label}</span>{" "}
-              {h.state === "down" ? (
-                <span className="text-down">✕ down</span>
-              ) : (
-                <>
-                  <span
-                    className={h.state === "slow" ? "text-amber" : "text-up"}
-                  >
-                    ●
-                  </span>
-                  {h.ms !== null && (
-                    <span className="tabular-nums text-muted"> {h.ms}ms</span>
+    /* health — is the estate up (roadmap 55): one capped probe per sibling
+       project, cached 5 min. Exception-only: a healthy estate says nothing,
+       and only the offenders are named. */
+    health:
+      !hidden.has("health") && health.some((h) => h.state !== "ok") ? (
+        <div className="flex items-baseline gap-3 border-t border-hairline px-4 py-2.5 text-sm">
+          <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+            health
+          </span>
+          <span className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1">
+            {health
+              .filter((h) => h.state !== "ok")
+              .map((h) => (
+                <span key={h.key} className="text-xs">
+                  <span className="text-muted">{h.label}</span>{" "}
+                  {h.state === "down" ? (
+                    <span className="text-down">✕ down</span>
+                  ) : (
+                    <>
+                      <span className="text-amber">●</span>
+                      {h.ms !== null && (
+                        <span className="tabular-nums text-muted">
+                          {" "}
+                          {h.ms}ms
+                        </span>
+                      )}
+                    </>
                   )}
-                </>
-              )}
-            </span>
-          ))}
-        </span>
-      </div>
-    ) : null,
-
-    /* arena — the same band the lobby shows (rank, recent games, drill-down),
-       so the owner doesn't have to sign out to see it. The THIS WEEK tft row
-       keeps the cadence; this is the standing (deliberate 0032 dent). */
-    tft: !hidden.has("tft") ? (
-      <TftModule tft={tft} history={tftHistory} />
-    ) : null,
-
-    /* 2fa — seeds sealed in the vault, codes computed in-browser behind the
-       unlock (ADR: TOTP drawer); the server never sees a seed or a code. */
-    totp: !hidden.has("totp") ? (
-      <div className="border-t border-hairline px-4 py-4">
-        <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-          2fa
+                </span>
+              ))}
+          </span>
         </div>
-        <TotpDrawer offline={!r2Enabled()} />
-      </div>
-    ) : null,
+      ) : null,
   };
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
       <div className="border border-hairline bg-surface/20">
         <StatusBar user={userName} />
-
-        <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-xs">
-          <span className="uppercase tracking-[0.2em] text-muted">
-            command center
-          </span>
-          <SignOut className="text-muted transition-colors hover:text-amber" />
-        </div>
 
         {/* encrypted drop box — a client island behind the vault unlock; sealed
             messages left on /contact open here and nowhere else (ADR: sealed box). */}
@@ -524,42 +499,39 @@ export async function CommandCenter({ userName }: { userName: string }) {
             </Link>
             <Link
               href="/reader"
-              className="text-amber/80 transition-colors hover:text-amber"
+              className="text-muted transition-colors hover:text-amber"
             >
               reader/
             </Link>
             <Link
               href="/transit"
-              className="text-amber/80 transition-colors hover:text-amber"
+              className="text-muted transition-colors hover:text-amber"
             >
               transit/
             </Link>
             <Link
               href="/vault"
-              className="text-amber/80 transition-colors hover:text-amber"
+              className="text-muted transition-colors hover:text-amber"
             >
               vault/
             </Link>
             <Link
               href="/files"
-              className="text-amber/80 transition-colors hover:text-amber"
+              className="text-muted transition-colors hover:text-amber"
             >
               files/
             </Link>
             <Link
               href="/system"
-              className="text-amber/80 transition-colors hover:text-amber"
+              className="text-muted transition-colors hover:text-amber"
             >
               system/
             </Link>
+            <SignOut className="text-muted transition-colors hover:text-amber" />
           </nav>
           <CommandK />
         </div>
       </div>
-
-      <p className="mt-4 text-center text-xs text-muted/60">
-        private command center · {userName}
-      </p>
     </main>
   );
 }
