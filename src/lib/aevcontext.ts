@@ -27,3 +27,6 @@ export const TODO_CONTEXT = "meta/todo";
 export const TOTP_CONTEXT = "meta/totp";
 /** The MK-rotation journal (ADR 0090/0103) — AEV2 from birth; no AEV1 legacy. */
 export const ROTATION_CONTEXT = "meta/rotation";
+/** The aperture status envelope — AEV2 from birth; its single writer is the
+ *  owner-run sync script, so no store module pins this one yet. */
+export const APERTURE_CONTEXT = "meta/aperture";

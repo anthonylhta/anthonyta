@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  APERTURE_CONTEXT,
   FIN_CONTEXT,
   TODO_CONTEXT,
   TOTP_CONTEXT,
@@ -66,5 +67,28 @@ describe("aevcontext — AEV2 round-trip per store", () => {
         await expect(open(mk, env, other.ctx)).rejects.toThrow();
       }
     }
+  });
+});
+
+describe("aevcontext — aperture", () => {
+  it("pins the literal context string", () => {
+    // No aperture store module exists yet, so there's no PATH to pin against the
+    // way STORES does — the literal stands in until the store PR lands, and that
+    // PR must add the PATH === context assertion for the same reason: seal and
+    // open drifting apart means a blob that stops decrypting on prod.
+    expect(APERTURE_CONTEXT).toBe("meta/aperture");
+  });
+
+  it("differs from every config-store context", () => {
+    for (const s of STORES) expect(APERTURE_CONTEXT).not.toBe(s.ctx);
+  });
+
+  it("seals and opens under its own context, and only that one", async () => {
+    const mk = await generateMk();
+    const env = await seal(mk, meta, bytes, APERTURE_CONTEXT);
+    const { bytes: out } = await open(mk, env, APERTURE_CONTEXT);
+    expect(new TextDecoder().decode(out)).toBe("abc");
+    await expect(open(mk, env, FIN_CONTEXT)).rejects.toThrow();
+    await expect(open(mk, env)).rejects.toThrow();
   });
 });
