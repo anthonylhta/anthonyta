@@ -1,0 +1,531 @@
+/**
+ * aperture — the render-side data contract for the private status module.
+ *
+ * THE SITE RENDERS, NEVER ADJUDICATES. Every figure that arrives here (a streak's
+ * count, a condition's status, a trial's outcome, the breakthrough wall) was
+ * DECIDED elsewhere — by the owner-run sync script that seals the blob — and lands
+ * already settled. The only site-side computation this module permits itself is
+ * the essence canon lookup and the two freshness dot flags. Nothing here decides
+ * whether a condition is held, whether a trial passed, or what a streak is worth.
+ *
+ * FRAME STRICT, VOCABULARY OPEN. The frame — version, shapes, types, required
+ * fields — hard-rejects to null: a structurally wrong blob renders NOTHING rather
+ * than half a panel of `undefined`. The vocabulary — stage names, condition
+ * statuses, trial tiers, attainment rungs — is deliberately open: every
+ * enum-valued field is typed `string`, and a value this build has never heard of
+ * survives normalize AS THE LITERAL for the UI to render muted. That is the whole
+ * forward-compat story — a newer emitter can ship a rung, a status, or a tier
+ * ahead of the site without blanking the module — and the exported guards are how
+ * a consumer branches known from unknown.
+ *
+ * Pure and env-less: no `next`, store, or `react` import, no Node-only API, and no
+ * clock of its own (both dot rules take their instants as arguments). Safe in a
+ * client component and unit-testable on its own, exactly like lib/fin and
+ * lib/layout.
+ *
+ * The sealed blob has a SINGLE writer — the owner-run sync script, landing in a
+ * later PR — so nothing here writes, merges, or migrates. Reading is the whole job.
+ */
+
+// --- closed vocabularies (the guards; the FIELDS themselves stay open) --------
+
+/** The four sub-steps within a mortal rank. Immortal ranks have no stages. */
+export type ApertureStage = "initial" | "middle" | "upper" | "peak";
+
+/** How a condition stands right now — the sync script adjudicates, never the site. */
+export type ConditionStatus =
+  | "not_held"
+  | "hardening"
+  | "held"
+  | "hardened"
+  | "failing"
+  | "suspended";
+
+/** Where a trial sits: pending, banked for later, or already resolved. */
+export type TrialState = "active" | "stocked" | "passed" | "failed";
+
+/** A trial's weight class. */
+export type TrialTier = "earthly" | "heavenly" | "grand";
+
+/** A path's rung on the mastery ladder. */
+export type Attainment =
+  | "ordinary"
+  | "quasi-master"
+  | "master"
+  | "quasi-grandmaster"
+  | "grandmaster"
+  | "quasi-great-grandmaster"
+  | "great-grandmaster"
+  | "quasi-supreme-grandmaster"
+  | "supreme-grandmaster";
+
+const STAGES: readonly ApertureStage[] = ["initial", "middle", "upper", "peak"];
+
+const CONDITION_STATUSES: readonly ConditionStatus[] = [
+  "not_held",
+  "hardening",
+  "held",
+  "hardened",
+  "failing",
+  "suspended",
+];
+
+const TRIAL_STATES: readonly TrialState[] = [
+  "active",
+  "stocked",
+  "passed",
+  "failed",
+];
+
+const TRIAL_TIERS: readonly TrialTier[] = ["earthly", "heavenly", "grand"];
+
+/** The nine attainment rungs, LOWEST → HIGHEST. The order is meaningful: the
+ *  ladder renders in this sequence and a rung's index is its height. */
+export const ATTAINMENTS = [
+  "ordinary",
+  "quasi-master",
+  "master",
+  "quasi-grandmaster",
+  "grandmaster",
+  "quasi-great-grandmaster",
+  "great-grandmaster",
+  "quasi-supreme-grandmaster",
+  "supreme-grandmaster",
+] as const;
+
+/** Every vocabulary guard is this one shape: a string in a closed list. */
+function inVocab<T extends string>(vocab: readonly T[], x: unknown): x is T {
+  return typeof x === "string" && (vocab as readonly string[]).includes(x);
+}
+
+/** Whether `x` is a stage THIS build knows — anything else renders muted. */
+export function isApertureStage(x: unknown): x is ApertureStage {
+  return inVocab(STAGES, x);
+}
+
+/** Whether `x` is a condition status this build knows — anything else renders muted. */
+export function isConditionStatus(x: unknown): x is ConditionStatus {
+  return inVocab(CONDITION_STATUSES, x);
+}
+
+/** Whether `x` is a trial state this build knows — anything else renders muted. */
+export function isTrialState(x: unknown): x is TrialState {
+  return inVocab(TRIAL_STATES, x);
+}
+
+/** Whether `x` is a trial tier this build knows — anything else renders muted. */
+export function isTrialTier(x: unknown): x is TrialTier {
+  return inVocab(TRIAL_TIERS, x);
+}
+
+/** Whether `x` is an attainment rung this build knows — anything else renders muted. */
+export function isAttainment(x: unknown): x is Attainment {
+  return inVocab(ATTAINMENTS, x);
+}
+
+// --- the document shape -------------------------------------------------------
+
+/** The part of the status that is never sealed — rank and stage carry the glance. */
+export interface AperturePublic {
+  rank: number;
+  stage: string;
+}
+
+/** The plaintext glance blob: enough to draw the badge without an unlock. */
+export interface ApertureGlance {
+  v: 1;
+  sealedAt: string;
+  rank: number;
+  stage: string;
+}
+
+/** One tracked streak. `state` is open vocabulary; the counters are adjudicated. */
+export interface ApertureStreak {
+  count: number;
+  target: number;
+  state: string;
+  earliestHarden?: string;
+  pausesThisQuarter?: number;
+}
+
+/** One condition and its progress toward hardening, in its own `unit`. */
+export interface ApertureCondition {
+  id: string;
+  label: string;
+  status: string;
+  progress: number;
+  target: number;
+  unit: string;
+}
+
+/** One path. Sub-paths reuse the same shape — `role` only appears on top-level
+ *  paths in practice, but the type deliberately doesn't forbid it on a sub. */
+export interface AperturePath {
+  name: string;
+  role?: string;
+  attainment?: string;
+  verified?: boolean;
+  note?: string;
+  activity?: string;
+  sub?: AperturePath[];
+}
+
+/** The vital gu, if one is held: a named companion with its own rank ceiling. */
+export interface ApertureVitalGu {
+  name: string;
+  rank: number;
+  max: number;
+}
+
+/** One trial. `date` is null while the outcome has no day attached to it yet. */
+export interface ApertureTrial {
+  name: string;
+  tier: string;
+  state: string;
+  opened?: string;
+  date?: string | null;
+  provisioned?: boolean;
+}
+
+/** The wall currently being worked and what would break it. `recentStrikes` is an
+ *  OPEN record on purpose — strike-counter names are DATA, not schema. */
+export interface ApertureBreakthrough {
+  wall: string;
+  event: string;
+  routes: string[];
+  recentStrikes: Record<string, number>;
+}
+
+/** Everything behind the unlock. `streaks` is an open record keyed by streak name
+ *  for the same reason as the strike counters: the names are data. */
+export interface ApertureSealed {
+  streaks: Record<string, ApertureStreak>;
+  conditions: ApertureCondition[];
+  paths: AperturePath[];
+  vitalGu?: ApertureVitalGu;
+  trials: ApertureTrial[];
+  breakthrough: ApertureBreakthrough;
+}
+
+/** The decrypted aperture document — the panel's entire input. */
+export interface ApertureDoc {
+  v: 1;
+  sealedAt: string;
+  public: AperturePublic;
+  sealed: ApertureSealed;
+}
+
+// --- normalize (never throws; unknown keys are DROPPED at every level) --------
+
+function isObj(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null;
+}
+/** An OPEN record, where the keys themselves are data. An array is not a record:
+ *  its numeric keys must never smuggle through the open-record frame as `[1]` →
+ *  `{"0": 1}`, which is coercion where the doctrine demands a hard reject. */
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return isObj(x) && !Array.isArray(x);
+}
+function isStr(x: unknown): x is string {
+  return typeof x === "string";
+}
+function isNonEmptyStr(x: unknown): x is string {
+  return typeof x === "string" && x.length > 0;
+}
+/** A finite number — no NaN, no Infinity, no string coercion. */
+function isFiniteNum(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x);
+}
+/** A safe integer ≥ 1 — ranks start at 1 and there is no rank 0. */
+function isPosInt(x: unknown): x is number {
+  return typeof x === "number" && Number.isSafeInteger(x) && x > 0;
+}
+/** A string an engine can actually turn into an instant. */
+function isInstant(x: unknown): x is string {
+  return typeof x === "string" && Number.isFinite(Date.parse(x));
+}
+
+/** Rebuild an array field-for-field, rejecting the WHOLE array if any row is off
+ *  shape — a half-rendered list is worse than an empty panel. */
+function normArray<T>(x: unknown, norm: (v: unknown) => T | null): T[] | null {
+  if (!Array.isArray(x)) return null;
+  const out: T[] = [];
+  for (const v of x) {
+    const n = norm(v);
+    if (n === null) return null;
+    out.push(n);
+  }
+  return out;
+}
+
+/** Same discipline for an open record: the KEYS are data and survive untouched,
+ *  the values must each normalize. */
+function normRecord<T>(
+  x: unknown,
+  norm: (v: unknown) => T | null,
+): Record<string, T> | null {
+  if (!isRecord(x)) return null;
+  const out: Record<string, T> = {};
+  for (const [k, v] of Object.entries(x)) {
+    const n = norm(v);
+    if (n === null) return null;
+    out[k] = n;
+  }
+  return out;
+}
+
+function normPublic(x: unknown): AperturePublic | null {
+  if (!isObj(x)) return null;
+  if (!isPosInt(x.rank) || !isNonEmptyStr(x.stage)) return null;
+  return { rank: x.rank, stage: x.stage };
+}
+
+function normStreak(x: unknown): ApertureStreak | null {
+  if (!isObj(x)) return null;
+  if (!isFiniteNum(x.count) || !isFiniteNum(x.target)) return null;
+  if (!isNonEmptyStr(x.state)) return null;
+  const { earliestHarden, pausesThisQuarter } = x;
+  if (earliestHarden !== undefined && !isStr(earliestHarden)) return null;
+  if (pausesThisQuarter !== undefined && !isFiniteNum(pausesThisQuarter))
+    return null;
+  return {
+    count: x.count,
+    target: x.target,
+    state: x.state,
+    ...(earliestHarden !== undefined ? { earliestHarden } : {}),
+    ...(pausesThisQuarter !== undefined ? { pausesThisQuarter } : {}),
+  };
+}
+
+function normCondition(x: unknown): ApertureCondition | null {
+  if (!isObj(x)) return null;
+  if (!isStr(x.id) || !isStr(x.label) || !isStr(x.unit)) return null;
+  if (!isNonEmptyStr(x.status)) return null;
+  if (!isFiniteNum(x.progress) || !isFiniteNum(x.target)) return null;
+  return {
+    id: x.id,
+    label: x.label,
+    status: x.status,
+    progress: x.progress,
+    target: x.target,
+    unit: x.unit,
+  };
+}
+
+function normPath(x: unknown): AperturePath | null {
+  if (!isObj(x)) return null;
+  if (!isStr(x.name)) return null;
+  const { role, attainment, verified, note, activity, sub } = x;
+  if (role !== undefined && !isStr(role)) return null;
+  if (attainment !== undefined && !isStr(attainment)) return null;
+  if (verified !== undefined && typeof verified !== "boolean") return null;
+  if (note !== undefined && !isStr(note)) return null;
+  if (activity !== undefined && !isStr(activity)) return null;
+  const subs = sub === undefined ? undefined : normArray(sub, normPath);
+  if (subs === null) return null;
+  return {
+    name: x.name,
+    ...(role !== undefined ? { role } : {}),
+    ...(attainment !== undefined ? { attainment } : {}),
+    ...(verified !== undefined ? { verified } : {}),
+    ...(note !== undefined ? { note } : {}),
+    ...(activity !== undefined ? { activity } : {}),
+    ...(subs !== undefined ? { sub: subs } : {}),
+  };
+}
+
+function normVitalGu(x: unknown): ApertureVitalGu | null {
+  if (!isObj(x)) return null;
+  if (!isStr(x.name)) return null;
+  if (!isFiniteNum(x.rank) || !isFiniteNum(x.max)) return null;
+  return { name: x.name, rank: x.rank, max: x.max };
+}
+
+function normTrial(x: unknown): ApertureTrial | null {
+  if (!isObj(x)) return null;
+  if (!isStr(x.name)) return null;
+  if (!isNonEmptyStr(x.tier) || !isNonEmptyStr(x.state)) return null;
+  const { opened, date, provisioned } = x;
+  if (opened !== undefined && !isStr(opened)) return null;
+  if (date !== undefined && date !== null && !isStr(date)) return null;
+  if (provisioned !== undefined && typeof provisioned !== "boolean")
+    return null;
+  return {
+    name: x.name,
+    tier: x.tier,
+    state: x.state,
+    ...(opened !== undefined ? { opened } : {}),
+    ...(date !== undefined ? { date } : {}),
+    ...(provisioned !== undefined ? { provisioned } : {}),
+  };
+}
+
+function normBreakthrough(x: unknown): ApertureBreakthrough | null {
+  if (!isObj(x)) return null;
+  if (!isStr(x.wall) || !isStr(x.event)) return null;
+  const routes = normArray(x.routes, (v) => (isStr(v) ? v : null));
+  if (routes === null) return null;
+  const recentStrikes = normRecord(x.recentStrikes, (v) =>
+    isFiniteNum(v) ? v : null,
+  );
+  if (recentStrikes === null) return null;
+  return { wall: x.wall, event: x.event, routes, recentStrikes };
+}
+
+function normSealed(x: unknown): ApertureSealed | null {
+  if (!isObj(x)) return null;
+  const streaks = normRecord(x.streaks, normStreak);
+  const conditions = normArray(x.conditions, normCondition);
+  const paths = normArray(x.paths, normPath);
+  const trials = normArray(x.trials, normTrial);
+  const breakthrough = normBreakthrough(x.breakthrough);
+  if (!streaks || !conditions || !paths || !trials || !breakthrough)
+    return null;
+  // Absent optional → stays absent; PRESENT-but-malformed → hard reject.
+  const vitalGu = x.vitalGu === undefined ? undefined : normVitalGu(x.vitalGu);
+  if (vitalGu === null) return null;
+  return {
+    streaks,
+    conditions,
+    paths,
+    ...(vitalGu !== undefined ? { vitalGu } : {}),
+    trials,
+    breakthrough,
+  };
+}
+
+/**
+ * A decrypted aperture blob → a document, or null when the FRAME is wrong. Only
+ * `v === 1` exists, so any other version is a hard reject — there is no widening
+ * branch to fall back to yet. Unknown keys are dropped by rebuilding the document
+ * field for field at every level (the anti-smuggling discipline `normalizeKeystore`
+ * uses): nothing a compromised store bolts on can ride into the panel. Never throws.
+ */
+export function normalizeAperture(x: unknown): ApertureDoc | null {
+  if (!isObj(x) || x.v !== 1 || !isInstant(x.sealedAt)) return null;
+  const pub = normPublic(x.public);
+  const sealed = normSealed(x.sealed);
+  if (!pub || !sealed) return null;
+  return { v: 1, sealedAt: x.sealedAt, public: pub, sealed };
+}
+
+/**
+ * The plaintext glance blob → a glance, or null on a wrong frame. Same rebuild
+ * discipline as the sealed document; the badge draws from this alone before any
+ * unlock, so a malformed glance must render nothing rather than a broken badge.
+ */
+export function normalizeApertureGlance(x: unknown): ApertureGlance | null {
+  if (!isObj(x) || x.v !== 1 || !isInstant(x.sealedAt)) return null;
+  if (!isPosInt(x.rank) || !isNonEmptyStr(x.stage)) return null;
+  return { v: 1, sealedAt: x.sealedAt, rank: x.rank, stage: x.stage };
+}
+
+// --- essence canon (colour is DERIVED from rank + stage, NEVER stored) --------
+
+/** The five mortal ranks — each has four stages. */
+export type MortalRank = 1 | 2 | 3 | 4 | 5;
+/** The four immortal ranks — above the mortal ceiling there are no stages. */
+export type ImmortalRank = 6 | 7 | 8 | 9;
+
+/**
+ * Mortal essence colour by rank and stage. Typed as a TOTAL record over both
+ * vocabularies, so a missing cell is a tsc error, never an `undefined` the panel
+ * would draw as a blank swatch. Nothing stores a colour beside a rank — the pair
+ * (rank, stage) is the only truth and the colour is looked up from it.
+ */
+export const MORTAL_ESSENCE: Record<
+  MortalRank,
+  Record<ApertureStage, string>
+> = {
+  1: {
+    initial: "Jade Green",
+    middle: "Pale Green",
+    upper: "Dark Green",
+    peak: "Black Green",
+  },
+  2: {
+    initial: "Light Red",
+    middle: "Scarlet",
+    upper: "Crimson",
+    peak: "Dark Red",
+  },
+  3: {
+    initial: "Light Silver",
+    middle: "Blossom Silver",
+    upper: "Bright Silver",
+    peak: "Snow Silver",
+  },
+  4: {
+    initial: "Light Gold",
+    middle: "Bright Gold",
+    upper: "Essence Gold",
+    peak: "True Gold",
+  },
+  5: {
+    initial: "Light Purple",
+    middle: "Violet",
+    upper: "Deep Purple",
+    peak: "Crystal Purple",
+  },
+};
+
+/** Immortal essence colour by rank. Stageless by canon — one colour per rank. */
+export const IMMORTAL_ESSENCE: Record<ImmortalRank, string> = {
+  6: "Green Grape",
+  7: "Red Date",
+  8: "White Litchi",
+  9: "Yellow Apricot",
+};
+
+function isMortalRank(x: number): x is MortalRank {
+  return Number.isInteger(x) && x >= 1 && x <= 5;
+}
+function isImmortalRank(x: number): x is ImmortalRank {
+  return Number.isInteger(x) && x >= 6 && x <= 9;
+}
+
+/**
+ * The canon essence colour for a rank (and, below the immortal line, a stage).
+ * An immortal rank IGNORES the stage entirely — it has none. Null means "no canon
+ * entry": the caller renders the literal rank/stage muted rather than inventing a
+ * colour, which is also what happens the day the emitter ships a rank ahead of us.
+ */
+export function essenceOf(rank: number, stage?: string | null): string | null {
+  if (isImmortalRank(rank)) return IMMORTAL_ESSENCE[rank];
+  if (!isMortalRank(rank) || !isApertureStage(stage)) return null;
+  return MORTAL_ESSENCE[rank][stage];
+}
+
+// --- freshness dots (the ONLY two site-side judgements; clock injected) -------
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether raw journal activity has run ≥2 days past the seal — the adjudication
+ * dot. FLAG, NEVER RESOLVE: it says the sealed picture is behind the raw days, it
+ * does NOT guess what those days would have decided. `latestRawDay` is the newest
+ * raw activity day (`YYYY-MM-DD`, which parses as UTC midnight); null means there
+ * is no raw activity to be behind. Anything unparseable is false — a broken date
+ * must never light a dot.
+ */
+export function isAdjudicationPending(
+  sealedAt: string,
+  latestRawDay: string | null,
+): boolean {
+  if (latestRawDay === null) return false;
+  const sealed = Date.parse(sealedAt);
+  const raw = Date.parse(latestRawDay);
+  if (!Number.isFinite(sealed) || !Number.isFinite(raw)) return false;
+  return raw - sealed >= 2 * DAY_MS;
+}
+
+/**
+ * Whether the seal itself is older than 9 days — the staleness dot. Strictly
+ * greater, so a seal exactly 9 days old is still fresh. `nowMs` is injected (this
+ * module owns no clock); an unparseable `sealedAt` is false, never a lit dot.
+ */
+export function isSealStale(sealedAt: string, nowMs: number): boolean {
+  const sealed = Date.parse(sealedAt);
+  if (!Number.isFinite(sealed)) return false;
+  return nowMs - sealed > 9 * DAY_MS;
+}
