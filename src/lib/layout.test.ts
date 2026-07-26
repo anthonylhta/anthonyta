@@ -25,15 +25,12 @@ const cfg = (o: Partial<LayoutConfig> = {}): LayoutConfig => ({
  *  that only speak when something is due or something is down. */
 const TODAY_DEFAULT = [
   "weather",
-  "steps",
   "transit-next",
   "vault-today",
   "todo",
   "briefing",
   "hand",
   "mortal",
-  "networth",
-  "week",
   "chores",
   "health",
 ];
@@ -126,25 +123,26 @@ describe("normalizeLayout", () => {
         lobby: [],
         center: ["tft", "totp", "aperture", "briefing"],
         lobbyOrder: [],
-        centerOrder: ["briefing-hand", "aperture", "week", "totp"],
+        centerOrder: ["briefing-hand", "aperture", "chores", "totp"],
       }),
-    ).toEqual(cfg({ center: ["briefing"], centerOrder: ["week"] }));
+    ).toEqual(cfg({ center: ["briefing"], centerOrder: ["chores"] }));
   });
 
-  it("round-trips a week-era config — the module outlived its zone", () => {
-    // `week`'s zone is gone (its digest dissolves into the paths band), but the
-    // MODULE key is unchanged, so an owner who hid the digest still has it hidden.
+  it("degrades a pre-shell config — three units left the sheet at once", () => {
+    // The guide shell retired three TODAY units together: the `week` digest
+    // dissolved into the paths band's evidence strips, `steps` became the body
+    // path's evidence, and `networth` became the wealth path's. An owner's config
+    // that hides or orders any of them predates all three, and must read clean
+    // rather than 400 the /system panel — the whole point of dropping unknown keys.
     expect(
       normalizeLayout({
         v: 2,
         lobby: [],
-        center: ["week", "chores"],
+        center: ["week", "steps", "networth", "chores"],
         lobbyOrder: [],
-        centerOrder: ["week", "health"],
+        centerOrder: ["week", "networth", "health"],
       }),
-    ).toEqual(
-      cfg({ center: ["week", "chores"], centerOrder: ["week", "health"] }),
-    );
+    ).toEqual(cfg({ center: ["chores"], centerOrder: ["health"] }));
   });
 
   it("dedupes repeated keys", () => {
@@ -204,7 +202,7 @@ describe("orderedUnits", () => {
 
   it("keeps the fixed dropbox pinned at the front regardless of order", () => {
     const keys = orderedUnits(
-      cfg({ centerOrder: ["health", "week"] }),
+      cfg({ centerOrder: ["health", "chores"] }),
       "center",
     ).map((u) => u.key);
     expect(keys[0]).toBe("dropbox");
@@ -225,7 +223,7 @@ describe("moveUnit + canMove", () => {
   it("moves a unit down within its zone", () => {
     const c = moveUnit(EMPTY_LAYOUT, "center", "weather", 1);
     expect(orderedUnitsInZone(c, "center", "today").map((u) => u.key)).toEqual([
-      "steps",
+      "transit-next",
       "weather",
       ...TODAY_DEFAULT.slice(2),
     ]);

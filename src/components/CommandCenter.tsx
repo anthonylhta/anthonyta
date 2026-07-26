@@ -1,23 +1,18 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
-import { ApertureBand } from "@/components/ApertureBand";
+import { ApertureMasthead } from "@/components/ApertureMasthead";
 import { SignOut } from "@/components/auth-buttons";
 import { ChoresRow } from "@/components/ChoresRow";
 import { DropInbox } from "@/components/DropInbox";
-import { JournalActivityRow } from "@/components/JournalActivityRow";
-import { NetWorthGlance } from "@/components/NetWorthGlance";
-import { ActivityStrip } from "@/components/terminal/ActivityStrip";
+import { GuideSealed, type GuideEvidence } from "@/components/GuideSealed";
+import { JournalPulse } from "@/components/JournalPulse";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { TodoGlance } from "@/components/TodoGlance";
 import { TransitGlance } from "@/components/TransitGlance";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
-import {
-  ACTIVITY_DAYS,
-  dailyCounts,
-  dailyDeltas,
-  toLevels,
-} from "@/lib/activity";
+import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
 import { getApertureGlance } from "@/lib/connectors/aperture";
 import { getBriefing } from "@/lib/connectors/briefing";
@@ -38,17 +33,13 @@ import {
   sydneyDaysAgo,
   type SnapIndexDay,
 } from "@/lib/fin";
+import { mortalSegments } from "@/lib/apertureview";
 import {
   hiddenSet,
   orderedUnitsInZone,
   type Zone as CenterZone,
 } from "@/lib/layout";
-import {
-  commas,
-  STEPS_STRIP_DAYS,
-  stepsForDay,
-  trailingSeries,
-} from "@/lib/steps";
+import { stepsForDay, trailingSeries } from "@/lib/steps";
 import { uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing } from "@/lib/sampleBriefing";
@@ -86,26 +77,31 @@ async function dropCount(): Promise<number> {
   }
 }
 
-/** The zones this page renders, top to bottom, and the divider each one gets. The
- *  sheet's three status bands are deliberately UNLABELLED for now: their chrome
- *  arrives with the shell, and a header over a single bridged band would announce
- *  a structure that isn't built yet. */
+/** The zones this page renders on the SERVER, top to bottom, with the divider each
+ *  one gets. Only TODAY is here: the sheet's three status bands all live in one
+ *  sealed envelope, so they are drawn by the client island below — which consumes
+ *  the very same registry through its `sections` prop, so hiding or reordering a
+ *  band in /system still works exactly as it does for a row down here. */
 const ZONES: { zone: CenterZone; label?: string; right?: () => string }[] = [
-  { zone: "wall" },
-  { zone: "paths" },
-  { zone: "trials" },
   { zone: "today", label: "today", right: todayLabel },
 ];
 
+/** The sheet's sealed bands, in render order — the zones whose units the island
+ *  draws rather than the server loop. */
+const SEALED_ZONES: CenterZone[] = ["wall", "paths", "trials"];
+
 /**
  * Your private daily driver — what `/` becomes when you're logged in (ADR 0004).
- * The zones come from the layout registry (roadmap 59) and render in its order:
- * the wall being worked, the paths, the trials, then TODAY — the day's rows and
- * the exception rows that only speak when something is due or down.
+ * The page IS the character sheet: the rank masthead, then the wall being worked,
+ * the conditions holding it open, the paths and their evidence, the trials — then
+ * TODAY, the day's rows plus the exception rows that only speak when something is
+ * due or down.
  *
- * MID-REDESIGN: the three status bands hold only the v1 aperture band (bridged
- * onto the `aperture-wall` unit) and the activity digest still renders as the
- * `week` unit at the end of TODAY. Both are temporary — the shell replaces them.
+ * The hierarchy is inverted from the old dashboard on purpose. Nothing on this page
+ * is a "module" reporting a number any more; every band answers the same question
+ * (what advances the pursuit), and the day's logistics come last because they are
+ * the least of it. The one figure that used to headline the page — net worth — is
+ * now the wealth path's evidence, where it means something.
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
@@ -146,14 +142,15 @@ export async function CommandCenter({ userName }: { userName: string }) {
   const hidden = hiddenSet(layout, "center");
 
   // Steps (roadmap: the daily section) — plaintext, server-rendered off the phone's
-  // daily push; today's count + a trailing fortnight strip. `null` today = nothing
-  // posted yet (the honest empty state).
+  // daily push. It is the evidence of whichever path declares it now, rather than a
+  // row of its own, so its strip runs the same ten weeks as every other strip in the
+  // band. `null` today = nothing posted yet (the honest empty state, a dash).
   const stepsToday = stepsForDay(steps, today);
-  const stepsLevels = toLevels(trailingSeries(steps, STEPS_STRIP_DAYS, today));
+  const stepsLevels = toLevels(trailingSeries(steps, ACTIVITY_DAYS, today));
 
-  // Reading week-over-week + trend now ride the sealed reading index (the cron's
-  // plaintext day series), not the retired snapshot store. A store miss or a bad
-  // shape → no days → the row's own "tracking…" fallback.
+  // Reading week-over-week rides the sealed reading index (the cron's plaintext day
+  // series), not the retired snapshot store. A store miss or a bad shape → no days →
+  // no baseline → the mortal row drops its reading segment rather than reading zero.
   let indexDays: SnapIndexDay[] = [];
   if (indexRead.state === "ok") {
     try {
@@ -170,55 +167,24 @@ export async function CommandCenter({ userName }: { userName: string }) {
       ? readingChapters - readingBaseline.readingChapters
       : null;
 
-  // THIS WEEK rows — number = this week, strip = the trailing ~10-week trend.
-  // riichi reads `puzzle_results` (the same table its app's streak uses), so its
-  // solve history + real streak are live now (ADR 0046, was deferred under 0007/0044).
-  const readingSeries = indexDays.map((d) => ({
-    date: d.date,
-    value: d.readingChapters,
-  }));
-  const rows: { k: string; value: ReactNode; levels: number[] }[] = [
-    {
-      k: "commits",
-      value: <span className="text-amber">+{gh.thisWeek}</span>,
+  // Path evidence — the trailing ten weeks each path's declared series draws, plus
+  // the one number beside it. Keyed by the names `paths[].activity` uses, so a path
+  // pointing at a series the sheet doesn't carry gets silence, not empty chrome.
+  const evidence: GuideEvidence = {
+    commits: {
       levels: toLevels(gh.daily.slice(-ACTIVITY_DAYS)),
+      value: gh.thisWeek,
     },
-    {
-      k: "reading",
-      value:
-        readingDelta !== null ? (
-          <span>
-            <span className="text-amber">
-              {readingDelta >= 0 ? "+" : ""}
-              {readingDelta}
-            </span>{" "}
-            ch
-          </span>
-        ) : (
-          <span className="text-muted">tracking…</span>
-        ),
-      levels: toLevels(dailyDeltas(readingSeries, ACTIVITY_DAYS, today)),
-    },
-    {
-      k: "languages",
-      value: <span className="text-amber">+{lang.thisWeek}</span>,
-      levels: toLevels(lang.activity),
-    },
-    {
-      k: "riichi",
-      value: (
-        <span>
-          streak <span className="text-amber">{riichi.currentStreak}</span>
-        </span>
-      ),
-      levels: toLevels(riichi.activity),
-    },
-    {
-      k: "tft",
-      value: <span className="text-amber">+{tft.gamesThisWeek}</span>,
-      levels: toLevels(dailyCounts(tft.matchDates, ACTIVITY_DAYS, today)),
-    },
-  ];
+    languages: { levels: toLevels(lang.activity), value: lang.thisWeek },
+    steps: { levels: stepsLevels, value: stepsToday },
+  };
+
+  // The sealed bands the island should draw: the visible aperture units of the three
+  // sealed zones, in the owner's configured order. The registry stays the one source
+  // of truth for hiding and ordering — the island only obeys this list.
+  const sections = SEALED_ZONES.flatMap((zone) =>
+    orderedUnitsInZone(layout, "center", zone).map((u) => u.key),
+  ).filter((key) => !hidden.has(key));
 
   // Each command-center module keyed by its layout UNIT key so the zones can
   // render in the owner's configured order (roadmap 59). The values are the
@@ -230,16 +196,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
       !hidden.has("dropbox") && drops > 0 ? (
         <DropInbox offline={!r2Enabled()} count={drops} />
       ) : null,
-
-    /* aperture — the private status band. The ONE deliberate standing block
-       (ADR 0109's exception-only rule acknowledged): the status display IS the
-       reminder surface, so it has no quiet state to hide in. Rank + stage are
-       server-rendered off the plaintext glance; the rest is a vault island.
-       BRIDGE: the v1 band hangs on the `aperture-wall` unit until the shell
-       splits it into the wall, conditions, paths and trials bands. */
-    "aperture-wall": !hidden.has("aperture-wall") ? (
-      <ApertureBand glance={aperture} offline={!r2Enabled()} />
-    ) : null,
 
     /* the morning glance rows (roadmap 50+51): Sydney weather is public
        data server-rendered off the keyless Open-Meteo connector; the
@@ -269,32 +225,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
       </div>
     ) : null,
 
-    /* steps — the daily count off the phone's plaintext push (Samsung Health →
-       Health Connect); today's number + a trailing 14-day strip. Exception-only:
-       with nothing pushed yet there's no row at all rather than an empty state,
-       and a today-less strip reads as a muted dash. */
-    steps:
-      !hidden.has("steps") &&
-      (stepsToday !== null || stepsLevels.some((l) => l > 0)) ? (
-        <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-          <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-            steps
-          </span>
-          <span className="min-w-0 flex-1 text-fg/90">
-            {stepsToday !== null ? (
-              <span className="tabular-nums text-fg">{commas(stepsToday)}</span>
-            ) : (
-              <span className="text-muted">—</span>
-            )}
-          </span>
-          {stepsLevels.some((l) => l > 0) && (
-            <span className="w-24 shrink-0">
-              <ActivityStrip levels={stepsLevels} label="steps, last 14 days" />
-            </span>
-          )}
-        </div>
-      ) : null,
-
     "transit-next": !hidden.has("transit-next") ? (
       <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
         <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
@@ -303,24 +233,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
         <span className="min-w-0 flex-1">
           <TransitGlance offline={!r2Enabled()} />
         </span>
-      </div>
-    ) : null,
-
-    /* net worth — a glance; full holdings + cash live on /portfolio. The
-       numbers are a client island: everything rides the E2EE fin envelope
-       (ADR 0061) and decrypts in the browser — sealed dots until unlocked. */
-    networth: !hidden.has("networth") ? (
-      <div className="border-b border-hairline px-4 py-4">
-        <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-muted">
-          <span>net worth</span>
-          <Link
-            href="/portfolio"
-            className="normal-case tracking-normal text-amber hover:underline"
-          >
-            portfolio →
-          </Link>
-        </div>
-        <NetWorthGlance offline={!r2Enabled()} />
       </div>
     ) : null,
 
@@ -391,20 +303,31 @@ export async function CommandCenter({ userName }: { userName: string }) {
       </div>
     ) : null,
 
-    week: !hidden.has("week") ? (
-      <div className="px-4 py-2">
-        {rows.map((r) => (
-          <ActivityRow
-            key={r.k}
-            k={r.k}
-            value={r.value}
-            levels={r.levels}
-            last={false}
-          />
-        ))}
-        {/* journal — a client island (the count + trend come from the sealed
-              vault index), always the final, borderless row. */}
-        <JournalActivityRow offline={!r2Enabled()} today={today} />
+    /* mortal — the day's small pursuits in one muted line. What's left of the
+       retired activity digest: the domains that answer to no path (games, the
+       reading count, the raw journal days) still deserve a pulse, but they no
+       longer get a row and a trend strip each. The journal segment is a client
+       island; it draws its own leading separator so it can vanish while sealed
+       without leaving a dangling "·". */
+    mortal: !hidden.has("mortal") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          mortal
+        </span>
+        <span className="min-w-0 flex-1 text-xs tabular-nums text-muted">
+          {mortalSegments({
+            riichiStreak: riichi.currentStreak,
+            tftGames: tft.gamesThisWeek,
+            readingDelta,
+          }).map((s, i) => (
+            <Fragment key={s.label}>
+              {i > 0 && " · "}
+              {s.label} <span className="text-amber">{s.value}</span>
+              {s.unit && ` ${s.unit}`}
+            </Fragment>
+          ))}
+          <JournalPulse offline={!r2Enabled()} />
+        </span>
       </div>
     ) : null,
 
@@ -472,6 +395,22 @@ export async function CommandCenter({ userName }: { userName: string }) {
             messages left on /contact open here and nowhere else (ADR: sealed box). */}
         {centerNodes.dropbox}
 
+        {/* the rank, off the plaintext glance — fixed chrome, never a unit. */}
+        <ApertureMasthead glance={aperture} />
+
+        {/* the sealed sheet: four bands, one envelope, one decrypt. Mounted only
+            when there IS a rank to stand behind (no glance means nothing was ever
+            sealed, so there is nothing to unlock toward) and only when the owner has
+            left at least one of its bands visible. */}
+        {aperture && sections.length > 0 && (
+          <GuideSealed
+            sections={sections}
+            evidence={evidence}
+            today={today}
+            offline={!r2Enabled()}
+          />
+        )}
+
         {/* zones render from the owner's layout order (roadmap 59); the default
             order reproduces the hand-tuned layout. A zone's divider appears only
             when the zone actually has something to say — a band whose every unit
@@ -483,7 +422,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
           if (units.length === 0) return null;
           return (
             <Fragment key={zone}>
-              {label && <Zone label={label} right={right?.()} />}
+              {label && <ZoneHeader label={label} right={right?.()} />}
               {units.map((u) => (
                 <Fragment key={u.key}>{centerNodes[u.key]}</Fragment>
               ))}
@@ -548,46 +487,5 @@ export async function CommandCenter({ userName }: { userName: string }) {
         </div>
       </div>
     </main>
-  );
-}
-
-/** A zone divider — the band headers the sheet reads down. */
-function Zone({ label, right }: { label: string; right?: string }) {
-  return (
-    <div className="flex items-center justify-between border-b border-hairline bg-amber/[0.04] px-4 py-1.5">
-      <span className="text-[10px] uppercase tracking-[0.22em] text-amber/85">
-        ▍ {label}
-      </span>
-      {right && (
-        <span className="text-[11px] tabular-nums text-muted">{right}</span>
-      )}
-    </div>
-  );
-}
-
-/** One THIS WEEK row — a fixed key column, the week's number, and the trend strip. */
-function ActivityRow({
-  k,
-  value,
-  levels,
-  last,
-}: {
-  k: string;
-  value: ReactNode;
-  levels: number[];
-  last?: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-center gap-3 py-2 text-sm ${last ? "" : "border-b border-hairline/40"}`}
-    >
-      <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-        {k}
-      </span>
-      <span className="w-24 shrink-0 tabular-nums text-fg/90">{value}</span>
-      <span className="min-w-0 flex-1">
-        <ActivityStrip levels={levels} />
-      </span>
-    </div>
   );
 }

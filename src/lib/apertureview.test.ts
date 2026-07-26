@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   IMMORTAL_ESSENCE,
   MORTAL_ESSENCE,
+  isAdjudicationPending,
+  isSealStale,
   type AperturePath,
+  type ApertureCondition,
   type ApertureDoc,
   type ApertureTrial,
 } from "./aperture";
@@ -13,21 +16,30 @@ import {
   bandLine,
   conditionChipClass,
   conditionChipPrefix,
-  daysUntil,
+  conditionStatusWord,
+  conditionsSummary,
+  dayGap,
   detailStatus,
   essenceSwatchClass,
   essenceTextClass,
+  isImminent,
+  latestDailyDay,
+  mortalSegments,
+  pathEvidence,
   sealedAgo,
+  signedCount,
   splitTrials,
+  stageGlyphs,
   trialCountdown,
-  trialSchedule,
+  trialsSummary,
 } from "./apertureview";
 
-// These ARE the band + island's component tests. Nothing renders in this suite,
+// These ARE the masthead + island's component tests. Nothing renders in this suite,
 // because nothing in the components decides anything: the six island states, the
-// colour of every chip and the wording of every date are the functions below, so
-// testing them here is testing the UI itself (the money.tone / chores.choreState
-// discipline). Every fixture is invented — this repo is public.
+// colour of every chip, the wording of every date and every band's right-hand
+// summary are the functions below, so testing them here is testing the UI itself
+// (the money.tone / chores.choreState discipline). Every fixture is invented — this
+// repo is public.
 
 const NOW = Date.parse("2026-03-05T00:00:00Z");
 
@@ -130,12 +142,10 @@ describe("apertureview — condition chips", () => {
     "suspended",
   ];
 
-  it("gives each known status a chip class, five distinct tones", () => {
-    // Five, not six: `suspended` deliberately SHARES the neutral chip with
-    // `not_held` — see the never-red assertion below.
+  it("gives each known status a distinct chip class", () => {
     const classes = statuses.map(conditionChipClass);
     for (const c of classes) expect(c).toBeTruthy();
-    expect(new Set(classes).size).toBe(5);
+    expect(new Set(classes).size).toBe(6);
     expect(conditionChipClass("failing")).toBe("border-down/50 text-down");
     expect(conditionChipClass("held")).toContain("text-up");
     expect(conditionChipClass("hardened")).toContain("text-up");
@@ -143,11 +153,23 @@ describe("apertureview — condition chips", () => {
   });
 
   it("NEVER paints a suspended condition red — the tribulation exemption", () => {
-    // The rule as a test: a suspended condition was paused by the adjudicator,
-    // not broken by the owner. Red would say failure, every time, wrongly.
-    expect(conditionChipClass("suspended")).not.toContain("down");
-    expect(conditionChipClass("suspended")).toBe("border-hairline text-muted");
+    // The rule as a test: a suspended condition was paused by the adjudicator, not
+    // broken by the owner. Red would say failure, every time, wrongly. It is the one
+    // status that speaks in SHAPE instead — a dashed border and the ⏸ prefix — so
+    // its colour tokens are the neutral chip's, and nothing else.
+    const chip = conditionChipClass("suspended");
+    expect(chip).toBe("border-hairline border-dashed text-muted");
+    expect(chip).not.toContain("down");
+    expect(chip).not.toContain("up");
+    expect(chip).not.toContain("amber");
     expect(conditionChipPrefix("suspended")).toBe("⏸ ");
+  });
+
+  it("respells the one snake_case status and no other", () => {
+    expect(conditionStatusWord("not_held")).toBe("not held");
+    for (const s of statuses)
+      if (s !== "not_held") expect(conditionStatusWord(s)).toBe(s);
+    expect(conditionStatusWord("transcended")).toBe("transcended");
   });
 
   it("prefixes nothing else", () => {
@@ -165,7 +187,60 @@ describe("apertureview — condition chips", () => {
   });
 });
 
-describe("apertureview — ACTIVITY_SERIES", () => {
+describe("apertureview — conditionsSummary", () => {
+  const cond = (status: string): ApertureCondition => ({
+    id: status,
+    label: status,
+    status,
+    progress: 0,
+    target: 1,
+    unit: "days",
+  });
+
+  it("leads with the worst thing, at most two segments", () => {
+    // A header read before the chips are: leading with "2 hardening" while something
+    // is failing buries the only line worth acting on.
+    expect(
+      conditionsSummary(
+        ["hardening", "hardening", "not_held", "failing"].map(cond),
+      ),
+    ).toBe("1 failing · 2 hardening");
+    expect(
+      conditionsSummary(
+        ["hardening", "held", "failing", "suspended"].map(cond),
+      ),
+    ).toBe("1 failing · 1 suspended");
+    expect(conditionsSummary(["held", "hardened"].map(cond))).toBe(
+      "1 held · 1 hardened",
+    );
+  });
+
+  it("respells not_held and counts a single status alone", () => {
+    expect(conditionsSummary([cond("not_held")])).toBe("1 not held");
+    expect(conditionsSummary(["held", "held", "held"].map(cond))).toBe(
+      "3 held",
+    );
+  });
+
+  it("says nothing about no conditions", () => {
+    expect(conditionsSummary([])).toBe("");
+  });
+
+  it("sorts an unknown status last but still names it when there is room", () => {
+    // Abbreviating must never be how an unknown status disappears.
+    expect(conditionsSummary(["transcended", "held"].map(cond))).toBe(
+      "1 held · 1 transcended",
+    );
+    expect(conditionsSummary([cond("transcended")])).toBe("1 transcended");
+    // …and when the known statuses fill both slots, the summary stops rather than
+    // growing — the chips below still carry every condition.
+    expect(
+      conditionsSummary(["failing", "suspended", "transcended"].map(cond)),
+    ).toBe("1 failing · 1 suspended");
+  });
+});
+
+describe("apertureview — ACTIVITY_SERIES + pathEvidence", () => {
   // The cartographer's paths, as the sealed document would carry them: two that
   // name a series the sheet can draw, one that names a series it has never heard
   // of, one that claims none at all.
@@ -176,16 +251,28 @@ describe("apertureview — ACTIVITY_SERIES", () => {
     { name: "Winter provisioning" },
   ];
 
-  it("gives every series it draws a source and a caption", () => {
+  it("gives every series it draws a source, a caption, a mode and a unit", () => {
     for (const [key, s] of Object.entries(ACTIVITY_SERIES)) {
       expect(s?.source, `${key} source`).toBeTruthy();
       expect(s?.label, `${key} label`).toBeTruthy();
+      expect(["delta", "count"], `${key} mode`).toContain(s?.mode);
+      expect(typeof s?.unit, `${key} unit`).toBe("string");
     }
+    // The two readings the band actually needs: a week's movement, and a day's count.
+    expect(ACTIVITY_SERIES["commits"]?.mode).toBe("delta");
+    expect(ACTIVITY_SERIES["steps"]?.mode).toBe("count");
+    // A number that speaks for itself takes no unit — the strip's caption says it.
+    expect(ACTIVITY_SERIES["languages"]?.unit).toBe("");
   });
 
   it("resolves the series a path names", () => {
     expect(ACTIVITY_SERIES[paths[0].activity ?? ""]?.source).toBe("github");
     expect(ACTIVITY_SERIES[paths[1].activity ?? ""]?.source).toBe("translator");
+    expect(pathEvidence(paths[0])).toEqual({
+      kind: "strip",
+      key: "commits",
+      series: ACTIVITY_SERIES["commits"],
+    });
   });
 
   it("misses on a series this build has never heard of — no strip, no crash", () => {
@@ -193,10 +280,26 @@ describe("apertureview — ACTIVITY_SERIES", () => {
     // can attach any series it likes and the path still renders, bare.
     expect(ACTIVITY_SERIES[paths[2].activity ?? ""]).toBeUndefined();
     expect(ACTIVITY_SERIES[paths[3].activity ?? ""]).toBeUndefined();
+    expect(pathEvidence(paths[2])).toBeNull();
+    expect(pathEvidence(paths[3])).toBeNull();
     // Including the names every plain object inherits — the null prototype is
     // what makes those a miss instead of a function posing as a descriptor.
     expect(ACTIVITY_SERIES["toString"]).toBeUndefined();
     expect(ACTIVITY_SERIES["constructor"]).toBeUndefined();
+    expect(pathEvidence({ name: "Ledger", activity: "toString" })).toBeNull();
+  });
+
+  it("gives the wealth path the figure, declared or merely named", () => {
+    // The one path recognised by NAME as well as by declaration: its figure comes
+    // from the hub's own sealed envelope either way, so the row shows the money
+    // whether or not the document thought to point at it.
+    expect(pathEvidence({ name: "Wealth" })).toEqual({ kind: "wealth" });
+    expect(pathEvidence({ name: "Coin", activity: "wealth" })).toEqual({
+      kind: "wealth",
+    });
+    expect(pathEvidence({ name: " wealth " })).toEqual({ kind: "wealth" });
+    // …and it does not swallow a path that merely mentions it.
+    expect(pathEvidence({ name: "Wealth of the guild" })).toBeNull();
   });
 
   it("is frozen — a table, not state", () => {
@@ -204,33 +307,36 @@ describe("apertureview — ACTIVITY_SERIES", () => {
   });
 });
 
-describe("apertureview — daysUntil + trialSchedule", () => {
-  it("rounds a countdown up and goes negative once past", () => {
-    expect(daysUntil("2026-03-05T00:00:00Z", NOW)).toBe(0);
-    expect(daysUntil("2026-03-05T12:00:00Z", NOW)).toBe(1);
-    expect(daysUntil("2026-04-15T00:00:00Z", NOW)).toBe(41);
-    expect(daysUntil("2026-03-01T00:00:00Z", NOW)).toBe(-4);
-    expect(daysUntil("whenever", NOW)).toBeNull();
+describe("apertureview — signedCount", () => {
+  it("always signs a movement, including a flat week", () => {
+    expect(signedCount(12)).toBe("+12");
+    expect(signedCount(0)).toBe("+0");
+    expect(signedCount(-3)).toBe("-3");
+  });
+});
+
+describe("apertureview — dayGap + isImminent", () => {
+  const TODAY = "2026-03-05";
+
+  it("counts whole calendar days either side of today", () => {
+    expect(dayGap("2026-03-05", TODAY)).toBe(0);
+    expect(dayGap("2026-03-05T23:30:00Z", TODAY)).toBe(0);
+    expect(dayGap("2026-03-08", TODAY)).toBe(3);
+    expect(dayGap("2026-03-01", TODAY)).toBe(-4);
+    expect(dayGap("whenever", TODAY)).toBeNull();
+    expect(dayGap("2026-03-08", "whenever")).toBeNull();
   });
 
-  it("calls a date-less trial unscheduled", () => {
-    expect(trialSchedule(null, NOW)).toBe("unscheduled");
-    expect(trialSchedule(undefined, NOW)).toBe("unscheduled");
-  });
-
-  it("counts down to a future date", () => {
-    expect(trialSchedule("2026-04-15", NOW)).toBe("in 41d");
-    // The boundary: tomorrow reads "in 1d", never "in 0d".
-    expect(trialSchedule("2026-03-06", NOW)).toBe("in 1d");
-  });
-
-  it("shows a resolved trial's own date instead of a countdown", () => {
-    expect(trialSchedule("2026-03-05", NOW)).toBe("2026-03-05");
-    expect(trialSchedule("2026-01-19", NOW)).toBe("2026-01-19");
-  });
-
-  it("passes an unparseable date through as the literal", () => {
-    expect(trialSchedule("some winter", NOW)).toBe("some winter");
+  it("calls today and the coming week imminent, and nothing else", () => {
+    expect(isImminent(TODAY, TODAY)).toBe(true);
+    expect(isImminent("2026-03-08", TODAY)).toBe(true);
+    expect(isImminent("2026-03-12", TODAY)).toBe(true); // the 7th day
+    expect(isImminent("2026-03-13", TODAY)).toBe(false); // the 8th
+    // A date already gone by is LATE, which the row says in words, not in amber.
+    expect(isImminent("2026-03-04", TODAY)).toBe(false);
+    expect(isImminent(null, TODAY)).toBe(false);
+    expect(isImminent(undefined, TODAY)).toBe(false);
+    expect(isImminent("some winter", TODAY)).toBe(false);
   });
 });
 
@@ -297,6 +403,159 @@ describe("apertureview — splitTrials", () => {
   });
 });
 
+describe("apertureview — trialsSummary", () => {
+  const TODAY = "2026-03-05";
+  const dated = (
+    name: string,
+    state: string,
+    date: string | null,
+  ): ApertureTrial => ({ name, tier: "earthly", state, date });
+
+  it("counts the states plainly when nothing is close", () => {
+    expect(
+      trialsSummary(
+        [
+          dated("Deep sounding", "active", null),
+          dated("Ridge survey", "stocked", null),
+        ],
+        TODAY,
+      ),
+    ).toBe("1 active · 1 stocked");
+    expect(trialsSummary([dated("Deep sounding", "active", null)], TODAY)).toBe(
+      "1 active",
+    );
+  });
+
+  it("lets a single imminent stocked trial read AS its countdown", () => {
+    // With one there is nothing to count — the countdown is the whole news.
+    expect(
+      trialsSummary(
+        [
+          dated("Deep sounding", "active", null),
+          dated("Ridge survey", "stocked", "2026-03-08"),
+        ],
+        TODAY,
+      ),
+    ).toBe("1 active · 1 in 3 days");
+  });
+
+  it("keeps the count and names the nearest when several are stocked", () => {
+    expect(
+      trialsSummary(
+        [
+          dated("Ridge survey", "stocked", "2026-03-09"),
+          dated("Star reckoning", "stocked", "2026-03-07"),
+        ],
+        TODAY,
+      ),
+    ).toBe("2 stocked · next in 2 days");
+  });
+
+  it("ignores a distant or a passed date", () => {
+    expect(
+      trialsSummary([dated("Ridge survey", "stocked", "2026-06-01")], TODAY),
+    ).toBe("1 stocked");
+    // Late, not upcoming — the row says so in words; the header just counts it.
+    expect(
+      trialsSummary([dated("Ridge survey", "stocked", "2026-02-01")], TODAY),
+    ).toBe("1 stocked");
+    expect(
+      trialsSummary([dated("Ridge survey", "stocked", "some winter")], TODAY),
+    ).toBe("1 stocked");
+  });
+
+  it("tallies a state it has never heard of as open rather than losing it", () => {
+    expect(
+      trialsSummary(
+        [
+          dated("Deep sounding", "active", null),
+          dated("Star reckoning", "deferred", null),
+        ],
+        TODAY,
+      ),
+    ).toBe("1 active · 1 open");
+  });
+
+  it("says nothing about no open trials", () => {
+    expect(trialsSummary([], TODAY)).toBe("");
+  });
+});
+
+describe("apertureview — stageGlyphs", () => {
+  it("renders the rank numeral and the stage glyph", () => {
+    expect(stageGlyphs(1, "initial")).toBe("一转·初期");
+    expect(stageGlyphs(3, "upper")).toBe("三转·后期");
+    expect(stageGlyphs(5, "peak")).toBe("五转·巅峰");
+    expect(stageGlyphs(2, "middle")).toBe("二转·中期");
+  });
+
+  it("keeps the rank alone when the stage means nothing here", () => {
+    // Immortal ranks are stageless by canon, and a newer emitter's stage is a word
+    // this build has no glyph for — both leave the numeral standing on its own.
+    expect(stageGlyphs(7, "")).toBe("七转");
+    expect(stageGlyphs(6, "transcendent")).toBe("六转");
+    expect(stageGlyphs(1, "INITIAL")).toBe("一转"); // the vocabulary is lowercase
+  });
+
+  it("renders nothing for a rank outside the canon's nine numerals", () => {
+    // Decoration is allowed to say less than the line above it, never more.
+    expect(stageGlyphs(10, "initial")).toBeNull();
+    expect(stageGlyphs(0, "initial")).toBeNull();
+    expect(stageGlyphs(-1, "initial")).toBeNull();
+    expect(stageGlyphs(1.5, "initial")).toBeNull();
+    expect(stageGlyphs(Number.NaN, "initial")).toBeNull();
+  });
+});
+
+describe("apertureview — mortalSegments", () => {
+  it("reads the day's small pursuits in order", () => {
+    expect(
+      mortalSegments({ riichiStreak: 4, tftGames: 3, readingDelta: 9 }),
+    ).toEqual([
+      { label: "riichi streak", value: "4" },
+      { label: "tft", value: "+3" },
+      { label: "reading", value: "+9", unit: "ch" },
+    ]);
+  });
+
+  it("drops the reading segment rather than inventing a zero", () => {
+    // No baseline to diff against yet — a "+0" the site made up is worse than a
+    // shorter line.
+    expect(
+      mortalSegments({ riichiStreak: 0, tftGames: 0, readingDelta: null }),
+    ).toEqual([
+      { label: "riichi streak", value: "0" },
+      { label: "tft", value: "+0" },
+    ]);
+  });
+
+  it("signs a negative reading delta", () => {
+    expect(
+      mortalSegments({ riichiStreak: 11, tftGames: 1, readingDelta: -2 })[2],
+    ).toEqual({ label: "reading", value: "-2", unit: "ch" });
+  });
+});
+
+describe("apertureview — latestDailyDay", () => {
+  it("finds the newest day-titled note and ignores every other title", () => {
+    expect(
+      latestDailyDay([
+        "2026-03-01",
+        "Harbour survey notes",
+        "2026-03-04",
+        "2026-02-28",
+      ]),
+    ).toBe("2026-03-04");
+  });
+
+  it("returns null when no title is a day", () => {
+    expect(latestDailyDay([])).toBeNull();
+    expect(
+      latestDailyDay(["Harbour survey notes", "2026-3-4", "20260304"]),
+    ).toBeNull();
+  });
+});
+
 describe("apertureview — bandLine + sealedAgo", () => {
   it("uppercases the stage, known or not", () => {
     expect(
@@ -326,5 +585,241 @@ describe("apertureview — bandLine + sealedAgo", () => {
 
   it("shows no age at all for an unparseable seal", () => {
     expect(sealedAgo("whenever", NOW)).toBeNull();
+  });
+});
+
+/**
+ * The sheet in its three states, as the island would read them. Two whole documents
+ * — a quiet week and a loud one — driven through every function the four bands call,
+ * so a change to one summary's rule shows up here as the sheet reading differently
+ * rather than as a passing unit test somewhere else. Both are the same invented
+ * cartographer as aperture.test.ts, at the same rank.
+ */
+const CARTOGRAPHER_TODAY = "2026-03-05";
+
+/** A quiet week: two streaks hardening, one condition failing quietly, nothing due. */
+const quiet: ApertureDoc = {
+  v: 1,
+  sealedAt: "2026-03-03T09:00:00+11:00",
+  public: { rank: 3, stage: "upper" },
+  sealed: {
+    streaks: {
+      logbook: { count: 12, target: 60, state: "hardening" },
+      ledger: { count: 6, target: 12, state: "hardening" },
+    },
+    conditions: [
+      {
+        id: "K1",
+        label: "Logbook ≥60d",
+        status: "hardening",
+        progress: 12,
+        target: 60,
+        unit: "days",
+      },
+      {
+        id: "K2",
+        label: "Ledger ≥12w",
+        status: "hardening",
+        progress: 6,
+        target: 12,
+        unit: "weeks",
+      },
+      {
+        id: "K3",
+        label: "Stores ≥3mo",
+        status: "not_held",
+        progress: 0,
+        target: 3,
+        unit: "months",
+      },
+      {
+        id: "K4",
+        label: "Drill 4×/wk",
+        status: "failing",
+        progress: 2,
+        target: 16,
+        unit: "sessions",
+      },
+    ],
+    paths: [
+      {
+        name: "Smithing",
+        role: "main",
+        attainment: "ordinary",
+        note: "tempering",
+        activity: "commits",
+      },
+      { name: "Wealth", role: "2nd", attainment: "ordinary" },
+      { name: "Lodestone survey", role: "prot.", activity: "steps" },
+      {
+        name: "Cartography",
+        role: "latent",
+        sub: [
+          {
+            name: "Star charts",
+            attainment: "quasi-master",
+            verified: true,
+            activity: "languages",
+          },
+        ],
+      },
+    ],
+    vitalGu: { name: "Lodestone", rank: 1, max: 5 },
+    trials: [
+      {
+        name: "Charter defence",
+        tier: "heavenly",
+        state: "active",
+        opened: "2026-01-12",
+      },
+      { name: "Ridge survey", tier: "earthly", state: "stocked", date: null },
+      {
+        name: "Winter crossing",
+        tier: "earthly",
+        state: "passed",
+        date: "2026-01-19",
+      },
+      {
+        name: "Harbour rites",
+        tier: "earthly",
+        state: "failed",
+        date: "2025-11-02",
+      },
+    ],
+    breakthrough: {
+      wall: "3 → 4",
+      event: "first craft-earned essence",
+      routes: ["signed charter", "first paid commission"],
+      recentStrikes: { petitions: 0, commissions: 1 },
+    },
+  },
+};
+
+/** A loud week: a condition suspended under exemption, a trial three days out. */
+const loud: ApertureDoc = {
+  ...quiet,
+  sealedAt: "2026-02-22T09:00:00+11:00",
+  sealed: {
+    ...quiet.sealed,
+    conditions: [
+      { ...quiet.sealed.conditions[0], progress: 54 },
+      { ...quiet.sealed.conditions[1], status: "held", progress: 12 },
+      { ...quiet.sealed.conditions[2], status: "failing" },
+      { ...quiet.sealed.conditions[3], status: "suspended" },
+    ],
+    trials: [
+      quiet.sealed.trials[0],
+      { ...quiet.sealed.trials[1], date: "2026-03-08" },
+      quiet.sealed.trials[2],
+      quiet.sealed.trials[3],
+      {
+        name: "Deep sounding",
+        tier: "grand",
+        state: "passed",
+        date: "2025-08-14",
+      },
+    ],
+    breakthrough: {
+      ...quiet.sealed.breakthrough,
+      recentStrikes: { petitions: 4, commissions: 2 },
+    },
+  },
+};
+
+describe("apertureview — the sheet, locked", () => {
+  it("never reaches a band, whatever the document says", () => {
+    // Locked is ONE block naming the four bands, so no summary is computed at all:
+    // every non-unlocked vault status collapses to the same sealed state.
+    for (const status of ["loading", "setup", "locked", "error"])
+      expect(detailStatus(status, null, quiet)).toBe("sealed");
+    expect(detailStatus("offline", null, quiet)).toBe("offline");
+  });
+});
+
+describe("apertureview — the sheet, a quiet week", () => {
+  const { sealed } = quiet;
+  const { open, resolved } = splitTrials(sealed.trials);
+
+  it("heads the masthead with the rank and its canon glyphs", () => {
+    expect(
+      bandLine({ v: 1, sealedAt: quiet.sealedAt, rank: 3, stage: "upper" }),
+    ).toBe("RANK 3 · UPPER");
+    expect(stageGlyphs(3, "upper")).toBe("三转·后期");
+  });
+
+  it("summarises the bands", () => {
+    expect(conditionsSummary(sealed.conditions)).toBe(
+      "1 failing · 2 hardening",
+    );
+    expect(trialsSummary(open, CARTOGRAPHER_TODAY)).toBe(
+      "1 active · 1 stocked",
+    );
+    expect(resolved).toHaveLength(2);
+    expect(sealed.breakthrough.wall).toBe("3 → 4");
+  });
+
+  it("gives each path the evidence it declared, and the others none", () => {
+    expect(sealed.paths.map((p) => pathEvidence(p)?.kind ?? null)).toEqual([
+      "strip",
+      "wealth",
+      "strip",
+      null,
+    ]);
+    expect(pathEvidence(sealed.paths[3].sub?.[0] as AperturePath)).toEqual({
+      kind: "strip",
+      key: "languages",
+      series: ACTIVITY_SERIES["languages"],
+    });
+  });
+
+  it("reads the stocked trial as unscheduled and shouts about nothing", () => {
+    expect(trialCountdown(open[1].date, CARTOGRAPHER_TODAY)).toBeNull();
+    for (const t of open)
+      expect(isImminent(t.date, CARTOGRAPHER_TODAY)).toBe(false);
+  });
+});
+
+describe("apertureview — the sheet, a loud week", () => {
+  const { sealed } = loud;
+  const { open, resolved } = splitTrials(sealed.trials);
+
+  it("leads the conditions band with the failure and the exemption", () => {
+    expect(conditionsSummary(sealed.conditions)).toBe(
+      "1 failing · 1 suspended",
+    );
+    // …and the exemption is still never red, chip for chip.
+    for (const c of sealed.conditions)
+      if (c.status === "suspended")
+        expect(conditionChipClass(c.status)).not.toContain("down");
+  });
+
+  it("counts down to the trial three days out", () => {
+    expect(trialsSummary(open, CARTOGRAPHER_TODAY)).toBe(
+      "1 active · 1 in 3 days",
+    );
+    expect(isImminent(open[1].date, CARTOGRAPHER_TODAY)).toBe(true);
+    expect(trialCountdown(open[1].date, CARTOGRAPHER_TODAY)).toBe("in 3 days");
+    expect(resolved).toHaveLength(3);
+  });
+
+  it("names both strike counters generically", () => {
+    // The counter NAMES are data (an open record), so the band renders whatever the
+    // document carries — it has no list of strikes it knows about.
+    expect(Object.entries(sealed.breakthrough.recentStrikes)).toEqual([
+      ["petitions", 4],
+      ["commissions", 2],
+    ]);
+  });
+
+  it("calls its own seal stale and the adjudication behind", () => {
+    const now = Date.parse("2026-03-05T09:00:00+11:00");
+    expect(sealedAgo(loud.sealedAt, now)).toBe("sealed 11d ago");
+    expect(isSealStale(loud.sealedAt, now)).toBe(true);
+    expect(
+      isAdjudicationPending(
+        loud.sealedAt,
+        latestDailyDay(["2026-03-04", "Harbour survey notes"]),
+      ),
+    ).toBe(true);
   });
 });

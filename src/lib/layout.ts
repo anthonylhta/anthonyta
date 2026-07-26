@@ -126,12 +126,6 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "weather", label: "weather (sydney)" }],
   },
   {
-    key: "steps",
-    zone: "today",
-    label: "steps (samsung health)",
-    modules: [{ key: "steps", label: "steps (samsung health)" }],
-  },
-  {
     key: "transit-next",
     zone: "today",
     label: "next trip (transit)",
@@ -168,23 +162,6 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [
       { key: "mortal", label: "mortal pulse (riichi / tft / reading)" },
     ],
-  },
-  // Wealth evidence also reads inside the paths band, but the standing glance is
-  // its own unit: the owner must be able to own — and hide — the figure itself.
-  {
-    key: "networth",
-    zone: "today",
-    label: "net worth (full glance)",
-    modules: [{ key: "networth", label: "net worth (full glance)" }],
-  },
-  // TEMPORARY: the activity digest dissolves into the paths band's evidence
-  // strips, so this unit exists only to keep the block on the page until the
-  // shell lands. Deleted with the block, not migrated.
-  {
-    key: "week",
-    zone: "today",
-    label: "this week (activity digest)",
-    modules: [{ key: "week", label: "this week (activity digest)" }],
   },
   // The exception rows, last: they say nothing at all until something is due or
   // something is down.

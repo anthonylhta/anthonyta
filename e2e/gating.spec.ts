@@ -307,6 +307,25 @@ test.describe("guest gating", () => {
     expect(session?.user).toBeFalsy();
   });
 
+  /**
+   * The character sheet's own vocabulary, none of which the lobby has any reason to
+   * say. Each string is rendered by exactly one owner-only surface: the masthead's
+   * rank reading, a band divider, the wall's strike counters, the streak line's gu,
+   * the mortal pulse row. They are checked as a set because the sheet is now the
+   * WHOLE signed-in page — a leak would be the entire private status, not one figure.
+   */
+  const SHEET_STRINGS = [
+    "aperture", // every aperture surface is namespaced, incl. the empty state
+    "unplaced", // the no-glance state
+    "Jade Green", // an essence colour name
+    "RANK ", // the masthead's rank reading (with its space — nonce-collision proof)
+    "the wall", // a band divider
+    "vital gu", // the streak line
+    "strikes this week", // the wall band
+    "mortal", // the day's pulse row (and its registry label)
+    "last 10 weeks", // the paths band's evidence strips (no lobby strip says this)
+  ];
+
   test("/ serves the lobby, never the command center", async ({ request }) => {
     const res = await request.get("/");
     expect(res.status()).toBe(200);
@@ -317,10 +336,9 @@ test.describe("guest gating", () => {
     expect(html).not.toContain("net worth"); // command-center-only
     expect(html).not.toContain("chequing");
     // The aperture glance is plaintext at rest but renders owner-only — the rank,
-    // its essence colour and even the empty state stay off the guest page.
-    expect(html).not.toContain("aperture");
-    expect(html).not.toContain("Jade Green");
-    expect(html).not.toContain("unplaced");
+    // its essence colour and every band of the sheet stay off the guest page.
+    for (const s of SHEET_STRINGS)
+      expect(html, `the lobby leaks "${s}"`).not.toContain(s);
   });
 
   test("/briefing hides the owner-only portfolio note", async ({ request }) => {
@@ -340,10 +358,9 @@ test.describe("guest gating", () => {
     expect(html).not.toContain("previewing");
     expect(html).not.toContain("exit preview");
     expect(html).not.toContain("command center");
-    // …and the preview is still a lobby: no aperture band leaks through it.
-    expect(html).not.toContain("aperture");
-    expect(html).not.toContain("Jade Green");
-    expect(html).not.toContain("unplaced");
+    // …and the preview is still a lobby: no band of the sheet leaks through it.
+    for (const s of SHEET_STRINGS)
+      expect(html, `the lobby preview leaks "${s}"`).not.toContain(s);
   });
 
   test("/ishin hides the private recent feed", async ({ request }) => {
