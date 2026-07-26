@@ -4,6 +4,7 @@ import { AUTHLOG_PATH } from "./authlogstore";
 import { BRIEFING_PATH } from "./briefingstore";
 import { BACKUP_STAMP_PATH } from "./chores";
 import { FIN_PATH, SNAP_INDEX_PATH } from "./finstore";
+import { GYM_PATH } from "./gymstore";
 import { KEYSTORE_PATH } from "./inbox";
 import { LAYOUT_PATH } from "./layoutstore";
 import { PRF_WRAP_PATH } from "./prfstore";
@@ -61,6 +62,11 @@ describe("drift guards", () => {
       action: "rewrite",
       kind: "envelope",
       context: TOTP_PATH,
+    });
+    expect(classifyKey(GYM_PATH)).toEqual({
+      action: "rewrite",
+      kind: "envelope",
+      context: GYM_PATH,
     });
   });
 });

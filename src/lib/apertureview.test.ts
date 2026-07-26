@@ -19,6 +19,7 @@ import {
   conditionStatusWord,
   conditionsSummary,
   dayGap,
+  declaredSeriesKeys,
   detailStatus,
   essenceSwatchClass,
   essenceTextClass,
@@ -275,6 +276,19 @@ describe("apertureview — ACTIVITY_SERIES + pathEvidence", () => {
     });
   });
 
+  it("draws the sealed gym series as a week's movement", () => {
+    // The first series the SERVER can't produce: its days are in the E2EE gym
+    // envelope, so the island derives it and merges it into the evidence. Being
+    // in this map is still what makes `activity: "gym"` drawable at all.
+    expect(ACTIVITY_SERIES["gym"]?.mode).toBe("delta");
+    expect(ACTIVITY_SERIES["gym"]?.unit).toBe("sessions");
+    expect(pathEvidence({ name: "Body", activity: "gym" })).toEqual({
+      kind: "strip",
+      key: "gym",
+      series: ACTIVITY_SERIES["gym"],
+    });
+  });
+
   it("misses on a series this build has never heard of — no strip, no crash", () => {
     // The other half of lib/aperture's open-vocabulary bargain: a newer emitter
     // can attach any series it likes and the path still renders, bare.
@@ -287,6 +301,25 @@ describe("apertureview — ACTIVITY_SERIES + pathEvidence", () => {
     expect(ACTIVITY_SERIES["toString"]).toBeUndefined();
     expect(ACTIVITY_SERIES["constructor"]).toBeUndefined();
     expect(pathEvidence({ name: "Ledger", activity: "toString" })).toBeNull();
+  });
+
+  it("collects the drawable series the paths declare, sub-paths included", () => {
+    expect(declaredSeriesKeys(paths)).toEqual(
+      new Set(["commits", "languages"]),
+    );
+    // A sub-path's declaration counts — the sheet reads the tree as siblings at
+    // different depths, and a nested path's strip is drawn like any other.
+    expect(
+      declaredSeriesKeys([
+        { name: "Body", sub: [{ name: "Strength", activity: "gym" }] },
+      ]),
+    ).toEqual(new Set(["gym"]));
+    // Undrawable and absent names are not worth fetching for.
+    expect(
+      declaredSeriesKeys([{ name: "Tides", activity: "tide-readings" }]),
+    ).toEqual(new Set());
+    expect(declaredSeriesKeys([{ name: "Wealth" }])).toEqual(new Set());
+    expect(declaredSeriesKeys([])).toEqual(new Set());
   });
 
   it("gives the wealth path the figure, declared or merely named", () => {

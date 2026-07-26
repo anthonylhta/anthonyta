@@ -166,6 +166,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/gym",
+    probe: "/api/gym",
+    shape: "owner-api",
+    methods: ["GET", "PUT"],
+  },
+  {
     routeKey: "/api/layout",
     probe: "/api/layout",
     shape: "owner-api",
@@ -257,6 +263,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
   {
     routeKey: "/files",
     probe: "/files",
+    shape: "owner-page",
+    methods: ["GET"],
+  },
+  {
+    routeKey: "/gym",
+    probe: "/gym",
     shape: "owner-page",
     methods: ["GET"],
   },

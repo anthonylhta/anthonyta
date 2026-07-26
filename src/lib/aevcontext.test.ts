@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   APERTURE_CONTEXT,
   FIN_CONTEXT,
+  GYM_CONTEXT,
   TODO_CONTEXT,
   TOTP_CONTEXT,
   TRANSIT_CONTEXT,
@@ -9,6 +10,7 @@ import {
 import { APERTURE_PATH } from "./aperturestore";
 import { generateMk, open, seal, type EnvelopeMeta } from "./crypto";
 import { FIN_PATH } from "./finstore";
+import { GYM_PATH } from "./gymstore";
 import { TODO_PATH } from "./todostore";
 import { TOTP_PATH } from "./totpstore";
 import { TRANSIT_PATH } from "./transitstore";
@@ -18,6 +20,7 @@ const STORES = [
   { name: "transit", ctx: TRANSIT_CONTEXT, path: TRANSIT_PATH },
   { name: "todo", ctx: TODO_CONTEXT, path: TODO_PATH },
   { name: "totp", ctx: TOTP_CONTEXT, path: TOTP_PATH },
+  { name: "gym", ctx: GYM_CONTEXT, path: GYM_PATH },
 ];
 
 const meta: EnvelopeMeta = { n: "x.json", t: "application/json", s: 3 };
@@ -31,7 +34,7 @@ describe("aevcontext — drift guard", () => {
     for (const s of STORES) expect(s.ctx).toBe(s.path);
   });
 
-  it("the four contexts are distinct", () => {
+  it("every context is distinct", () => {
     expect(new Set(STORES.map((s) => s.ctx)).size).toBe(STORES.length);
   });
 });
@@ -73,7 +76,7 @@ describe("aevcontext — AEV2 round-trip per store", () => {
 
 describe("aevcontext — aperture", () => {
   it("equals the R2 path its store module reads from", () => {
-    // The same drift guard the STORES array gives the four config stores, now
+    // The same drift guard the STORES array gives the fixed config stores, now
     // that aperturestore exists to pin against: seal and open using different
     // strings means a blob that stops decrypting on prod, so the context is held
     // equal to the PATH constant rather than to a literal copied beside it.

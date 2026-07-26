@@ -217,7 +217,9 @@ export function conditionsSummary(conditions: ApertureCondition[]): string {
 
 /** Where a path's activity series comes from, and how its evidence reads. */
 export interface ActivitySeries {
-  /** The connector whose per-day series the shell draws (the `getX` behind it). */
+  /** Where the per-day series comes from — usually the connector behind it (the
+   *  `getX`), but a SEALED source names its own store instead and is derived in
+   *  the browser, because the server cannot see it to draw it. */
   source: string;
   /** The site's caption for the strip — the emitter's word for the series is the
    *  KEY, this is what the sheet prints next to it. */
@@ -238,6 +240,12 @@ export interface ActivitySeries {
  * reason to drop the path itself. Three for now, the ones the document claims;
  * reading, riichi and tft each already have a per-day series on the sheet, so
  * widening this is one line per series the day a path names one.
+ *
+ * `gym` is the first SEALED series here, and the reason `source` no longer means
+ * "connector": its days live in the E2EE gym envelope, so the server that renders
+ * the other three cannot produce this one. The island decrypts it and merges it in
+ * (GuideSealed) — the entry is still needed here, because being in this map is what
+ * makes a path's `activity: "gym"` drawable at all.
  *
  * Typed with `undefined` in the value so a lookup can't be mistaken for a hit —
  * `noUncheckedIndexedAccess` is off in this project, and the whole contract here
@@ -263,6 +271,7 @@ export const ACTIVITY_SERIES: Readonly<
       unit: "",
     },
     steps: { source: "steps", label: "steps", mode: "count", unit: "steps" },
+    gym: { source: "gym", label: "sessions", mode: "delta", unit: "sessions" },
   }),
 );
 
@@ -301,6 +310,26 @@ export function pathEvidence(path: AperturePath): PathEvidence {
   }
   if (path.name.trim().toLowerCase() === WEALTH) return { kind: "wealth" };
   return null;
+}
+
+/**
+ * Every series key the document's paths actually ask for, sub-paths included.
+ * The sheet uses this to decide what is worth FETCHING: a sealed series costs a
+ * request and a decrypt, so it is only loaded when some path points at it. Keys
+ * this build can't draw are not included — an undrawable name is not a reason to
+ * go looking for data.
+ */
+export function declaredSeriesKeys(paths: AperturePath[]): Set<string> {
+  const keys = new Set<string>();
+  const walk = (list: AperturePath[]) => {
+    for (const p of list) {
+      const ev = pathEvidence(p);
+      if (ev?.kind === "strip") keys.add(ev.key);
+      if (p.sub) walk(p.sub);
+    }
+  };
+  walk(paths);
+  return keys;
 }
 
 /** A movement, always signed — `+12`, `0` reads as `+0` (a week that ran flat is

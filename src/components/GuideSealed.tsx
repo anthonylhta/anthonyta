@@ -6,7 +6,8 @@ import { useVault } from "@/app/files/useVault";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { useFinTotals, type FinTotals } from "@/components/useFinTotals";
-import { APERTURE_CONTEXT } from "@/lib/aevcontext";
+import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
+import { APERTURE_CONTEXT, GYM_CONTEXT } from "@/lib/aevcontext";
 import {
   isAdjudicationPending,
   isAttainment,
@@ -19,6 +20,7 @@ import {
   conditionChipPrefix,
   conditionStatusWord,
   conditionsSummary,
+  declaredSeriesKeys,
   detailStatus,
   isImminent,
   latestDailyDay,
@@ -28,6 +30,7 @@ import {
   trialCountdown,
   trialsSummary,
 } from "@/lib/apertureview";
+import { normalizeGymConfig, sessionCounts, sessionsThisWeek } from "@/lib/gym";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
 import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
@@ -114,6 +117,40 @@ async function adjudicationPending(
   }
 }
 
+/**
+ * The gym path's evidence, derived IN THE BROWSER. Every other strip on the band
+ * is server-rendered, but the gym log lives in the E2EE `meta/gym` envelope — the
+ * server cannot see a session, so it cannot draw one. Same rider doctrine as the
+ * adjudication dot above: best-effort by construction, so ANY miss (no envelope
+ * yet, a store flake, a shape this build doesn't trust) returns null and the row
+ * renders bare, exactly as an undrawable series does. It never delays or fails
+ * the sheet.
+ */
+async function gymSeries(
+  today: string,
+  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
+): Promise<EvidenceSeries | null> {
+  try {
+    const res = await fetch("/api/gym");
+    if (res.status !== 200) return null;
+    const { bytes } = await openItem(
+      new Uint8Array(await res.arrayBuffer()),
+      GYM_CONTEXT,
+    );
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    const cfg = normalizeGymConfig(parsed);
+    if (!cfg) return null;
+    // The same ten-week window every other strip in the band runs, so the row
+    // lines up with its neighbours.
+    return {
+      levels: toLevels(sessionCounts(cfg, ACTIVITY_DAYS, today)),
+      value: sessionsThisWeek(cfg, today),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function GuideSealed({
   sections,
   evidence,
@@ -130,6 +167,8 @@ export function GuideSealed({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
   const [showResolved, setShowResolved] = useState(false);
+  /** The one sealed strip, once it lands — see `gymSeries`. */
+  const [gym, setGym] = useState<EvidenceSeries | null>(null);
 
   // Render-phase adjustment (not an effect): dropping the decrypted document the
   // moment the vault stops being unlocked, per the lint-blessed reset pattern.
@@ -141,6 +180,7 @@ export function GuideSealed({
       setLoaded(null);
       setDataErr(null);
       setShowResolved(false);
+      setGym(null);
     }
   }
 
@@ -179,6 +219,12 @@ export function GuideSealed({
         if (!cancelled) setLoaded({ doc, pending: false });
         const pending = await adjudicationPending(doc.sealedAt, openItem);
         if (pending && !cancelled) setLoaded({ doc, pending });
+        // The sealed strip, only when a path actually asks for it — it costs a
+        // request and a decrypt, and most documents won't name it.
+        if (declaredSeriesKeys(doc.sealed.paths).has("gym")) {
+          const series = await gymSeries(today, openItem);
+          if (series && !cancelled) setGym(series);
+        }
       } catch {
         if (!cancelled) setDataErr("unreachable");
       }
@@ -186,7 +232,7 @@ export function GuideSealed({
     return () => {
       cancelled = true;
     };
-  }, [status, openItem]);
+  }, [status, openItem, today]);
 
   switch (detailStatus(status, dataErr, loaded?.doc ?? null)) {
     case "offline":
@@ -220,6 +266,11 @@ export function GuideSealed({
   const { streaks, conditions, paths, vitalGu, trials, breakthrough } =
     loaded.doc.sealed;
   const { open, resolved } = splitTrials(trials);
+
+  // The server's evidence, plus the one series only this browser can produce. The
+  // band consumes them identically — a sealed strip is not a special kind of row,
+  // it just arrives later (and, on any miss, not at all).
+  const allEvidence: GuideEvidence = gym ? { ...evidence, gym } : evidence;
 
   /**
    * One band, by its registry key. An unknown key renders nothing — the registry and
@@ -315,7 +366,7 @@ export function GuideSealed({
                   key={i}
                   path={p}
                   depth={0}
-                  evidence={evidence}
+                  evidence={allEvidence}
                   totals={totals}
                 />
               ))}
