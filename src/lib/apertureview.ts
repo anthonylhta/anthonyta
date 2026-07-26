@@ -166,6 +166,44 @@ export function conditionChipPrefix(status: string): string {
   return status === "suspended" ? "⏸ " : "";
 }
 
+// --- path evidence -------------------------------------------------------------
+
+/** Where a path's activity series comes from, and what to call the strip. */
+export interface ActivitySeries {
+  /** The connector whose per-day series the shell draws (the `getX` behind it). */
+  source: string;
+  /** The site's caption for the strip — the emitter's word for the series is the
+   *  KEY, this is what the sheet prints next to it. */
+  label: string;
+}
+
+/**
+ * `paths[].activity` → the series that becomes that path's evidence strip. The
+ * document names a series in the emitter's own words (the field is open, like
+ * every other vocabulary in lib/aperture), so this map is the site's side of the
+ * bargain: the names it can actually draw. A name that isn't here reads as
+ * `undefined` and the path renders with NO strip — never a blank one, and never a
+ * reason to drop the path itself. Three for now, the ones the document claims;
+ * reading, riichi and tft each already have a per-day series on the sheet, so
+ * widening this is one line per series the day a path names one.
+ *
+ * Typed with `undefined` in the value so a lookup can't be mistaken for a hit —
+ * `noUncheckedIndexedAccess` is off in this project, and the whole contract here
+ * is that most keys MISS.
+ */
+export const ACTIVITY_SERIES: Readonly<
+  Record<string, ActivitySeries | undefined>
+> = Object.freeze(
+  // Null prototype: `activity: "toString"` has to MISS like any other name the map
+  // doesn't carry. An inherited method resolving as a descriptor would be exactly
+  // the unknown-dressed-as-known this module refuses.
+  Object.assign(Object.create(null) as Record<string, ActivitySeries>, {
+    commits: { source: "github", label: "commits" },
+    languages: { source: "translator", label: "languages" },
+    steps: { source: "steps", label: "steps" },
+  }),
+);
+
 // --- dates ---------------------------------------------------------------------
 
 /**
@@ -194,6 +232,37 @@ export function trialSchedule(
   const days = daysUntil(date, nowMs);
   if (days === null) return date;
   return days > 0 ? `in ${days}d` : date;
+}
+
+/**
+ * A trial's day in words: "today", "in 1 day", "in N days", and — once the day has
+ * gone by — "N days ago". A stocked trial past its date is shown HONESTLY rather
+ * than quietly dropped or dressed as still upcoming. Null for no date at all and
+ * for anything unparseable, both of which leave the copy to the caller
+ * ("unscheduled"); a broken date must never render as a number.
+ *
+ * Anchored on a DAY, not an instant: `todayISO` is the Sydney calendar day, where
+ * `trialSchedule` and `sealedAgo` take a clock. Floored against that day's
+ * midnight, so a timestamp later today still reads "today" while anything before
+ * that midnight reads at least "1 day ago" — calendar days, which is what a trial
+ * actually has.
+ *
+ * `trialSchedule` above is the band-era compact form ("in 41d") the detail island
+ * still uses; this is the sheet's sentence form.
+ */
+export function trialCountdown(
+  dateISO: string | null | undefined,
+  todayISO: string,
+): string | null {
+  if (dateISO === null || dateISO === undefined) return null;
+  const t = Date.parse(dateISO);
+  const today = Date.parse(todayISO);
+  if (!Number.isFinite(t) || !Number.isFinite(today)) return null;
+  const days = Math.floor((t - today) / DAY_MS);
+  if (days === 0) return "today";
+  const n = Math.abs(days);
+  const unit = n === 1 ? "day" : "days";
+  return days > 0 ? `in ${n} ${unit}` : `${n} ${unit} ago`;
 }
 
 /**
