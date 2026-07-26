@@ -13,12 +13,30 @@ import {
   orderedUnitsInZone,
   setHidden,
   type LayoutConfig,
+  type Zone,
 } from "./layout";
 
 const cfg = (o: Partial<LayoutConfig> = {}): LayoutConfig => ({
   ...EMPTY_LAYOUT,
   ...o,
 });
+
+/** The TODAY zone's default order — the day's rows, then the two exception rows
+ *  that only speak when something is due or something is down. */
+const TODAY_DEFAULT = [
+  "weather",
+  "steps",
+  "transit-next",
+  "vault-today",
+  "todo",
+  "briefing",
+  "hand",
+  "mortal",
+  "networth",
+  "week",
+  "chores",
+  "health",
+];
 
 describe("unit / module registries", () => {
   it("use unique module keys per surface", () => {
@@ -39,7 +57,28 @@ describe("unit / module registries", () => {
     expect(CENTER_UNITS.every((u) => u.zone)).toBe(true);
     expect(LOBBY_UNITS.every((u) => u.zone === undefined)).toBe(true);
   });
+
+  it("declare the command-center units grouped by zone, in render order", () => {
+    // The default order IS the sheet read top to bottom, so a zone must not
+    // reappear further down the registry: an interleaved unit would render in its
+    // zone anyway and read as scrambled in the /system panel's default listing.
+    const zones = CENTER_UNITS.map((u) => u.zone);
+    expect([...new Set(zones)]).toEqual([
+      "fixed",
+      "wall",
+      "paths",
+      "trials",
+      "today",
+    ]);
+    expect(zones).toEqual([...zones].sort(byZoneOrder));
+  });
 });
+
+/** Sort key over the render order above — only used to prove no zone interleaves. */
+function byZoneOrder(a?: string, b?: string): number {
+  const order = ["fixed", "wall", "paths", "trials", "today"];
+  return order.indexOf(a ?? "") - order.indexOf(b ?? "");
+}
 
 describe("normalizeLayout", () => {
   it("round-trips a full v2 config", () => {
@@ -78,17 +117,34 @@ describe("normalizeLayout", () => {
   });
 
   it("drops retired command-center keys — no migration needed", () => {
-    // `tft`/`totp` left the command center and `briefing-hand` split into two
-    // units; a config written before that still reads clean.
+    // `tft`/`totp` left the command center, `briefing-hand` split into two units,
+    // and the v1 `aperture` band became the four sheet bands; a config written
+    // before any of that still reads clean.
     expect(
       normalizeLayout({
         v: 2,
         lobby: [],
-        center: ["tft", "totp", "briefing"],
+        center: ["tft", "totp", "aperture", "briefing"],
         lobbyOrder: [],
-        centerOrder: ["briefing-hand", "week", "totp"],
+        centerOrder: ["briefing-hand", "aperture", "week", "totp"],
       }),
     ).toEqual(cfg({ center: ["briefing"], centerOrder: ["week"] }));
+  });
+
+  it("round-trips a week-era config — the module outlived its zone", () => {
+    // `week`'s zone is gone (its digest dissolves into the paths band), but the
+    // MODULE key is unchanged, so an owner who hid the digest still has it hidden.
+    expect(
+      normalizeLayout({
+        v: 2,
+        lobby: [],
+        center: ["week", "chores"],
+        lobbyOrder: [],
+        centerOrder: ["week", "health"],
+      }),
+    ).toEqual(
+      cfg({ center: ["week", "chores"], centerOrder: ["week", "health"] }),
+    );
   });
 
   it("dedupes repeated keys", () => {
@@ -155,20 +211,13 @@ describe("orderedUnits", () => {
   });
 
   it("splits a surface into its zones, order preserved", () => {
-    const today = orderedUnitsInZone(EMPTY_LAYOUT, "center", "today").map(
-      (u) => u.key,
-    );
-    expect(today).toEqual([
-      "aperture",
-      "weather",
-      "steps",
-      "transit-next",
-      "networth",
-      "vault-today",
-      "todo",
-      "briefing",
-      "hand",
-    ]);
+    const zone = (z: Zone) =>
+      orderedUnitsInZone(EMPTY_LAYOUT, "center", z).map((u) => u.key);
+    expect(zone("fixed")).toEqual(["dropbox"]);
+    expect(zone("wall")).toEqual(["aperture-wall", "aperture-conditions"]);
+    expect(zone("paths")).toEqual(["aperture-paths"]);
+    expect(zone("trials")).toEqual(["aperture-trials"]);
+    expect(zone("today")).toEqual(TODAY_DEFAULT);
   });
 });
 
@@ -176,33 +225,43 @@ describe("moveUnit + canMove", () => {
   it("moves a unit down within its zone", () => {
     const c = moveUnit(EMPTY_LAYOUT, "center", "weather", 1);
     expect(orderedUnitsInZone(c, "center", "today").map((u) => u.key)).toEqual([
-      "aperture",
       "steps",
       "weather",
-      "transit-next",
-      "networth",
-      "vault-today",
-      "todo",
-      "briefing",
-      "hand",
+      ...TODAY_DEFAULT.slice(2),
     ]);
   });
 
   it("moves a unit up within its zone", () => {
-    const c = moveUnit(EMPTY_LAYOUT, "center", "chores", -1);
-    expect(orderedUnitsInZone(c, "center", "week").map((u) => u.key)).toEqual([
-      "chores",
-      "week",
-      "health",
+    // The wall zone carries two units: the wall itself and the conditions holding
+    // it open. They travel together, but they still swap against each other.
+    const c = moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", -1);
+    expect(orderedUnitsInZone(c, "center", "wall").map((u) => u.key)).toEqual([
+      "aperture-conditions",
+      "aperture-wall",
     ]);
   });
 
   it("never crosses a zone boundary", () => {
-    // aperture is first in TODAY; moving it up is a no-op (not into the fixed row)
-    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture", -1)).toEqual(
+    // The wall leads its zone; moving it up is a no-op, not a promotion into the
+    // pinned row above it.
+    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-wall", -1)).toEqual(
       EMPTY_LAYOUT,
     );
-    // health is last in THIS WEEK; moving it down is a no-op
+    // Conditions end the wall zone: down does NOT drop them into paths.
+    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", 1)).toEqual(
+      EMPTY_LAYOUT,
+    );
+    // A one-unit zone can't move either way.
+    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-paths", -1)).toEqual(
+      EMPTY_LAYOUT,
+    );
+    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-paths", 1)).toEqual(
+      EMPTY_LAYOUT,
+    );
+    // weather opens TODAY and health closes it.
+    expect(moveUnit(EMPTY_LAYOUT, "center", "weather", -1)).toEqual(
+      EMPTY_LAYOUT,
+    );
     expect(moveUnit(EMPTY_LAYOUT, "center", "health", 1)).toEqual(EMPTY_LAYOUT);
   });
 
@@ -213,27 +272,34 @@ describe("moveUnit + canMove", () => {
     expect(moveUnit(EMPTY_LAYOUT, "center", "ghost", 1)).toEqual(EMPTY_LAYOUT);
   });
 
-  it("leaves the other zone untouched when reordering one", () => {
-    const c = moveUnit(EMPTY_LAYOUT, "center", "chores", -1);
-    expect(orderedUnitsInZone(c, "center", "today").map((u) => u.key)).toEqual(
-      orderedUnitsInZone(EMPTY_LAYOUT, "center", "today").map((u) => u.key),
-    );
+  it("leaves the other zones untouched when reordering one", () => {
+    const c = moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", -1);
+    for (const z of ["fixed", "paths", "trials", "today"] as Zone[]) {
+      expect(orderedUnitsInZone(c, "center", z).map((u) => u.key)).toEqual(
+        orderedUnitsInZone(EMPTY_LAYOUT, "center", z).map((u) => u.key),
+      );
+    }
   });
 
   it("canMove greys the arrows at the zone edges", () => {
-    expect(canMove(EMPTY_LAYOUT, "center", "aperture", -1)).toBe(false);
-    expect(canMove(EMPTY_LAYOUT, "center", "aperture", 1)).toBe(true);
-    // weather is no longer the top of TODAY, so it CAN move up now.
-    expect(canMove(EMPTY_LAYOUT, "center", "weather", -1)).toBe(true);
+    expect(canMove(EMPTY_LAYOUT, "center", "weather", -1)).toBe(false);
+    expect(canMove(EMPTY_LAYOUT, "center", "weather", 1)).toBe(true);
     expect(canMove(EMPTY_LAYOUT, "center", "health", 1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "dropbox", 1)).toBe(false);
+    // Both arrows are dead on a zone that holds a single unit.
+    expect(canMove(EMPTY_LAYOUT, "center", "aperture-paths", -1)).toBe(false);
+    expect(canMove(EMPTY_LAYOUT, "center", "aperture-paths", 1)).toBe(false);
   });
 
-  it("puts the aperture band first in TODAY by default", () => {
-    // Default position #1 is part of the module's spec, not an accident of the
-    // registry's order: the status band is the first thing the morning shows.
+  it("leads the sheet with the wall, and TODAY with the weather", () => {
+    // Default positions are part of the spec, not an accident of the registry's
+    // order: the wall being worked opens the sheet, and the day's first row is
+    // the one thing that is true before any unlock.
+    expect(orderedUnitsInZone(EMPTY_LAYOUT, "center", "wall")[0].key).toBe(
+      "aperture-wall",
+    );
     expect(orderedUnitsInZone(EMPTY_LAYOUT, "center", "today")[0].key).toBe(
-      "aperture",
+      "weather",
     );
   });
 

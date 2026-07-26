@@ -38,7 +38,11 @@ import {
   sydneyDaysAgo,
   type SnapIndexDay,
 } from "@/lib/fin";
-import { hiddenSet, orderedUnitsInZone } from "@/lib/layout";
+import {
+  hiddenSet,
+  orderedUnitsInZone,
+  type Zone as CenterZone,
+} from "@/lib/layout";
 import {
   commas,
   STEPS_STRIP_DAYS,
@@ -82,24 +86,26 @@ async function dropCount(): Promise<number> {
   }
 }
 
-/** A "15 Jun – 21 Jun" label for the trailing week. */
-function weekRange(): string {
-  const day = (dt: Date) =>
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Australia/Sydney",
-      day: "numeric",
-      month: "short",
-    }).format(dt);
-  const now = new Date();
-  return `${day(new Date(now.getTime() - 6 * 86_400_000))} – ${day(now)}`;
-}
+/** The zones this page renders, top to bottom, and the divider each one gets. The
+ *  sheet's three status bands are deliberately UNLABELLED for now: their chrome
+ *  arrives with the shell, and a header over a single bridged band would announce
+ *  a structure that isn't built yet. */
+const ZONES: { zone: CenterZone; label?: string; right?: () => string }[] = [
+  { zone: "wall" },
+  { zone: "paths" },
+  { zone: "trials" },
+  { zone: "today", label: "today", right: todayLabel },
+];
 
 /**
  * Your private daily driver — what `/` becomes when you're logged in (ADR 0004).
- * Two zones (ADR 0032): TODAY = what you act on now; THIS WEEK = the rolling digest.
- * Each domain lives in exactly one zone. THIS WEEK now pairs each domain's
- * this-week number with its trailing ~10-week trend strip (ADR 0044) — the digest
- * IS the pulse, so there's no separate heatmap to duplicate it.
+ * The zones come from the layout registry (roadmap 59) and render in its order:
+ * the wall being worked, the paths, the trials, then TODAY — the day's rows and
+ * the exception rows that only speak when something is due or down.
+ *
+ * MID-REDESIGN: the three status bands hold only the v1 aperture band (bridged
+ * onto the `aperture-wall` unit) and the activity digest still renders as the
+ * `week` unit at the end of TODAY. Both are temporary — the shell replaces them.
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
@@ -138,17 +144,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
   // which of these blocks render at all.
   const hidden = hiddenSet(layout, "center");
-  const todayVisible = [
-    "aperture",
-    "weather",
-    "steps",
-    "transit-next",
-    "networth",
-    "vault-today",
-    "todo",
-    "briefing",
-    "hand",
-  ].some((k) => !hidden.has(k));
 
   // Steps (roadmap: the daily section) — plaintext, server-rendered off the phone's
   // daily push; today's count + a trailing fortnight strip. `null` today = nothing
@@ -225,8 +220,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
     },
   ];
 
-  const weekVisible = ["week", "chores", "health"].some((k) => !hidden.has(k));
-
   // Each command-center module keyed by its layout UNIT key so the zones can
   // render in the owner's configured order (roadmap 59). The values are the
   // exact blocks that used to sit inline, a ternary yielding the JSX when
@@ -241,8 +234,10 @@ export async function CommandCenter({ userName }: { userName: string }) {
     /* aperture — the private status band. The ONE deliberate standing block
        (ADR 0109's exception-only rule acknowledged): the status display IS the
        reminder surface, so it has no quiet state to hide in. Rank + stage are
-       server-rendered off the plaintext glance; the rest is a vault island. */
-    aperture: !hidden.has("aperture") ? (
+       server-rendered off the plaintext glance; the rest is a vault island.
+       BRIDGE: the v1 band hangs on the `aperture-wall` unit until the shell
+       splits it into the wall, conditions, paths and trials bands. */
+    "aperture-wall": !hidden.has("aperture-wall") ? (
       <ApertureBand glance={aperture} offline={!r2Enabled()} />
     ) : null,
 
@@ -478,16 +473,23 @@ export async function CommandCenter({ userName }: { userName: string }) {
         {centerNodes.dropbox}
 
         {/* zones render from the owner's layout order (roadmap 59); the default
-            order reproduces the hand-tuned layout exactly. */}
-        {todayVisible && <Zone label="today" right={todayLabel()} />}
-        {orderedUnitsInZone(layout, "center", "today").map((u) => (
-          <Fragment key={u.key}>{centerNodes[u.key]}</Fragment>
-        ))}
-
-        {weekVisible && <Zone label="this week" right={weekRange()} />}
-        {orderedUnitsInZone(layout, "center", "week").map((u) => (
-          <Fragment key={u.key}>{centerNodes[u.key]}</Fragment>
-        ))}
+            order reproduces the hand-tuned layout. A zone's divider appears only
+            when the zone actually has something to say — a band whose every unit
+            is hidden (or quiet) announces nothing. */}
+        {ZONES.map(({ zone, label, right }) => {
+          const units = orderedUnitsInZone(layout, "center", zone).filter(
+            (u) => centerNodes[u.key] != null,
+          );
+          if (units.length === 0) return null;
+          return (
+            <Fragment key={zone}>
+              {label && <Zone label={label} right={right?.()} />}
+              {units.map((u) => (
+                <Fragment key={u.key}>{centerNodes[u.key]}</Fragment>
+              ))}
+            </Fragment>
+          );
+        })}
 
         {/* quick jumps */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
@@ -549,7 +551,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
   );
 }
 
-/** A zone divider — the dashboard's fixed shape (today vs this week). */
+/** A zone divider — the band headers the sheet reads down. */
 function Zone({ label, right }: { label: string; right?: string }) {
   return (
     <div className="flex items-center justify-between border-b border-hairline bg-amber/[0.04] px-4 py-1.5">

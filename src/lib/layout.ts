@@ -15,7 +15,14 @@
  *   - UNITS are the orderable blocks. A unit is usually one module, but a few
  *     are visually GROUPED and move together (the lobby's languages+reading+
  *     riichi card). The command center's `dropbox` is a FIXED unit — hideable,
- *     but pinned above both zones.
+ *     but pinned above every zone.
+ *
+ * The command center's ZONES are the character sheet's bands, in render order:
+ * `fixed` chrome, the `wall` currently being worked (with its conditions), the
+ * `paths` and their evidence, the `trials`, then `today` — the day's rows plus
+ * the exception rows that only speak when something is wrong. A unit reorders
+ * within its own zone and never across one, so no arrow can drag the day's
+ * weather up into the status bands. The lobby has no zones (one flow).
  *
  * Forward-compat that keeps deploys safe: the config names HIDDEN keys only (a
  * module added later is visible by default — a config predating it can't hide
@@ -29,9 +36,10 @@ export interface ModuleDef {
   label: string;
 }
 
-/** The reorderable zone a unit belongs to (command center only). `fixed` units
- *  are pinned above the zones and never reorder; lobby units have no zone. */
-export type Zone = "fixed" | "today" | "week";
+/** The reorderable zone a unit belongs to (command center only), in render
+ *  order. `fixed` units are pinned above the zones and never reorder; lobby
+ *  units have no zone. */
+export type Zone = "fixed" | "wall" | "paths" | "trials" | "today";
 
 export interface UnitDef {
   /** Stable orderable-unit id (== the module key for single-module units). */
@@ -80,11 +88,36 @@ export const CENTER_UNITS: UnitDef[] = [
     label: "drop inbox (sealed messages)",
     modules: [{ key: "dropbox", label: "drop inbox (sealed messages)" }],
   },
+  // The status bands. The wall zone holds two units because they always travel
+  // together visually — the wall being worked, and the conditions that hold it
+  // open — but conditions still reorder against the wall inside the zone.
   {
-    key: "aperture",
-    zone: "today",
-    label: "aperture (status band)",
-    modules: [{ key: "aperture", label: "aperture (status band)" }],
+    key: "aperture-wall",
+    zone: "wall",
+    label: "the wall (breakthrough + strikes)",
+    modules: [
+      { key: "aperture-wall", label: "the wall (breakthrough + strikes)" },
+    ],
+  },
+  {
+    key: "aperture-conditions",
+    zone: "wall",
+    label: "conditions",
+    modules: [{ key: "aperture-conditions", label: "conditions" }],
+  },
+  {
+    key: "aperture-paths",
+    zone: "paths",
+    label: "paths (attainment + evidence)",
+    modules: [
+      { key: "aperture-paths", label: "paths (attainment + evidence)" },
+    ],
+  },
+  {
+    key: "aperture-trials",
+    zone: "trials",
+    label: "trials",
+    modules: [{ key: "aperture-trials", label: "trials" }],
   },
   {
     key: "weather",
@@ -103,12 +136,6 @@ export const CENTER_UNITS: UnitDef[] = [
     zone: "today",
     label: "next trip (transit)",
     modules: [{ key: "transit-next", label: "next trip (transit)" }],
-  },
-  {
-    key: "networth",
-    zone: "today",
-    label: "net worth glance",
-    modules: [{ key: "networth", label: "net worth glance" }],
   },
   {
     key: "vault-today",
@@ -135,20 +162,41 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "hand", label: "today's hand (riichi)" }],
   },
   {
+    key: "mortal",
+    zone: "today",
+    label: "mortal pulse (riichi / tft / reading)",
+    modules: [
+      { key: "mortal", label: "mortal pulse (riichi / tft / reading)" },
+    ],
+  },
+  // Wealth evidence also reads inside the paths band, but the standing glance is
+  // its own unit: the owner must be able to own — and hide — the figure itself.
+  {
+    key: "networth",
+    zone: "today",
+    label: "net worth (full glance)",
+    modules: [{ key: "networth", label: "net worth (full glance)" }],
+  },
+  // TEMPORARY: the activity digest dissolves into the paths band's evidence
+  // strips, so this unit exists only to keep the block on the page until the
+  // shell lands. Deleted with the block, not migrated.
+  {
     key: "week",
-    zone: "week",
+    zone: "today",
     label: "this week (activity digest)",
     modules: [{ key: "week", label: "this week (activity digest)" }],
   },
+  // The exception rows, last: they say nothing at all until something is due or
+  // something is down.
   {
     key: "chores",
-    zone: "week",
+    zone: "today",
     label: "chores (csv / vault-sync / backup)",
     modules: [{ key: "chores", label: "chores (csv / vault-sync / backup)" }],
   },
   {
     key: "health",
-    zone: "week",
+    zone: "today",
     label: "project health (riichi / webnovel / ishin)",
     modules: [
       { key: "health", label: "project health (riichi / webnovel / ishin)" },

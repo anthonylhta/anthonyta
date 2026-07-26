@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   IMMORTAL_ESSENCE,
   MORTAL_ESSENCE,
+  type AperturePath,
   type ApertureDoc,
   type ApertureTrial,
 } from "./aperture";
 import {
+  ACTIVITY_SERIES,
   ESSENCE_SWATCH,
   ESSENCE_TEXT,
   bandLine,
@@ -17,6 +19,7 @@ import {
   essenceTextClass,
   sealedAgo,
   splitTrials,
+  trialCountdown,
   trialSchedule,
 } from "./apertureview";
 
@@ -162,6 +165,45 @@ describe("apertureview — condition chips", () => {
   });
 });
 
+describe("apertureview — ACTIVITY_SERIES", () => {
+  // The cartographer's paths, as the sealed document would carry them: two that
+  // name a series the sheet can draw, one that names a series it has never heard
+  // of, one that claims none at all.
+  const paths: AperturePath[] = [
+    { name: "Smithing", attainment: "master", activity: "commits" },
+    { name: "Cartography", attainment: "quasi-master", activity: "languages" },
+    { name: "Lodestone survey", activity: "tide-readings" },
+    { name: "Winter provisioning" },
+  ];
+
+  it("gives every series it draws a source and a caption", () => {
+    for (const [key, s] of Object.entries(ACTIVITY_SERIES)) {
+      expect(s?.source, `${key} source`).toBeTruthy();
+      expect(s?.label, `${key} label`).toBeTruthy();
+    }
+  });
+
+  it("resolves the series a path names", () => {
+    expect(ACTIVITY_SERIES[paths[0].activity ?? ""]?.source).toBe("github");
+    expect(ACTIVITY_SERIES[paths[1].activity ?? ""]?.source).toBe("translator");
+  });
+
+  it("misses on a series this build has never heard of — no strip, no crash", () => {
+    // The other half of lib/aperture's open-vocabulary bargain: a newer emitter
+    // can attach any series it likes and the path still renders, bare.
+    expect(ACTIVITY_SERIES[paths[2].activity ?? ""]).toBeUndefined();
+    expect(ACTIVITY_SERIES[paths[3].activity ?? ""]).toBeUndefined();
+    // Including the names every plain object inherits — the null prototype is
+    // what makes those a miss instead of a function posing as a descriptor.
+    expect(ACTIVITY_SERIES["toString"]).toBeUndefined();
+    expect(ACTIVITY_SERIES["constructor"]).toBeUndefined();
+  });
+
+  it("is frozen — a table, not state", () => {
+    expect(Object.isFrozen(ACTIVITY_SERIES)).toBe(true);
+  });
+});
+
 describe("apertureview — daysUntil + trialSchedule", () => {
   it("rounds a countdown up and goes negative once past", () => {
     expect(daysUntil("2026-03-05T00:00:00Z", NOW)).toBe(0);
@@ -189,6 +231,41 @@ describe("apertureview — daysUntil + trialSchedule", () => {
 
   it("passes an unparseable date through as the literal", () => {
     expect(trialSchedule("some winter", NOW)).toBe("some winter");
+  });
+});
+
+describe("apertureview — trialCountdown", () => {
+  // The sheet's sentence form, anchored on a Sydney calendar DAY rather than an
+  // instant — the same 5 March as NOW above.
+  const TODAY = "2026-03-05";
+
+  it("says today for the day itself, at any hour of it", () => {
+    expect(trialCountdown("2026-03-05", TODAY)).toBe("today");
+    expect(trialCountdown("2026-03-05T23:30:00Z", TODAY)).toBe("today");
+  });
+
+  it("counts forward in whole days, singular at one", () => {
+    expect(trialCountdown("2026-03-06", TODAY)).toBe("in 1 day");
+    expect(trialCountdown("2026-03-07", TODAY)).toBe("in 2 days");
+    expect(trialCountdown("2026-04-15", TODAY)).toBe("in 41 days");
+  });
+
+  it("counts a passed date backward instead of hiding it", () => {
+    // A stocked trial whose day has gone by is still the owner's business: the row
+    // says so rather than reading as unscheduled or as still ahead.
+    expect(trialCountdown("2026-03-04", TODAY)).toBe("1 day ago");
+    expect(trialCountdown("2026-01-19", TODAY)).toBe("45 days ago");
+  });
+
+  it("lands a small-hours timestamp on the calendar day it belongs to", () => {
+    expect(trialCountdown("2026-03-04T02:00:00Z", TODAY)).toBe("1 day ago");
+  });
+
+  it("returns null for no date, and for anything unparseable at either end", () => {
+    expect(trialCountdown(null, TODAY)).toBeNull();
+    expect(trialCountdown(undefined, TODAY)).toBeNull();
+    expect(trialCountdown("some winter", TODAY)).toBeNull();
+    expect(trialCountdown("2026-04-15", "whenever")).toBeNull();
   });
 });
 
