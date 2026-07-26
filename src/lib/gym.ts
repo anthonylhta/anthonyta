@@ -234,6 +234,17 @@ export function addSession(cfg: GymConfig, session: GymSession): GymConfig {
 }
 
 /**
+ * Remove one session by id. An unknown id is a no-op, so the 409 dance can
+ * re-run it against a fresh base another device may already have pruned. This
+ * exists for exactly one honest reason: test and mis-logged sessions would
+ * otherwise be permanent, and a junk heavy set poisons PR detection forever.
+ */
+export function removeSession(cfg: GymConfig, id: string): GymConfig {
+  if (!cfg.sessions.some((s) => s.id === id)) return cfg;
+  return rebuild(cfg, { sessions: cfg.sessions.filter((s) => s.id !== id) });
+}
+
+/**
  * Add one exercise to the catalog. A name already in the catalog (ignoring case
  * and surrounding space) is a no-op, as is an id already present — so this is
  * both duplicate-proof and re-runnable. The caller resolves an existing name to

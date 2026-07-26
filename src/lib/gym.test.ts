@@ -19,6 +19,7 @@ import {
   lastDoneFor,
   lastSetsFor,
   normalizeGymConfig,
+  removeSession,
   removeTemplate,
   renameExercise,
   sessionCounts,
@@ -190,6 +191,24 @@ describe("addSession", () => {
 
   it("carries seq through untouched (the writer bumps it, not the transform)", () => {
     const cfg = addSession(base({ seq: 7 }), session({ id: "s2" }));
+    expect(cfg.seq).toBe(7);
+  });
+});
+
+describe("removeSession", () => {
+  it("removes by id and keeps the remaining order", () => {
+    const cfg = addSession(base(), session({ id: "s2" }));
+    const pruned = removeSession(cfg, "s1");
+    expect(pruned.sessions.map((s) => s.id)).toEqual(["s2"]);
+  });
+
+  it("is a no-op identity on an unknown id, so the 409 dance can re-run it", () => {
+    const cfg = base();
+    expect(removeSession(cfg, "nope")).toBe(cfg);
+  });
+
+  it("carries seq through untouched (the writer bumps it, not the transform)", () => {
+    const cfg = removeSession(base({ seq: 7 }), "s1");
     expect(cfg.seq).toBe(7);
   });
 });

@@ -31,6 +31,7 @@ import {
   normalizeGymConfig,
   parseDraft,
   prefillSet,
+  removeSession,
   removeTemplate,
   renameExercise,
   sessionVolume,
@@ -337,7 +338,9 @@ export function GymLog({ offline }: { offline: boolean }) {
           saveConfig={saveConfig}
         />
       )}
-      {tab === "history" && <HistoryView cfg={cfg} />}
+      {tab === "history" && (
+        <HistoryView cfg={cfg} busy={busy} saveConfig={saveConfig} />
+      )}
       {tab === "exercises" && (
         <ExercisesView cfg={cfg} busy={busy} saveConfig={saveConfig} />
       )}
@@ -713,9 +716,26 @@ function SetRow({
 // history
 // -------------------------------------------------------------------------------
 
-function HistoryView({ cfg }: { cfg: GymConfig }) {
+function HistoryView({
+  cfg,
+  busy,
+  saveConfig,
+}: {
+  cfg: GymConfig;
+  busy: boolean;
+  saveConfig: (apply: (base: GymConfig) => GymConfig) => Promise<boolean>;
+}) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const used = gymPayloadBytes(cfg);
+
+  async function remove(id: string) {
+    const ok = await saveConfig((b) => removeSession(b, id));
+    if (ok) {
+      setConfirmDelete(null);
+      setOpenId(null);
+    }
+  }
 
   return (
     <div className="flex flex-col">
@@ -753,6 +773,24 @@ function HistoryView({ cfg }: { cfg: GymConfig }) {
                     </p>
                   ))}
                   {s.note && <p className="mt-1 text-muted/70">{s.note}</p>}
+                  {/* two-tap delete (the transit idiom) — a mis-log or a test
+                      session must be removable, or it poisons PR detection
+                      and the week counts forever. */}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="mt-2 text-muted/60 transition-colors hover:text-down disabled:opacity-30"
+                    onClick={() => {
+                      if (confirmDelete === s.id) void remove(s.id);
+                      else setConfirmDelete(s.id);
+                    }}
+                  >
+                    {busy && confirmDelete === s.id
+                      ? "deleting…"
+                      : confirmDelete === s.id
+                        ? "delete this session?"
+                        : "delete"}
+                  </button>
                 </div>
               )}
             </div>
