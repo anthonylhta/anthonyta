@@ -88,6 +88,12 @@ const SHARE_SEG = `1900000000-e-${"A".repeat(22)}`;
 export const ROUTE_MANIFEST: RouteEntry[] = [
   // -- owner-gated API (guest → byte-identical 404 "Not found") -----------------
   {
+    routeKey: "/api/aperture",
+    probe: "/api/aperture",
+    shape: "owner-api",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/api/auth/webauthn/creds",
     probe: "/api/auth/webauthn/creds",
     shape: "owner-api",

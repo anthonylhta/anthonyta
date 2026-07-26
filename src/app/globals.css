@@ -13,6 +13,32 @@
   --color-amber: #f5a524; /* primary accent — cursor, active, highlight */
   --color-up: #7fd17f; /* live + positive finance (use sparingly) */
   --color-down: #e5604d; /* negative finance only */
+
+  /* essence canon (aperture) — used ONLY in the band's swatch + rank text (ADR 0002: amber stays THE accent) */
+  --color-jade-green: #6fbf8f;
+  --color-pale-green: #b7dcb4;
+  --color-dark-green: #4c9a63;
+  --color-black-green: #2f6647;
+  --color-light-red: #e08a7a;
+  --color-scarlet: #e0553f;
+  --color-crimson: #c43a2f;
+  --color-dark-red: #9c2f27;
+  --color-light-silver: #c9ced1;
+  --color-blossom-silver: #dcc9d4;
+  --color-bright-silver: #e9edef;
+  --color-snow-silver: #f4f7f9;
+  --color-light-gold: #e3c37b;
+  --color-bright-gold: #eed069;
+  --color-essence-gold: #d9a83f;
+  --color-true-gold: #f7d84a;
+  --color-light-purple: #b79ad6;
+  --color-violet: #9a6fd0;
+  --color-deep-purple: #8257c9;
+  --color-crystal-purple: #c9a8f0;
+  --color-green-grape: #9ed67a;
+  --color-red-date: #c8503c;
+  --color-white-litchi: #efe8e0;
+  --color-yellow-apricot: #f0b64a;
 }
 
 @theme inline {

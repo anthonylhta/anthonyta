@@ -81,6 +81,12 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "dropbox", label: "drop inbox (sealed messages)" }],
   },
   {
+    key: "aperture",
+    zone: "today",
+    label: "aperture (status band)",
+    modules: [{ key: "aperture", label: "aperture (status band)" }],
+  },
+  {
     key: "weather",
     zone: "today",
     label: "weather (sydney)",
