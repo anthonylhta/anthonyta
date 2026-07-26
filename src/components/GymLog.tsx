@@ -368,8 +368,15 @@ function LogView({
   const [picking, setPicking] = useState(false);
   const [pick, setPick] = useState("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  /** Whether a session was begun THIS mount. The draft alone can't carry this:
+   *  an empty start (no template exercises yet, or "empty") writes a draft with
+   *  zero entries, which is indistinguishable from no draft at all — and the
+   *  builder must still open so the first exercise can be added. Found on first
+   *  real use: without this, a fresh install could never log anything. Not
+   *  persisted on purpose — an empty begun-ness has nothing to lose with the tab. */
+  const [begun, setBegun] = useState(false);
 
-  const started = draft.entries.length > 0 || draft.note !== "";
+  const started = begun || draft.entries.length > 0 || draft.note !== "";
 
   /** Start a session from a template — one empty-ish set per exercise, prefilled
    *  from last time so a repeat workout is a few taps of confirmation. */
@@ -378,6 +385,7 @@ function LogView({
       exerciseId,
       sets: [prefillSet(cfg, exerciseId, [])],
     }));
+    setBegun(true);
     writeDraft({
       ...(template ? { templateId: template.id } : {}),
       entries,
@@ -422,6 +430,7 @@ function LogView({
     if (ok) {
       writeDraft(EMPTY_GYM_DRAFT);
       setConfirmDiscard(false);
+      setBegun(false);
     }
   }
 
@@ -605,6 +614,7 @@ function LogView({
             if (confirmDiscard) {
               writeDraft(EMPTY_GYM_DRAFT);
               setConfirmDiscard(false);
+              setBegun(false);
             } else setConfirmDiscard(true);
           }}
         >
@@ -889,6 +899,28 @@ function TemplatesView({
 }) {
   const [edit, setEdit] = useState<GymTemplate | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+
+  /** Type a name the catalog doesn't carry yet — mint it and seal it FIRST
+   *  (the addToDraft discipline), then add it to the template being edited.
+   *  Without this, a fresh install had no way to build a real template: the
+   *  catalog only grew from logged sessions, and an empty template couldn't
+   *  start one (found on first real use). */
+  async function mintExercise() {
+    if (!edit) return;
+    const clean = newName.trim();
+    if (!clean) return;
+    let id = findExerciseByName(cfg, clean);
+    if (id === null) {
+      const minted = randomId();
+      const ok = await saveConfig((b) => addExercise(b, minted, clean));
+      if (!ok) return;
+      id = minted;
+    }
+    if (!edit.exerciseIds.includes(id))
+      setEdit({ ...edit, exerciseIds: [...edit.exerciseIds, id] });
+    setNewName("");
+  }
 
   function move(ids: string[], from: number, to: number): string[] {
     if (to < 0 || to >= ids.length) return ids;
@@ -983,11 +1015,27 @@ function TemplatesView({
                 + {e.name}
               </button>
             ))}
-          {cfg.exercises.length === 0 && (
-            <span className="text-muted">
-              log a session first — exercises come from there
-            </span>
-          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <input
+            type="text"
+            value={newName}
+            disabled={busy}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void mintExercise()}
+            placeholder="new exercise name"
+            className={`flex-1 ${input}`}
+            aria-label="new exercise name"
+          />
+          <button
+            type="button"
+            className={btn}
+            disabled={busy || !newName.trim()}
+            onClick={() => void mintExercise()}
+          >
+            + add
+          </button>
         </div>
 
         <div className="flex items-center gap-3 text-xs">
