@@ -40,6 +40,7 @@ test.describe("guest gating", () => {
     "/api/layout", // owner layout config write/read (ADR: layout visibility)
     "/api/todo", // E2EE quick-capture envelope (ADR: quick capture)
     "/reader", // the owner-only morning feeds page (ADR: rss reader)
+    "/api/aperture", // E2EE private status envelope (the aperture module)
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
@@ -315,6 +316,11 @@ test.describe("guest gating", () => {
     expect(html).not.toContain("private command center");
     expect(html).not.toContain("net worth"); // command-center-only
     expect(html).not.toContain("chequing");
+    // The aperture glance is plaintext at rest but renders owner-only — the rank,
+    // its essence colour and even the empty state stay off the guest page.
+    expect(html).not.toContain("aperture");
+    expect(html).not.toContain("Jade Green");
+    expect(html).not.toContain("unplaced");
   });
 
   test("/briefing hides the owner-only portfolio note", async ({ request }) => {
@@ -334,6 +340,10 @@ test.describe("guest gating", () => {
     expect(html).not.toContain("previewing");
     expect(html).not.toContain("exit preview");
     expect(html).not.toContain("command center");
+    // …and the preview is still a lobby: no aperture band leaks through it.
+    expect(html).not.toContain("aperture");
+    expect(html).not.toContain("Jade Green");
+    expect(html).not.toContain("unplaced");
   });
 
   test("/ishin hides the private recent feed", async ({ request }) => {

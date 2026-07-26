@@ -159,6 +159,7 @@ describe("orderedUnits", () => {
       (u) => u.key,
     );
     expect(today).toEqual([
+      "aperture",
       "weather",
       "steps",
       "transit-next",
@@ -175,6 +176,7 @@ describe("moveUnit + canMove", () => {
   it("moves a unit down within its zone", () => {
     const c = moveUnit(EMPTY_LAYOUT, "center", "weather", 1);
     expect(orderedUnitsInZone(c, "center", "today").map((u) => u.key)).toEqual([
+      "aperture",
       "steps",
       "weather",
       "transit-next",
@@ -196,8 +198,8 @@ describe("moveUnit + canMove", () => {
   });
 
   it("never crosses a zone boundary", () => {
-    // weather is first in TODAY; moving it up is a no-op (not into the fixed row)
-    expect(moveUnit(EMPTY_LAYOUT, "center", "weather", -1)).toEqual(
+    // aperture is first in TODAY; moving it up is a no-op (not into the fixed row)
+    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture", -1)).toEqual(
       EMPTY_LAYOUT,
     );
     // health is last in THIS WEEK; moving it down is a no-op
@@ -219,10 +221,20 @@ describe("moveUnit + canMove", () => {
   });
 
   it("canMove greys the arrows at the zone edges", () => {
-    expect(canMove(EMPTY_LAYOUT, "center", "weather", -1)).toBe(false);
-    expect(canMove(EMPTY_LAYOUT, "center", "weather", 1)).toBe(true);
+    expect(canMove(EMPTY_LAYOUT, "center", "aperture", -1)).toBe(false);
+    expect(canMove(EMPTY_LAYOUT, "center", "aperture", 1)).toBe(true);
+    // weather is no longer the top of TODAY, so it CAN move up now.
+    expect(canMove(EMPTY_LAYOUT, "center", "weather", -1)).toBe(true);
     expect(canMove(EMPTY_LAYOUT, "center", "health", 1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "dropbox", 1)).toBe(false);
+  });
+
+  it("puts the aperture band first in TODAY by default", () => {
+    // Default position #1 is part of the module's spec, not an accident of the
+    // registry's order: the status band is the first thing the morning shows.
+    expect(orderedUnitsInZone(EMPTY_LAYOUT, "center", "today")[0].key).toBe(
+      "aperture",
+    );
   });
 
   it("reorders lobby units (single zone)", () => {

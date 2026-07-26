@@ -6,6 +6,7 @@ import {
   TOTP_CONTEXT,
   TRANSIT_CONTEXT,
 } from "./aevcontext";
+import { APERTURE_PATH } from "./aperturestore";
 import { generateMk, open, seal, type EnvelopeMeta } from "./crypto";
 import { FIN_PATH } from "./finstore";
 import { TODO_PATH } from "./todostore";
@@ -71,12 +72,12 @@ describe("aevcontext — AEV2 round-trip per store", () => {
 });
 
 describe("aevcontext — aperture", () => {
-  it("pins the literal context string", () => {
-    // No aperture store module exists yet, so there's no PATH to pin against the
-    // way STORES does — the literal stands in until the store PR lands, and that
-    // PR must add the PATH === context assertion for the same reason: seal and
-    // open drifting apart means a blob that stops decrypting on prod.
-    expect(APERTURE_CONTEXT).toBe("meta/aperture");
+  it("equals the R2 path its store module reads from", () => {
+    // The same drift guard the STORES array gives the four config stores, now
+    // that aperturestore exists to pin against: seal and open using different
+    // strings means a blob that stops decrypting on prod, so the context is held
+    // equal to the PATH constant rather than to a literal copied beside it.
+    expect(APERTURE_CONTEXT).toBe(APERTURE_PATH);
   });
 
   it("differs from every config-store context", () => {

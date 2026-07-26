@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
+import { ApertureBand } from "@/components/ApertureBand";
 import { SignOut } from "@/components/auth-buttons";
 import { ChoresRow } from "@/components/ChoresRow";
 import { DropInbox } from "@/components/DropInbox";
@@ -18,6 +19,7 @@ import {
   toLevels,
 } from "@/lib/activity";
 import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
+import { getApertureGlance } from "@/lib/connectors/aperture";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getChoreReads } from "@/lib/connectors/chores";
 import { getGithub } from "@/lib/connectors/github";
@@ -115,6 +117,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     health,
     steps,
     drops,
+    aperture,
   ] = await Promise.all([
     getBriefing(),
     getLanguageStats(),
@@ -129,12 +132,14 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getHealth(),
     getSteps(today),
     dropCount(),
+    getApertureGlance(),
   ]);
   const b = briefing ?? sampleBriefing;
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
   // which of these blocks render at all.
   const hidden = hiddenSet(layout, "center");
   const todayVisible = [
+    "aperture",
     "weather",
     "steps",
     "transit-next",
@@ -232,6 +237,14 @@ export async function CommandCenter({ userName }: { userName: string }) {
       !hidden.has("dropbox") && drops > 0 ? (
         <DropInbox offline={!r2Enabled()} count={drops} />
       ) : null,
+
+    /* aperture — the private status band. The ONE deliberate standing block
+       (ADR 0109's exception-only rule acknowledged): the status display IS the
+       reminder surface, so it has no quiet state to hide in. Rank + stage are
+       server-rendered off the plaintext glance; the rest is a vault island. */
+    aperture: !hidden.has("aperture") ? (
+      <ApertureBand glance={aperture} offline={!r2Enabled()} />
+    ) : null,
 
     /* the morning glance rows (roadmap 50+51): Sydney weather is public
        data server-rendered off the keyless Open-Meteo connector; the
