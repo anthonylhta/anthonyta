@@ -1,12 +1,19 @@
-import type { ApertureDoc, ApertureGlance, ApertureTrial } from "./aperture";
+import {
+  isApertureStage,
+  type AperturePath,
+  type ApertureCondition,
+  type ApertureDoc,
+  type ApertureGlance,
+  type ApertureTrial,
+} from "./aperture";
 
 /**
- * apertureview — the pure view spine of the status band and its detail island.
- * Every decision the two components make lives here: which of the six island
- * states to render, which literal Tailwind class a colour or a status wears, how a
- * date turns into a countdown, which trials collapse behind the "+n" toggle. The
- * components are thin JSX over these values and hold no branching logic of their
- * own.
+ * apertureview — the pure view spine of the character sheet: the masthead and the
+ * sealed island below it. Every decision those components make lives here: which of
+ * the six island states to render, which literal Tailwind class a colour or a status
+ * wears, how a date turns into a countdown, what a band's right-hand summary says,
+ * which trials collapse behind the "+n" toggle. The components are thin JSX over
+ * these values and hold no branching logic of their own.
  *
  * That split is the house testing discipline, not an abstraction for its own sake:
  * vitest runs node-env here, so a component's behaviour is only testable once it is
@@ -93,7 +100,7 @@ export const ESSENCE_TEXT: Record<string, string> = {
   "Yellow Apricot": "text-yellow-apricot",
 };
 
-/** The same canon as swatch fills — the band's 2.5×2.5 square. */
+/** The same canon as fills — the masthead's rank bar and its swatch. */
 export const ESSENCE_SWATCH: Record<string, string> = {
   "Jade Green": "bg-jade-green",
   "Pale Green": "bg-pale-green",
@@ -150,9 +157,10 @@ const CONDITION_CHIP: Record<string, string> = {
   failing: "border-down/50 text-down",
   // The tribulation exemption, honoured in CSS: a SUSPENDED condition was paused
   // by the adjudicator, not broken by the owner, so it must never wear a `down`
-  // (red) class — red here would read as failure and be a lie every time. It gets
-  // the neutral chip, and the ⏸ prefix below carries the whole meaning.
-  suspended: MUTED_CHIP,
+  // (red) class — red here would read as failure and be a lie every time. It keeps
+  // the neutral COLOUR and says its piece in shape instead: a dashed border, plus
+  // the ⏸ prefix below.
+  suspended: "border-hairline border-dashed text-muted",
 };
 
 /** A condition status's chip class; an unknown status gets the muted chip. */
@@ -166,15 +174,59 @@ export function conditionChipPrefix(status: string): string {
   return status === "suspended" ? "⏸ " : "";
 }
 
+/** How a status reads on its chip. Only the one snake_case value in the vocabulary
+ *  is respelled; every other status — known or not — prints as its own literal. */
+export function conditionStatusWord(status: string): string {
+  return status === "not_held" ? "not held" : status;
+}
+
+/**
+ * The conditions band's right-hand summary: what is WORST first, at most two
+ * segments ("1 failing · 1 suspended"). Worst-first because the header is read
+ * before the chips are, and a band that leads with "3 held" while one condition is
+ * failing has buried the only thing worth acting on. Statuses this build has never
+ * heard of sort last but still get a segment when there is room — the summary
+ * abbreviates, and abbreviating must never be how an unknown status disappears.
+ */
+const SUMMARY_ORDER: readonly string[] = [
+  "failing",
+  "suspended",
+  "hardening",
+  "not_held",
+  "held",
+  "hardened",
+];
+
+/** How many segments the summary shows before it stops — two reads at a glance. */
+const SUMMARY_SEGMENTS = 2;
+
+export function conditionsSummary(conditions: ApertureCondition[]): string {
+  const counts = new Map<string, number>();
+  for (const c of conditions)
+    counts.set(c.status, (counts.get(c.status) ?? 0) + 1);
+
+  const known = SUMMARY_ORDER.filter((s) => counts.has(s));
+  const unknown = [...counts.keys()].filter((s) => !SUMMARY_ORDER.includes(s));
+  return [...known, ...unknown]
+    .slice(0, SUMMARY_SEGMENTS)
+    .map((s) => `${counts.get(s)} ${conditionStatusWord(s)}`)
+    .join(" · ");
+}
+
 // --- path evidence -------------------------------------------------------------
 
-/** Where a path's activity series comes from, and what to call the strip. */
+/** Where a path's activity series comes from, and how its evidence reads. */
 export interface ActivitySeries {
   /** The connector whose per-day series the shell draws (the `getX` behind it). */
   source: string;
   /** The site's caption for the strip — the emitter's word for the series is the
    *  KEY, this is what the sheet prints next to it. */
   label: string;
+  /** How the number beside the strip reads: a WEEK's movement (`+12`) or the
+   *  latest day's absolute COUNT (`8,423`). */
+  mode: "delta" | "count";
+  /** The word after the number, empty when the number speaks for itself. */
+  unit: string;
 }
 
 /**
@@ -198,40 +250,96 @@ export const ACTIVITY_SERIES: Readonly<
   // doesn't carry. An inherited method resolving as a descriptor would be exactly
   // the unknown-dressed-as-known this module refuses.
   Object.assign(Object.create(null) as Record<string, ActivitySeries>, {
-    commits: { source: "github", label: "commits" },
-    languages: { source: "translator", label: "languages" },
-    steps: { source: "steps", label: "steps" },
+    commits: {
+      source: "github",
+      label: "commits",
+      mode: "delta",
+      unit: "commits",
+    },
+    languages: {
+      source: "translator",
+      label: "languages",
+      mode: "delta",
+      unit: "",
+    },
+    steps: { source: "steps", label: "steps", mode: "count", unit: "steps" },
   }),
 );
+
+/**
+ * What a path row carries on its right. A `strip` is one of the series above; the
+ * `wealth` row is the one exception, because its figure is the SITE's own — the
+ * decrypted fin envelope (ADR 0061), not a per-day series any connector emits — so
+ * it renders as a total with a month-to-date arrow instead of a heatmap.
+ */
+export type PathEvidence =
+  | { kind: "strip"; key: string; series: ActivitySeries }
+  | { kind: "wealth" }
+  | null;
+
+/** The one path the sheet knows by NAME as well as by declaration — see below. */
+const WEALTH = "wealth";
+
+/**
+ * A path's evidence, or null for none at all. Precedence: a declared series the
+ * sheet can draw, then the wealth figure, then nothing. A path naming a series this
+ * build has never heard of gets NO evidence — never an empty strip, and never a
+ * reason to drop the path.
+ *
+ * Wealth is recognised from `activity: "wealth"` OR from the path's own name, which
+ * is a deliberate asymmetry: every other series is the emitter's to declare because
+ * only the emitter knows which connector it means, whereas the wealth figure comes
+ * from the hub's own envelope either way. Matching the name too means the row shows
+ * the money whether or not the document thought to point at it.
+ */
+export function pathEvidence(path: AperturePath): PathEvidence {
+  const key = path.activity;
+  if (key !== undefined) {
+    const series = ACTIVITY_SERIES[key];
+    if (series) return { kind: "strip", key, series };
+    if (key.trim().toLowerCase() === WEALTH) return { kind: "wealth" };
+  }
+  if (path.name.trim().toLowerCase() === WEALTH) return { kind: "wealth" };
+  return null;
+}
+
+/** A movement, always signed — `+12`, `0` reads as `+0` (a week that ran flat is
+ *  still a week that was measured). */
+export function signedCount(n: number): string {
+  return n >= 0 ? `+${n}` : `${n}`;
+}
 
 // --- dates ---------------------------------------------------------------------
 
 /**
- * Whole days from `nowMs` until `iso`, rounded UP (a date 12h away is "1d", never
- * "0d"); negative once the date is past. Null on anything unparseable — a broken
- * date must never render as a number. The clock is injected, like lib/aperture's.
+ * Whole CALENDAR days from `todayISO` to `dateISO` — positive ahead, negative past,
+ * zero for the day itself. Floored against `todayISO`'s midnight, so a timestamp
+ * later today still reads 0 while anything before that midnight reads at least −1.
+ * Null on anything unparseable at either end: a broken date must never become a
+ * number. The day anchor is injected, like every clock in this module.
  */
-export function daysUntil(iso: string, nowMs: number): number | null {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return null;
-  return Math.ceil((t - nowMs) / DAY_MS);
+export function dayGap(dateISO: string, todayISO: string): number | null {
+  const t = Date.parse(dateISO);
+  const today = Date.parse(todayISO);
+  if (!Number.isFinite(t) || !Number.isFinite(today)) return null;
+  return Math.floor((t - today) / DAY_MS);
 }
 
+/** How close a date has to be for the sheet to raise its voice about it. */
+const IMMINENT_DAYS = 7;
+
 /**
- * How a trial's date reads on the row. No date at all is "unscheduled" — the
- * honest state, not an omission. A future date becomes a restrained countdown
- * ("in 41d"); a past or today's date shows AS the date, because a resolved trial
- * is a fact with a day attached and counting down to it would be nonsense. An
- * unparseable string passes through as the literal, per the muted-literal rule.
+ * Whether a date is close enough to shout about — today or within the next week.
+ * A date that has already gone by is NOT imminent: it is late, which the row says
+ * in words ("2 days ago") rather than in amber.
  */
-export function trialSchedule(
-  date: string | null | undefined,
-  nowMs: number,
-): string {
-  if (date === null || date === undefined) return "unscheduled";
-  const days = daysUntil(date, nowMs);
-  if (days === null) return date;
-  return days > 0 ? `in ${days}d` : date;
+export function isImminent(
+  dateISO: string | null | undefined,
+  todayISO: string,
+): boolean {
+  if (dateISO === null || dateISO === undefined) return false;
+  const gap = dayGap(dateISO, todayISO);
+  return gap !== null && gap >= 0 && gap <= IMMINENT_DAYS;
 }
 
 /**
@@ -241,24 +349,17 @@ export function trialSchedule(
  * for anything unparseable, both of which leave the copy to the caller
  * ("unscheduled"); a broken date must never render as a number.
  *
- * Anchored on a DAY, not an instant: `todayISO` is the Sydney calendar day, where
- * `trialSchedule` and `sealedAgo` take a clock. Floored against that day's
- * midnight, so a timestamp later today still reads "today" while anything before
- * that midnight reads at least "1 day ago" — calendar days, which is what a trial
+ * Anchored on a DAY, not an instant (`dayGap` above): `todayISO` is the Sydney
+ * calendar day, where `sealedAgo` takes a clock — calendar days are what a trial
  * actually has.
- *
- * `trialSchedule` above is the band-era compact form ("in 41d") the detail island
- * still uses; this is the sheet's sentence form.
  */
 export function trialCountdown(
   dateISO: string | null | undefined,
   todayISO: string,
 ): string | null {
   if (dateISO === null || dateISO === undefined) return null;
-  const t = Date.parse(dateISO);
-  const today = Date.parse(todayISO);
-  if (!Number.isFinite(t) || !Number.isFinite(today)) return null;
-  const days = Math.floor((t - today) / DAY_MS);
+  const days = dayGap(dateISO, todayISO);
+  if (days === null) return null;
   if (days === 0) return "today";
   const n = Math.abs(days);
   const unit = n === 1 ? "day" : "days";
@@ -297,11 +398,139 @@ export function splitTrials(trials: ApertureTrial[]): {
   };
 }
 
-// --- the band's one line -------------------------------------------------------
+/**
+ * The trials band's right-hand summary, over the OPEN trials only (resolved ones sit
+ * behind their own toggle): "1 active · 1 stocked", or — once a stocked trial is
+ * within the week — "1 in 3 days". A single stocked trial reads AS its countdown,
+ * because with one there is nothing to count; several keep the count and name the
+ * nearest. Anything neither active nor stocked is tallied as "open" rather than
+ * folded into a state it doesn't hold: an unknown state must not vanish from the
+ * header any more than it vanishes from the rows.
+ */
+export function trialsSummary(open: ApertureTrial[], todayISO: string): string {
+  const active = open.filter((t) => t.state === "active").length;
+  const stocked = open.filter((t) => t.state === "stocked");
+  const other = open.length - active - stocked.length;
+
+  const segments: string[] = [];
+  if (active > 0) segments.push(`${active} active`);
+  if (stocked.length > 0) {
+    let nearest: { gap: number; words: string } | null = null;
+    for (const t of stocked) {
+      const date = t.date;
+      if (!date || !isImminent(date, todayISO)) continue;
+      const gap = dayGap(date, todayISO);
+      const words = trialCountdown(date, todayISO);
+      if (gap === null || words === null) continue;
+      if (nearest === null || gap < nearest.gap) nearest = { gap, words };
+    }
+    if (nearest === null) segments.push(`${stocked.length} stocked`);
+    else if (stocked.length === 1) segments.push(`1 ${nearest.words}`);
+    else segments.push(`${stocked.length} stocked · next ${nearest.words}`);
+  }
+  if (other > 0) segments.push(`${other} open`);
+  return segments.join(" · ");
+}
+
+// --- the masthead's rank reading ------------------------------------------------
 
 /** The zero-tap line: "RANK 3 · UPPER". The stage is uppercased whether or not
  *  this build knows it — it's a literal either way, and an unknown stage still
- *  belongs on the band. */
+ *  belongs on the masthead. */
 export function bandLine(glance: ApertureGlance): string {
   return `RANK ${glance.rank} · ${glance.stage.toUpperCase()}`;
+}
+
+/** 一 through 九 — the nine ranks. Index is `rank - 1`; anything off the end is a
+ *  rank this canon has no numeral for. */
+const RANK_NUMERALS: readonly string[] = [
+  "一",
+  "二",
+  "三",
+  "四",
+  "五",
+  "六",
+  "七",
+  "八",
+  "九",
+];
+
+/** The four mortal stages, in the canon's own glyphs. */
+const STAGE_GLYPHS: Record<string, string> = {
+  initial: "初期",
+  middle: "中期",
+  upper: "后期",
+  peak: "巅峰",
+};
+
+/**
+ * The masthead's quiet flourish: 一转·初期 for rank 1 initial. Muted decoration over
+ * the rank line, never the reading itself, so it is allowed to say LESS than the
+ * line above it and never more: a rank outside the canon's nine numerals renders
+ * nothing at all (rather than a numeral nobody assigned), and a stage this build has
+ * never heard of — including every immortal rank, which is stageless by canon —
+ * leaves the glyphs at the rank alone.
+ */
+export function stageGlyphs(rank: number, stage: string): string | null {
+  if (!Number.isInteger(rank)) return null;
+  const numeral = RANK_NUMERALS[rank - 1];
+  if (numeral === undefined) return null;
+  const glyph = isApertureStage(stage) ? STAGE_GLYPHS[stage] : undefined;
+  return glyph === undefined ? `${numeral}转` : `${numeral}转·${glyph}`;
+}
+
+// --- the mortal pulse row -------------------------------------------------------
+
+/** The three mortal signals the day already has server-side. */
+export interface MortalSignals {
+  riichiStreak: number;
+  tftGames: number;
+  /** Chapters read since ~a week ago; null while the index has no baseline yet. */
+  readingDelta: number | null;
+}
+
+/** One `label value unit` segment of the mortal row. */
+export interface MortalSegment {
+  label: string;
+  value: string;
+  unit?: string;
+}
+
+/**
+ * The mortal row, as segments: `riichi streak 4 · tft +3 · reading +9 ch`. The
+ * reading segment DROPS OUT rather than reading zero when there is no baseline to
+ * diff against — a "+0" the site made up is worse than a shorter line.
+ */
+export function mortalSegments(s: MortalSignals): MortalSegment[] {
+  const segments: MortalSegment[] = [
+    { label: "riichi streak", value: `${s.riichiStreak}` },
+    { label: "tft", value: signedCount(s.tftGames) },
+  ];
+  if (s.readingDelta !== null)
+    segments.push({
+      label: "reading",
+      value: signedCount(s.readingDelta),
+      unit: "ch",
+    });
+  return segments;
+}
+
+// --- the adjudication rider -----------------------------------------------------
+
+/** A vault daily note's title is its Sydney calendar day, and nothing else is. */
+const DAILY_TITLE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The newest daily-note day among a set of vault note titles, or null when none of
+ * them is a day. Lexical comparison is the whole trick — `YYYY-MM-DD` sorts as it
+ * counts — and titles that aren't days (every other note in the vault) are simply
+ * not days, not errors. Feeds `isAdjudicationPending`: this is the raw journal edge
+ * the seal is measured against.
+ */
+export function latestDailyDay(titles: string[]): string | null {
+  let latest: string | null = null;
+  for (const title of titles)
+    if (DAILY_TITLE.test(title) && (latest === null || title > latest))
+      latest = title;
+  return latest;
 }

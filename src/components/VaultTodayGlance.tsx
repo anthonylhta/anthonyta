@@ -14,7 +14,7 @@ import { parseDaily, type TodayDigest } from "@/lib/today";
  * vault is unlocked (the IndexedDB key cache usually means it already is). Any miss —
  * offline, locked, no note yet, a fetch/decrypt hiccup — degrades to the same Module
  * chrome with a muted nudge, so the layout never shifts and the homepage never crashes.
- * Mirrors NetWorthGlance's invested-only fallback; parseDaily stays the pure server
+ * Mirrors useFinTotals' sealed-figure fallback; parseDaily stays the pure server
  * transform, now run on the decrypted bytes.
  */
 
@@ -44,7 +44,7 @@ export function VaultTodayGlance({
   const [loaded, setLoaded] = useState<Loaded>(null);
 
   // Render-phase reset (not an effect): drop the decrypted note the moment the vault
-  // stops being unlocked, per the lint-blessed reset pattern (NetWorthGlance/FinPanel).
+  // stops being unlocked, per the lint-blessed reset pattern (useFinTotals/FinPanel).
   const unlocked = status === "unlocked";
   const [wasUnlocked, setWasUnlocked] = useState(unlocked);
   if (wasUnlocked !== unlocked) {

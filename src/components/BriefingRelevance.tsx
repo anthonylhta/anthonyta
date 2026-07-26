@@ -17,7 +17,7 @@ import type { Briefing } from "@/lib/sampleBriefing";
  * This is an annotation, not a data row: any miss — offline, locked, no holdings, no
  * matches, a fetch/decrypt hiccup — renders NOTHING. It only ever mounts inside an
  * owner-gated tree, so "nothing" is the right absence, not a teaser. Mirrors
- * NetWorthGlance's unlock lifecycle and its render-phase reset-on-lock exactly.
+ * useFinTotals' unlock lifecycle and its render-phase reset-on-lock exactly.
  */
 
 export function BriefingRelevance({
@@ -31,7 +31,7 @@ export function BriefingRelevance({
   const [hits, setHits] = useState<RelevanceHit[]>([]);
 
   // Render-phase adjustment (not an effect): drop the matches the moment the vault
-  // stops being unlocked, per the lint-blessed reset pattern (NetWorthGlance/FinPanel).
+  // stops being unlocked, per the lint-blessed reset pattern (useFinTotals/FinPanel).
   const unlocked = status === "unlocked";
   const [wasUnlocked, setWasUnlocked] = useState(unlocked);
   if (wasUnlocked !== unlocked) {

@@ -25,9 +25,6 @@ export const MAX_STEPS_BYTES = 1024;
 /** Days of history retained on write (a rolling ~quarter — plenty for a strip). */
 export const STEPS_HISTORY_CAP = 120;
 
-/** How many trailing days the TODAY-row strip covers. */
-export const STEPS_STRIP_DAYS = 14;
-
 /** A daily ceiling no human clears — guards against garbage / overflow input. */
 const MAX_DAILY_STEPS = 300_000;
 
