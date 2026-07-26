@@ -464,6 +464,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
               transit/
             </Link>
             <Link
+              href="/gym"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              gym/
+            </Link>
+            <Link
               href="/vault"
               className="text-muted transition-colors hover:text-amber"
             >

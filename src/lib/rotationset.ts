@@ -22,6 +22,7 @@
 
 import {
   FIN_CONTEXT,
+  GYM_CONTEXT,
   ROTATION_CONTEXT,
   TODO_CONTEXT,
   TOTP_CONTEXT,
@@ -82,6 +83,7 @@ const CONTEXT_STORES: ReadonlyMap<string, string> = new Map([
   [TRANSIT_CONTEXT, TRANSIT_CONTEXT],
   [TODO_CONTEXT, TODO_CONTEXT],
   [TOTP_CONTEXT, TOTP_CONTEXT],
+  [GYM_CONTEXT, GYM_CONTEXT],
 ]);
 
 /** Exact `meta/*` keys the rotation deliberately leaves alone. Literals for the
