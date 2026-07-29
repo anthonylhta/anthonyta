@@ -13,6 +13,7 @@ import {
   ACTIVITY_SERIES,
   ESSENCE_SWATCH,
   ESSENCE_TEXT,
+  ESSENCE_VAR,
   bandLine,
   conditionChipClass,
   conditionChipPrefix,
@@ -21,8 +22,13 @@ import {
   dayGap,
   declaredSeriesKeys,
   detailStatus,
+  displayNumeral,
   essenceSwatchClass,
   essenceTextClass,
+  essenceVarClass,
+  familyOf,
+  gutterPhrase,
+  hardenLabel,
   isImminent,
   latestDailyDay,
   mortalSegments,
@@ -31,6 +37,8 @@ import {
   signedCount,
   splitTrials,
   stageGlyphs,
+  tallyMarks,
+  tierGlyph,
   trialCountdown,
   trialsSummary,
 } from "./apertureview";
@@ -103,7 +111,7 @@ describe("apertureview — essence classes", () => {
     ...Object.values(IMMORTAL_ESSENCE),
   ];
 
-  it("gives every one of the 24 canon names both a text and a swatch class", () => {
+  it("gives every one of the 24 canon names a text, swatch and var class", () => {
     // Iterating the canon tables rather than a copied list: the day a rank or
     // stage is added upstream, this test fails instead of the band rendering an
     // invisible name.
@@ -111,17 +119,25 @@ describe("apertureview — essence classes", () => {
     for (const name of canon) {
       expect(ESSENCE_TEXT[name], `${name} text class`).toBeTruthy();
       expect(ESSENCE_SWATCH[name], `${name} swatch class`).toBeTruthy();
+      expect(ESSENCE_VAR[name], `${name} var class`).toBeTruthy();
       expect(essenceTextClass(name)).toBe(ESSENCE_TEXT[name]);
       expect(essenceSwatchClass(name)).toBe(ESSENCE_SWATCH[name]);
+      expect(essenceVarClass(name)).toBe(ESSENCE_VAR[name]);
     }
   });
 
-  it("maps each name to a distinct pair of literal classes", () => {
+  it("maps each name to a distinct triple of literal classes", () => {
     expect(new Set(canon.map((n) => ESSENCE_TEXT[n])).size).toBe(24);
     expect(new Set(canon.map((n) => ESSENCE_SWATCH[n])).size).toBe(24);
+    expect(new Set(canon.map((n) => ESSENCE_VAR[n])).size).toBe(24);
     for (const name of canon) {
       expect(ESSENCE_TEXT[name].startsWith("text-")).toBe(true);
       expect(ESSENCE_SWATCH[name].startsWith("bg-")).toBe(true);
+      // The var class DECLARES --essence over the same @theme token the text
+      // class consumes — the skin's whole input, one line per canon name.
+      expect(ESSENCE_VAR[name].startsWith("[--essence:var(--color-")).toBe(
+        true,
+      );
     }
   });
 
@@ -130,6 +146,63 @@ describe("apertureview — essence classes", () => {
     expect(essenceTextClass("Moonstone")).toBe("text-muted");
     expect(essenceSwatchClass(null)).toBeNull();
     expect(essenceSwatchClass("Moonstone")).toBeNull();
+    // Off canon the ESSENCE VARIABLE is muted too — the skin's chrome (brush,
+    // gutters, headers) stays legible without inventing a colour.
+    expect(essenceVarClass(null)).toBe("[--essence:var(--color-muted)]");
+    expect(essenceVarClass("Moonstone")).toBe("[--essence:var(--color-muted)]");
+  });
+});
+
+describe("apertureview — the skin's vocabulary (ADR 0118)", () => {
+  it("names each mortal rank's essence family, and none above the ceiling", () => {
+    expect(familyOf(1)).toEqual({ en: "Green Copper", zh: "青铜" });
+    expect(familyOf(2)).toEqual({ en: "Red Steel", zh: "赤铁" });
+    expect(familyOf(3)).toEqual({ en: "White Silver", zh: "白银" });
+    expect(familyOf(4)).toEqual({ en: "Yellow Gold", zh: "黄金" });
+    expect(familyOf(5)).toEqual({ en: "Purple Crystal", zh: "紫晶" });
+    // Immortal essence has ONE name and essenceOf already returns it — a family
+    // line would only repeat it, so there is none.
+    for (const rank of [6, 7, 8, 9, 0, 10, 2.5, NaN])
+      expect(familyOf(rank), `rank ${rank}`).toBeNull();
+  });
+
+  it("phrases the left gutter from the family, or not at all", () => {
+    expect(gutterPhrase(1)).toBe("青铜之气");
+    expect(gutterPhrase(5)).toBe("紫晶之气");
+    expect(gutterPhrase(6)).toBeNull();
+    expect(gutterPhrase(99)).toBeNull();
+  });
+
+  it("gives the nine ranks their display numerals and no one else any", () => {
+    expect(displayNumeral(1)).toBe("壹");
+    expect(displayNumeral(9)).toBe("玖");
+    for (const rank of [0, 10, 1.5, NaN])
+      expect(displayNumeral(rank), `rank ${rank}`).toBeNull();
+  });
+
+  it("glyphs the three known trial tiers and stays silent on the rest", () => {
+    expect(tierGlyph("earthly")).toBe("地");
+    expect(tierGlyph("heavenly")).toBe("天");
+    expect(tierGlyph("grand")).toBe("大");
+    expect(tierGlyph("cosmic")).toBeNull();
+    expect(tierGlyph("")).toBeNull();
+  });
+
+  it("inks strike tallies by fives, and only where a tally still reads", () => {
+    expect(tallyMarks(1)).toBe("丨");
+    expect(tallyMarks(4)).toBe("丨丨丨丨");
+    expect(tallyMarks(5)).toBe("正");
+    expect(tallyMarks(7)).toBe("正丨丨");
+    expect(tallyMarks(15)).toBe("正正正");
+    // Zero, the uncountable, and the woodpile all fall back to the digit alone.
+    for (const n of [0, -3, 2.5, NaN, 16, 100])
+      expect(tallyMarks(n), `n=${n}`).toBeNull();
+  });
+
+  it("reads a harden date in the meta line's register", () => {
+    expect(hardenLabel("2026-08-12")).toBe("hardens ~aug 12");
+    expect(hardenLabel("2026-12-01")).toBe("hardens ~dec 1");
+    expect(hardenLabel("not-a-date")).toBeNull();
   });
 });
 
@@ -148,9 +221,17 @@ describe("apertureview — condition chips", () => {
     for (const c of classes) expect(c).toBeTruthy();
     expect(new Set(classes).size).toBe(6);
     expect(conditionChipClass("failing")).toBe("border-down/50 text-down");
-    expect(conditionChipClass("held")).toContain("text-up");
-    expect(conditionChipClass("hardened")).toContain("text-up");
-    expect(conditionChipClass("hardening")).toContain("text-amber");
+    // The healthy ladder wears the sheet's essence variable (the cultivation
+    // skin, ADR 0118), soft → full → full-with-wash as a condition hardens.
+    expect(conditionChipClass("hardening")).toBe(
+      "border-(--essence-soft) text-(--essence)",
+    );
+    expect(conditionChipClass("held")).toBe(
+      "border-(--essence) text-(--essence)",
+    );
+    expect(conditionChipClass("hardened")).toBe(
+      "border-(--essence) bg-(--essence-faint) text-(--essence)",
+    );
   });
 
   it("NEVER paints a suspended condition red — the tribulation exemption", () => {
@@ -163,6 +244,9 @@ describe("apertureview — condition chips", () => {
     expect(chip).not.toContain("down");
     expect(chip).not.toContain("up");
     expect(chip).not.toContain("amber");
+    // …and not the essence either: the pause is the adjudicator's neutrality,
+    // so it must not wear the healthy ladder's colour any more than red.
+    expect(chip).not.toContain("essence");
     expect(conditionChipPrefix("suspended")).toBe("⏸ ");
   });
 

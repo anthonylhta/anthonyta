@@ -33,7 +33,12 @@ import {
   sydneyDaysAgo,
   type SnapIndexDay,
 } from "@/lib/fin";
-import { mortalSegments } from "@/lib/apertureview";
+import { essenceOf } from "@/lib/aperture";
+import {
+  essenceVarClass,
+  gutterPhrase,
+  mortalSegments,
+} from "@/lib/apertureview";
 import {
   hiddenSet,
   orderedUnitsInZone,
@@ -386,8 +391,34 @@ export async function CommandCenter({ userName }: { userName: string }) {
       ) : null,
   };
 
+  // The cultivation skin (ADR 0118) rides the container: the data-skin attribute
+  // scopes every skin style, and the essence variable — looked up from the
+  // PLAINTEXT glance's rank/stage, so even the locked page tints — is declared
+  // here once for everything below to consume. No glance, no skin: the unplaced
+  // sheet stays plain Warm Terminal.
+  const essence = aperture ? essenceOf(aperture.rank, aperture.stage) : null;
+  const phrase = aperture ? gutterPhrase(aperture.rank) : null;
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
+    <main
+      data-skin={aperture ? "cultivation" : undefined}
+      className={`mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6 ${
+        aperture ? essenceVarClass(essence) : ""
+      }`}
+    >
+      {/* vertical ink ornaments — fixed in the page gutters, wide desktop only
+          (CSS hides them long before they could crowd the sheet) */}
+      {aperture && (
+        <>
+          <div aria-hidden lang="zh" className="skin-gutter skin-gutter-l">
+            {phrase}
+            <span className="skin-gutter-stroke" />
+          </div>
+          <div aria-hidden lang="zh" className="skin-gutter skin-gutter-r">
+            观微知著
+          </div>
+        </>
+      )}
       <div className="border border-hairline bg-surface/20">
         <StatusBar user={userName} />
 

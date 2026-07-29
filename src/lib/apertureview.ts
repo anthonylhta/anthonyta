@@ -143,6 +143,77 @@ export function essenceSwatchClass(name: string | null): string | null {
   return (name && ESSENCE_SWATCH[name]) || null;
 }
 
+/**
+ * The same canon a third way: the class that DECLARES the sheet's `--essence`
+ * variable (the cultivation skin's one input — ADR 0118). Set once on the sheet
+ * container; every essence-tinted border, wash, strip and glyph below consumes
+ * the variable instead of naming a colour. Arbitrary-property classes are still
+ * static literals, so the JIT rule above holds.
+ */
+export const ESSENCE_VAR: Record<string, string> = {
+  "Jade Green": "[--essence:var(--color-jade-green)]",
+  "Pale Green": "[--essence:var(--color-pale-green)]",
+  "Dark Green": "[--essence:var(--color-dark-green)]",
+  "Black Green": "[--essence:var(--color-black-green)]",
+  "Light Red": "[--essence:var(--color-light-red)]",
+  Scarlet: "[--essence:var(--color-scarlet)]",
+  Crimson: "[--essence:var(--color-crimson)]",
+  "Dark Red": "[--essence:var(--color-dark-red)]",
+  "Light Silver": "[--essence:var(--color-light-silver)]",
+  "Blossom Silver": "[--essence:var(--color-blossom-silver)]",
+  "Bright Silver": "[--essence:var(--color-bright-silver)]",
+  "Snow Silver": "[--essence:var(--color-snow-silver)]",
+  "Light Gold": "[--essence:var(--color-light-gold)]",
+  "Bright Gold": "[--essence:var(--color-bright-gold)]",
+  "Essence Gold": "[--essence:var(--color-essence-gold)]",
+  "True Gold": "[--essence:var(--color-true-gold)]",
+  "Light Purple": "[--essence:var(--color-light-purple)]",
+  Violet: "[--essence:var(--color-violet)]",
+  "Deep Purple": "[--essence:var(--color-deep-purple)]",
+  "Crystal Purple": "[--essence:var(--color-crystal-purple)]",
+  "Green Grape": "[--essence:var(--color-green-grape)]",
+  "Red Date": "[--essence:var(--color-red-date)]",
+  "White Litchi": "[--essence:var(--color-white-litchi)]",
+  "Yellow Apricot": "[--essence:var(--color-yellow-apricot)]",
+};
+
+/** The skin's `--essence` declaration for a canon name. Off canon the essence IS
+ *  muted — the unknown-renders-muted doctrine as a variable — so the skin's
+ *  chrome stays legible without ever inventing a colour. */
+export function essenceVarClass(name: string | null): string {
+  return (name && ESSENCE_VAR[name]) || "[--essence:var(--color-muted)]";
+}
+
+/**
+ * The metal-tier NAME of each mortal rank's essence — the layer of the canon
+ * above the 20 stage shades (rank 1's Jade→Black Green are the shades of Green
+ * Copper essence, and so on). Immortal ranks aren't here: their essence has one
+ * name and `essenceOf` already returns it, so a family line would only repeat it.
+ */
+export const ESSENCE_FAMILY: Record<
+  1 | 2 | 3 | 4 | 5,
+  { en: string; zh: string }
+> = {
+  1: { en: "Green Copper", zh: "青铜" },
+  2: { en: "Red Steel", zh: "赤铁" },
+  3: { en: "White Silver", zh: "白银" },
+  4: { en: "Yellow Gold", zh: "黄金" },
+  5: { en: "Purple Crystal", zh: "紫晶" },
+};
+
+/** A rank's essence family, or null above the mortal ceiling (and off canon). */
+export function familyOf(rank: number): { en: string; zh: string } | null {
+  if (!Number.isInteger(rank) || rank < 1 || rank > 5) return null;
+  return ESSENCE_FAMILY[rank as 1 | 2 | 3 | 4 | 5];
+}
+
+/** The left gutter's vertical phrase — the essence family as qi (青铜之气). Null
+ *  where there is no family to name, and the gutter simply stays a stroke. */
+export function gutterPhrase(rank: number): string | null {
+  const family = familyOf(rank);
+  return family === null ? null : `${family.zh}之气`;
+}
+
 // --- condition chips -----------------------------------------------------------
 
 /** The neutral chip: unknown statuses AND the two known statuses that must not
@@ -151,9 +222,14 @@ const MUTED_CHIP = "border-hairline text-muted";
 
 const CONDITION_CHIP: Record<string, string> = {
   not_held: MUTED_CHIP,
-  hardening: "border-amber/40 text-amber",
-  held: "border-up/40 text-up",
-  hardened: "border-up/60 text-up",
+  // The three healthy statuses wear the sheet's essence (the cultivation skin's
+  // variable, declared on the container) in a ladder: hardening a soft border,
+  // held a full one, hardened the full border plus the faint wash — permanence
+  // earns the fill. Failing keeps the house red — bad news must not change
+  // colour with the rank.
+  hardening: "border-(--essence-soft) text-(--essence)",
+  held: "border-(--essence) text-(--essence)",
+  hardened: "border-(--essence) bg-(--essence-faint) text-(--essence)",
   failing: "border-down/50 text-down",
   // The tribulation exemption, honoured in CSS: a SUSPENDED condition was paused
   // by the adjudicator, not broken by the owner, so it must never wear a `down`
@@ -506,6 +582,76 @@ export function stageGlyphs(rank: number, stage: string): string | null {
   if (numeral === undefined) return null;
   const glyph = isApertureStage(stage) ? STAGE_GLYPHS[stage] : undefined;
   return glyph === undefined ? `${numeral}转` : `${numeral}转·${glyph}`;
+}
+
+/** 壹 through 玖 — the financial forms, the display register for the masthead's
+ *  large numeral (the running-text 一转·初期 above keeps the plain forms). */
+const DISPLAY_NUMERALS: readonly string[] = [
+  "壹",
+  "贰",
+  "叁",
+  "肆",
+  "伍",
+  "陆",
+  "柒",
+  "捌",
+  "玖",
+];
+
+/** The masthead's large rank glyph, or null off the canon's nine — a rank with
+ *  no numeral shows none, exactly like the stage glyphs above. */
+export function displayNumeral(rank: number): string | null {
+  if (!Number.isInteger(rank)) return null;
+  return DISPLAY_NUMERALS[rank - 1] ?? null;
+}
+
+// --- the skin's small glyph vocabulary -------------------------------------------
+
+/** A trial tier's single glyph — 地 earthly, 天 heavenly, 大 grand. Unknown tiers
+ *  get none: the literal tier word still prints beside it either way. */
+const TIER_GLYPHS: Record<string, string> = {
+  earthly: "地",
+  heavenly: "天",
+  grand: "大",
+};
+
+export function tierGlyph(tier: string): string | null {
+  return TIER_GLYPHS[tier] ?? null;
+}
+
+/** How many strokes of tally the wall will ink before falling back to digits
+ *  alone — three full 正 reads at a glance, more reads as a woodpile. */
+const TALLY_MAX = 15;
+
+/**
+ * A strike count as Chinese tally marks — 正 per completed five, 丨 per remainder
+ * (the count-to-正 convention: five strokes complete the character). Null for
+ * zero, non-integers, and anything past the cap — the digit beside it is always
+ * printed, so the tally only ever ADDS a reading, never replaces one.
+ */
+export function tallyMarks(n: number): string | null {
+  if (!Number.isInteger(n) || n <= 0 || n > TALLY_MAX) return null;
+  return "正".repeat(Math.floor(n / 5)) + "丨".repeat(n % 5);
+}
+
+// en-US short month over UTC: harden dates are bare Sydney calendar days, and
+// formatting the UTC-midnight they parse to preserves the written day.
+const HARDEN_DAY = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+/**
+ * A streak's harden date in the meta line's register: "hardens ~aug 12". The ~
+ * is honest — the date slips automatically with any pause, so it is an earliest,
+ * never a promise. Null on anything unparseable; a broken date must never render
+ * as a wrong day.
+ */
+export function hardenLabel(dateISO: string): string | null {
+  const t = Date.parse(dateISO);
+  if (!Number.isFinite(t)) return null;
+  return `hardens ~${HARDEN_DAY.format(t).toLowerCase()}`;
 }
 
 // --- the mortal pulse row -------------------------------------------------------
