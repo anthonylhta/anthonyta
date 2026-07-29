@@ -22,10 +22,16 @@
  *   2. Unwrap the master key (MK) from `meta/keystore` with the owner's passphrase —
  *      the same keystore the files inbox created, and the same wrong-passphrase-is-a-
  *      failed-GCM-unwrap check vault-sync relies on.
- *   3. Open the PREVIOUS envelope, if there is one, purely to diff against. A
- *      missing or unreadable prior reads as a first seal — it is a summary input,
- *      never a reason to abort a sync.
- *   4. Write the two objects the render side reads:
+ *   3. Open the PREVIOUS envelope, if there is one — to archive and to diff against.
+ *      A missing or unreadable prior reads as a first seal; that costs the summary
+ *      and the archive, never the sync.
+ *   4. ARCHIVE the prior at its dated history key (`meta/aperture-hist/<day>.bin`,
+ *      day = the seal's Sydney calendar day, AAD = the dated key itself — the
+ *      aevcontext family) BEFORE anything overwrites `meta/aperture`. Step 5
+ *      destroys the only other copy of that document, so this write goes first and
+ *      a failure aborts with nothing changed. This is what makes the weekly
+ *      overwrite non-destructive: every seal survives at its date (ADR 0116).
+ *   5. Write the two objects the render side reads:
  *        · `meta/aperture` — the AEV2 envelope (AAD = APERTURE_CONTEXT), whose
  *          plaintext is the whole document as JSON; the owner's browser opens it and
  *          re-validates with `normalizeAperture`.
@@ -33,6 +39,9 @@
  *          band draws before any unlock.
  *      Plain overwrites: this script is the store's SINGLE writer, so there is no
  *      no-clobber dance and no conflict to resolve.
+ *   6. Archive THIS seal at its own dated key too, so the record carries the
+ *      current week without waiting for the next run to treat it as the prior. A
+ *      failure here self-heals: the next run archives this document in step 4.
  *
  * Run: `npm run aperture-sync` (with APERTURE_DIR set, or the folder as the first
  * argument). The npm script loads `.env.local` for the `R2_*` vars, passes tsx as a
@@ -44,13 +53,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { APERTURE_CONTEXT } from "../src/lib/aevcontext";
+import { APERTURE_CONTEXT, apertureHistPath } from "../src/lib/aevcontext";
 import { normalizeAperture, type ApertureDoc } from "../src/lib/aperture";
 import { APERTURE_GLANCE_PATH, APERTURE_PATH } from "../src/lib/aperturestore";
 import {
   apertureGlance,
   diffSummary,
   explainApertureRejection,
+  sealDay,
 } from "../src/lib/aperturesync";
 import {
   fromB64url,
@@ -60,7 +70,7 @@ import {
   unwrapMk,
 } from "../src/lib/crypto";
 import { deriveKekForKdf } from "../src/lib/kdf";
-import { r2Enabled, readKey, writeKey } from "../src/lib/r2";
+import { r2Enabled, readKey, writeKey, type StoreWrite } from "../src/lib/r2";
 
 /** The one file this script reads, inside APERTURE_DIR. */
 const DOC_FILE = "aperture.json";
@@ -152,18 +162,19 @@ async function unwrapMasterKey(passphrase: string): Promise<CryptoKey> {
 }
 
 /**
- * The document this run is replacing, for the diff summary only. Absent, a flaky
- * read, an envelope sealed under a different key, and a stale shape all collapse to
- * null — with a warning where the store had something it couldn't hand back, since
- * "first seal" printed over a real prior document is a claim worth being told about.
- * None of it is fatal: the new seal doesn't depend on the old one.
+ * The document this run is replacing, for the dated archive and the diff summary.
+ * Absent, a flaky read, an envelope sealed under a different key, and a stale shape
+ * all collapse to null — with a warning where the store had something it couldn't
+ * hand back, since a null here now costs an ARCHIVE as well as a summary line: the
+ * overwrite in main() will destroy whatever this couldn't open. Still not fatal —
+ * the new seal doesn't depend on the old one — but worth a louder line.
  */
 async function loadPriorDoc(mk: CryptoKey): Promise<ApertureDoc | null> {
   const read = await readKey(APERTURE_PATH);
   if (read.state === "absent") return null;
   if (read.state === "error") {
     console.error(
-      "⚠ the prior envelope could not be read — the summary will read as a first seal",
+      "⚠ the prior envelope could not be read — it will NOT be archived, and the summary will read as a first seal",
     );
     return null;
   }
@@ -175,10 +186,41 @@ async function loadPriorDoc(mk: CryptoKey): Promise<ApertureDoc | null> {
     return doc;
   } catch {
     console.error(
-      "⚠ the prior envelope exists but cannot be opened — the summary will read as a first seal",
+      "⚠ the prior envelope exists but cannot be opened — it will NOT be archived, and the summary will read as a first seal",
     );
     return null;
   }
+}
+
+/**
+ * Seal `doc` a second time at its dated history key and write it, returning the
+ * key and the write's verdict for the call site to judge (the two sites abort
+ * differently — before the main overwrite nothing has changed yet; after it, a
+ * rerun converges). AAD is the dated key ITSELF, not APERTURE_CONTEXT: each
+ * archived seal binds its own address, so two weeks can never be swapped.
+ *
+ * Plain overwrite, like every write this script owns. That is also the same-day
+ * rule: syncing twice on one Sydney day leaves the day's LAST document at the
+ * dated key, which is exactly what "the seal as of that date" should mean.
+ */
+async function archiveSeal(
+  mk: CryptoKey,
+  doc: ApertureDoc,
+): Promise<{ path: string; wrote: StoreWrite }> {
+  const day = sealDay(doc.sealedAt);
+  const path = apertureHistPath(day);
+  const bytes = new TextEncoder().encode(JSON.stringify(doc));
+  const envelope = await seal(
+    mk,
+    { n: `aperture-${day}.json`, t: "application/json", s: bytes.length },
+    bytes,
+    path,
+  );
+  const wrote = await writeKey(path, envelope, {
+    overwrite: true,
+    contentType: "application/octet-stream",
+  });
+  return { path, wrote };
 }
 
 // ---------------------------------------------------------------------------
@@ -268,10 +310,22 @@ async function main(): Promise<void> {
   const mk = await unwrapMasterKey(passphrase);
   console.error("· unlocked the vault key");
 
-  // 3. the prior document, for the summary only
+  // 3. the prior document, for the archive and the summary
   const prior = await loadPriorDoc(mk);
 
-  // 4. seal the whole document — the plaintext the browser parses and re-validates
+  // 4. archive the prior at its dated key BEFORE the overwrite in step 5 destroys
+  // the only other copy of it. Failing here aborts with the store untouched —
+  // better no sync than a sync that ate a week of the record.
+  if (prior !== null) {
+    const arch = await archiveSeal(mk, prior);
+    if (arch.wrote !== "ok")
+      throw new Error(
+        `archiving the prior seal to ${arch.path} failed (${arch.wrote}) — nothing changed`,
+      );
+    console.error(`· archived the prior seal → ${arch.path}`);
+  }
+
+  // 5. seal the whole document — the plaintext the browser parses and re-validates
   const bytes = new TextEncoder().encode(JSON.stringify(doc));
   const envelope = await seal(
     mk,
@@ -289,7 +343,7 @@ async function main(): Promise<void> {
       `writing ${APERTURE_PATH} failed (${sealed}) — nothing changed`,
     );
 
-  // 5. then the glance. Envelope first, so a run that dies between the two leaves
+  // 6. then the glance. Envelope first, so a run that dies between the two leaves
   // the band a rank OLDER than the sealed document rather than one the document
   // can't back up — and says so, because the two must converge on a rerun.
   const glanceBody = JSON.stringify(apertureGlance(doc));
@@ -302,6 +356,17 @@ async function main(): Promise<void> {
     throw new Error(
       `envelope sealed, glance write FAILED (${glanced}) — rerun to converge`,
     );
+
+  // 7. this seal's own dated copy, LAST — the two live objects the band reads are
+  // already converged, and a death here costs nothing durable: the next run
+  // archives this same document as the prior in step 4.
+  const arch = await archiveSeal(mk, doc);
+  if (arch.wrote !== "ok")
+    throw new Error(
+      `synced, but archiving this seal to ${arch.path} failed (${arch.wrote}) — ` +
+        "rerun to archive it now, or the next sync archives it as the prior",
+    );
+  console.error(`· archived this seal → ${arch.path}`);
 
   console.log(diffSummary(prior, doc));
   process.exit(0);

@@ -45,6 +45,27 @@ export function apertureGlance(doc: ApertureDoc): ApertureGlance {
   };
 }
 
+// --- the archive day ----------------------------------------------------------
+
+// en-CA formats as YYYY-MM-DD. Hoisted — Intl formatters are costly to build.
+const SYDNEY_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Australia/Sydney",
+});
+
+/**
+ * The Sydney calendar day a seal belongs to — the `day` its archived copy is
+ * keyed by (`aevcontext.apertureHistPath`). Sydney rather than UTC for the same
+ * reason lib/activity buckets Sydney: the check-in happens on the owner's
+ * calendar, and a Sunday-morning seal must not archive under Saturday's date.
+ *
+ * Takes the instant, not a clock (this module owns none), and expects it
+ * already validated — `normalizeAperture` guarantees `sealedAt` parses, and an
+ * unparseable instant here would throw rather than mint a junk key.
+ */
+export function sealDay(sealedAt: string): string {
+  return SYDNEY_DAY.format(new Date(sealedAt));
+}
+
 // --- the diff summary ---------------------------------------------------------
 
 /** `1 streak` / `2 streaks` — the counts in the first-seal line. */
