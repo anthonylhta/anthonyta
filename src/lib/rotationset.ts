@@ -21,6 +21,9 @@
  */
 
 import {
+  APERTURE_CONTEXT,
+  APERTURE_HIST_PREFIX,
+  apertureHistDay,
   FIN_CONTEXT,
   GYM_CONTEXT,
   ROTATION_CONTEXT,
@@ -77,13 +80,16 @@ export type RotationClass =
   | { action: "skip"; reason: string }
   | { action: "unknown" };
 
-/** Fixed AEV2 config stores: storage path = AAD context (ADR 0099). */
+/** Fixed-key AEV2 stores: storage path = AAD context (ADR 0099; the aperture
+ *  envelope rides the same rule though its writer is the sync script, not a
+ *  browser — ADR 0112). */
 const CONTEXT_STORES: ReadonlyMap<string, string> = new Map([
   [FIN_CONTEXT, FIN_CONTEXT],
   [TRANSIT_CONTEXT, TRANSIT_CONTEXT],
   [TODO_CONTEXT, TODO_CONTEXT],
   [TOTP_CONTEXT, TOTP_CONTEXT],
   [GYM_CONTEXT, GYM_CONTEXT],
+  [APERTURE_CONTEXT, APERTURE_CONTEXT],
 ]);
 
 /** Exact `meta/*` keys the rotation deliberately leaves alone. Literals for the
@@ -107,6 +113,10 @@ const META_SKIPS: ReadonlyMap<string, string> = new Map([
   [
     "meta/snap/index.json",
     "plaintext reading index — the deliberate E2EE boundary",
+  ],
+  [
+    "meta/aperture-glance.json",
+    "plaintext rank/stage glance — deliberately unsealed (ADR 0112)",
   ],
 ]);
 
@@ -155,6 +165,14 @@ export function classifyKey(key: string): RotationClass {
 
   if (key === DROPBOX_KEY_PATH)
     return { action: "rewrite", kind: "dropboxkey" };
+
+  if (key.startsWith(APERTURE_HIST_PREFIX)) {
+    // Archived seals bind their OWN dated key as AAD (the aevcontext family),
+    // so each rewrite carries its key as its context. Malformed members refuse
+    // the rotation, exactly as a malformed vault path does.
+    if (apertureHistDay(key) === null) return { action: "unknown" };
+    return { action: "rewrite", kind: "envelope", context: key };
+  }
 
   const context = CONTEXT_STORES.get(key);
   if (context !== undefined)

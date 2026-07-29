@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ROTATION_CONTEXT } from "./aevcontext";
+import {
+  APERTURE_CONTEXT,
+  apertureHistPath,
+  ROTATION_CONTEXT,
+} from "./aevcontext";
+import { APERTURE_GLANCE_PATH, APERTURE_PATH } from "./aperturestore";
 import { AUTHLOG_PATH } from "./authlogstore";
 import { BRIEFING_PATH } from "./briefingstore";
 import { BACKUP_STAMP_PATH } from "./chores";
@@ -68,6 +73,16 @@ describe("drift guards", () => {
       kind: "envelope",
       context: GYM_PATH,
     });
+    // The aperture envelope: sealed by the sync script rather than a browser,
+    // but MK-sealed AEV2 all the same — unclassified it silently blocked every
+    // rotation from the day it first synced (found 2026-07-29).
+    expect(classifyKey(APERTURE_PATH)).toEqual({
+      action: "rewrite",
+      kind: "envelope",
+      context: APERTURE_PATH,
+    });
+    expect(APERTURE_CONTEXT).toBe(APERTURE_PATH);
+    expect(classifyKey(APERTURE_GLANCE_PATH).action).toBe("skip");
   });
 });
 
@@ -137,6 +152,25 @@ describe("classifyKey", () => {
     expect(classifyKey("meta/snap/2026-07-01.bin").action).toBe("unknown");
   });
 
+  it("archived aperture seals rewrite under their OWN key as context", () => {
+    const key = apertureHistPath("2026-07-26");
+    expect(classifyKey(key)).toEqual({
+      action: "rewrite",
+      kind: "envelope",
+      context: key,
+    });
+  });
+
+  it("a malformed aperture-hist key is unknown, not skipped", () => {
+    expect(classifyKey("meta/aperture-hist/latest.bin").action).toBe("unknown");
+    expect(classifyKey("meta/aperture-hist/2026-7-26.bin").action).toBe(
+      "unknown",
+    );
+    expect(classifyKey("meta/aperture-hist/2026-07-26.json").action).toBe(
+      "unknown",
+    );
+  });
+
   it("anything unrecognized is unknown — a future store can't slip through", () => {
     expect(classifyKey("meta/newfeature").action).toBe("unknown");
     expect(classifyKey("meta/analytics2/x").action).toBe("unknown");
@@ -154,6 +188,9 @@ describe("partitionEstate", () => {
     "vault/manifest.bin", // listed FIRST — must still walk LAST
     `vault/n-${ID}.bin`,
     "meta/fin",
+    "meta/aperture",
+    "meta/aperture-hist/2026-07-26.bin",
+    "meta/aperture-glance.json",
     `inbox/e-${ID}.bin`,
     "meta/keystore",
     "meta/dropboxkey",
@@ -166,12 +203,15 @@ describe("partitionEstate", () => {
     expect(p.walk).toEqual([
       `vault/n-${ID}.bin`,
       "meta/fin",
+      "meta/aperture",
+      "meta/aperture-hist/2026-07-26.bin",
       `inbox/e-${ID}.bin`,
       "meta/dropboxkey",
       "vault/manifest.bin",
     ]);
     expect(p.unknown).toEqual([]);
     expect(p.skipped.map((s) => s.key)).toEqual([
+      "meta/aperture-glance.json",
       "meta/keystore",
       `share/1893456000-e-${ID}.bin`,
       "meta/analytics/salt",
