@@ -4,6 +4,7 @@ import {
   apertureGlance,
   diffSummary,
   explainApertureRejection,
+  sealDay,
 } from "./aperturesync";
 
 // Wholly invented status — this repo is public, so the fixture is fiction by
@@ -113,6 +114,25 @@ describe("aperturesync — glance projection", () => {
   it("copies the document's seal instant rather than stamping a clock", () => {
     const shifted = doc({ sealedAt: "2026-02-01T07:30:00+10:00" });
     expect(apertureGlance(shifted).sealedAt).toBe("2026-02-01T07:30:00+10:00");
+  });
+});
+
+describe("aperturesync — seal day", () => {
+  it("reads a Sydney-offset instant as its own calendar day", () => {
+    expect(sealDay("2026-03-05T09:00:00+10:00")).toBe("2026-03-05");
+  });
+
+  it("buckets a UTC evening on the Sydney day it lands in", () => {
+    // 20:00Z on the 5th is already 06:00 on the 6th in Sydney (+10) — the exact
+    // shift the UTC-day trap would archive under the wrong key (activity.ts's
+    // lesson, 2026-07-03).
+    expect(sealDay("2026-03-05T20:00:00Z")).toBe("2026-03-06");
+  });
+
+  it("keeps a bare date on that date", () => {
+    // A bare day parses as UTC midnight = 10:00/11:00 Sydney the SAME day, so
+    // an emitter that ever sealed with a plain date still archives sensibly.
+    expect(sealDay("2026-07-28")).toBe("2026-07-28");
   });
 });
 

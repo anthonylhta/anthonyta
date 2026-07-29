@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   APERTURE_CONTEXT,
+  APERTURE_HIST_PREFIX,
+  apertureHistDay,
+  apertureHistPath,
   FIN_CONTEXT,
   GYM_CONTEXT,
   TODO_CONTEXT,
@@ -93,6 +96,54 @@ describe("aevcontext — aperture", () => {
     const { bytes: out } = await open(mk, env, APERTURE_CONTEXT);
     expect(new TextDecoder().decode(out)).toBe("abc");
     await expect(open(mk, env, FIN_CONTEXT)).rejects.toThrow();
+    await expect(open(mk, env)).rejects.toThrow();
+  });
+});
+
+describe("aevcontext — aperture history family", () => {
+  it("builds the dated key and reads the day back out of it", () => {
+    expect(apertureHistPath("2026-07-26")).toBe(
+      "meta/aperture-hist/2026-07-26.bin",
+    );
+    expect(apertureHistDay("meta/aperture-hist/2026-07-26.bin")).toBe(
+      "2026-07-26",
+    );
+    expect(
+      apertureHistPath("2026-07-26").startsWith(APERTURE_HIST_PREFIX),
+    ).toBe(true);
+  });
+
+  it("refuses everything that is not a well-formed dated member", () => {
+    for (const key of [
+      "meta/aperture", // the live envelope, not the family
+      "meta/aperture-hist/2026-07-26", // no extension
+      "meta/aperture-hist/2026-07-26.json", // wrong extension
+      "meta/aperture-hist/26-07-26.bin", // two-digit year
+      "meta/aperture-hist/2026-7-26.bin", // unpadded month
+      "meta/aperture-hist/latest.bin", // not a day at all
+      "meta/aperture-hist/2026-07-26/x.bin", // nested
+      "meta/aperture-hist/2026-07-26.bin.bak", // trailing junk
+    ])
+      expect(apertureHistDay(key), key).toBeNull();
+  });
+
+  it("the family prefix stays outside the live envelope's key", () => {
+    // `meta/aperture` and `meta/aperture-hist/...` must never prefix-collide:
+    // listings, backups and the rotation walk all bucket by prefix.
+    expect(APERTURE_CONTEXT.startsWith(APERTURE_HIST_PREFIX)).toBe(false);
+  });
+
+  it("two days in the family cannot be swapped for each other", async () => {
+    // The per-key AAD is the whole point: a compromised store must not be able
+    // to answer a request for one week's seal with another week's bytes.
+    const mk = await generateMk();
+    const env = await seal(mk, meta, bytes, apertureHistPath("2026-07-26"));
+    const { bytes: out } = await open(mk, env, apertureHistPath("2026-07-26"));
+    expect(new TextDecoder().decode(out)).toBe("abc");
+    await expect(
+      open(mk, env, apertureHistPath("2026-08-02")),
+    ).rejects.toThrow();
+    await expect(open(mk, env, APERTURE_CONTEXT)).rejects.toThrow();
     await expect(open(mk, env)).rejects.toThrow();
   });
 });
