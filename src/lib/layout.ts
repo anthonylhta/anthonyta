@@ -120,6 +120,12 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "aperture-trials", label: "trials" }],
   },
   {
+    key: "aperture-record",
+    zone: "trials",
+    label: "the record (seal history)",
+    modules: [{ key: "aperture-record", label: "the record (seal history)" }],
+  },
+  {
     key: "weather",
     zone: "today",
     label: "weather (sydney)",

@@ -94,6 +94,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET"],
   },
   {
+    routeKey: "/api/aperture/hist",
+    probe: "/api/aperture/hist?d=2026-01-01",
+    shape: "owner-api",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/api/auth/webauthn/creds",
     probe: "/api/auth/webauthn/creds",
     shape: "owner-api",

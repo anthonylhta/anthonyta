@@ -324,6 +324,7 @@ test.describe("guest gating", () => {
     "strikes this week", // the wall band
     "mortal", // the day's pulse row (and its registry label)
     "last 10 weeks", // the paths band's evidence strips (no lobby strip says this)
+    "the record", // the seal-history band's divider
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
