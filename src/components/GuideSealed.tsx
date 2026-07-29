@@ -31,11 +31,14 @@ import {
   conditionsSummary,
   declaredSeriesKeys,
   detailStatus,
+  hardenLabel,
   isImminent,
   latestDailyDay,
   pathEvidence,
   signedCount,
   splitTrials,
+  tallyMarks,
+  tierGlyph,
   trialCountdown,
   trialsSummary,
 } from "@/lib/apertureview";
@@ -330,7 +333,7 @@ export function GuideSealed({
       // what they'd say is exactly what the key is for.
       return (
         <SealedBlock sections={sections}>
-          <Link href="/files" className="text-amber hover:underline">
+          <Link href="/files" className="text-(--essence) hover:underline">
             unlock in files →
           </Link>
         </SealedBlock>
@@ -376,10 +379,11 @@ export function GuideSealed({
           <>
             <ZoneHeader
               label="the wall"
+              seal="壁"
               right={breakthrough.wall || undefined}
             />
             {hasBody && (
-              <div className="border-b border-hairline px-4 py-3">
+              <div className="skin-masonry border-b border-hairline px-4 py-3">
                 {breakthrough.event && (
                   <p className="text-sm text-fg">{breakthrough.event}</p>
                 )}
@@ -389,7 +393,7 @@ export function GuideSealed({
                     {breakthrough.routes.map((r, i) => (
                       <Fragment key={i}>
                         {i > 0 && " · "}
-                        <span className="text-amber">{r}</span>
+                        <span className="text-(--essence)">{r}</span>
                       </Fragment>
                     ))}
                   </p>
@@ -401,7 +405,18 @@ export function GuideSealed({
                       <Fragment key={name}>
                         {i > 0 && <span className="text-muted"> · </span>}
                         <span className="text-fg/90">{name}</span>{" "}
-                        <span className="text-amber">{n}</span>
+                        {/* the count inked as tally marks where it fits — the
+                            digit always prints, the 正 only ever adds */}
+                        {tallyMarks(n) && (
+                          <span
+                            aria-hidden
+                            lang="zh"
+                            className="font-[family-name:var(--font-zh)] tracking-[0.15em] text-cinnabar"
+                          >
+                            {tallyMarks(n)}{" "}
+                          </span>
+                        )}
+                        <span className="text-(--essence)">{n}</span>
                       </Fragment>
                     ))}
                   </p>
@@ -418,6 +433,7 @@ export function GuideSealed({
           <>
             <ZoneHeader
               label="conditions"
+              seal="律"
               right={conditionsSummary(conditions) || undefined}
             />
             <div className="flex flex-wrap gap-2 border-b border-hairline px-4 py-3">
@@ -444,7 +460,11 @@ export function GuideSealed({
         if (paths.length === 0) return null;
         return (
           <>
-            <ZoneHeader label="paths" right="evidence · last 10 weeks" />
+            <ZoneHeader
+              label="paths"
+              seal="道"
+              right="evidence · last 10 weeks"
+            />
             <div className="border-b border-hairline">
               {paths.map((p, i) => (
                 <PathRows
@@ -465,6 +485,7 @@ export function GuideSealed({
           <>
             <ZoneHeader
               label="trials"
+              seal="劫"
               right={trialsSummary(open, today) || undefined}
             />
             <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
@@ -472,17 +493,30 @@ export function GuideSealed({
                 const active = t.state === "active";
                 const soon = isImminent(t.date, today);
                 const when = trialCountdown(t.date, today);
+                const glyph = tierGlyph(t.tier);
                 return (
                   <p key={i} className="text-xs">
                     <span
                       aria-hidden
-                      className={active || soon ? "text-amber" : "text-muted"}
+                      className={
+                        active || soon ? "text-(--essence)" : "text-muted"
+                      }
                     >
                       {active ? "●" : "◐"}
                     </span>{" "}
                     <span className="text-fg/90">{t.name}</span>{" "}
                     <span className="text-muted/60">
-                      · {t.tier} · {t.state}
+                      ·{" "}
+                      {glyph && (
+                        <span
+                          aria-hidden
+                          lang="zh"
+                          className="font-[family-name:var(--font-zh)]"
+                        >
+                          {glyph}{" "}
+                        </span>
+                      )}
+                      {t.tier} · {t.state}
                       {active &&
                         t.opened !== undefined &&
                         ` · opened ${t.opened}`}
@@ -493,7 +527,7 @@ export function GuideSealed({
                         <span
                           className={
                             soon
-                              ? "tabular-nums text-amber"
+                              ? "tabular-nums text-(--essence)"
                               : "tabular-nums text-muted/60"
                           }
                         >
@@ -508,7 +542,7 @@ export function GuideSealed({
                 <button
                   type="button"
                   onClick={() => setShowResolved(!showResolved)}
-                  className="self-start text-[11px] text-muted transition-colors hover:text-amber"
+                  className="self-start text-[11px] text-muted transition-colors hover:text-(--essence)"
                 >
                   {showResolved
                     ? "▴ hide resolved"
@@ -538,11 +572,16 @@ export function GuideSealed({
           <>
             <ZoneHeader
               label="the record"
+              seal="录"
               right={`${total} seal${total === 1 ? "" : "s"}`}
             />
             <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
-              {record.rows.map((r) => (
+              {record.rows.map((r, i) => (
                 <p key={r.day} className="text-xs">
+                  <span
+                    aria-hidden
+                    className={`mr-1.5 inline-block h-[7px] w-[7px] bg-(--essence) ${i === 0 ? "" : "opacity-45"}`}
+                  />
                   <span className="tabular-nums text-muted">{r.day}</span>{" "}
                   <span className="text-fg/90">
                     rank {r.rank} · {r.stage}
@@ -588,7 +627,15 @@ export function GuideSealed({
         <div className="flex flex-wrap items-baseline gap-x-3.5 gap-y-1 border-b border-hairline px-4 pb-3 text-[11px] text-muted">
           {streakEntries.map(([name, s]) => (
             <span key={name} className="tabular-nums">
-              {name} <span className="text-amber">{s.count}</span>/{s.target}
+              {name} <span className="text-(--essence)">{s.count}</span>/
+              {s.target}
+              {s.earliestHarden !== undefined &&
+                hardenLabel(s.earliestHarden) && (
+                  <span className="text-muted/50">
+                    {" "}
+                    {hardenLabel(s.earliestHarden)}
+                  </span>
+                )}
             </span>
           ))}
           {loaded.pending && (
@@ -613,7 +660,9 @@ export function GuideSealed({
   );
 }
 
-/** The locked / decrypting block: the bands named, then whatever comes next. */
+/** The locked / decrypting block: the bands named, the cinnabar 封 pressed over
+ *  them ("sealed" is the E2EE vocabulary — the stamp makes it literal), then
+ *  whatever comes next. */
 function SealedBlock({
   sections,
   children,
@@ -625,10 +674,19 @@ function SealedBlock({
     .map((k) => SECTION_LABEL[k])
     .filter((n): n is string => n !== undefined);
   return (
-    <p className="border-b border-hairline px-4 py-3 text-[13px] text-muted/55">
-      {names.join(" · ")} <span className="text-muted/40">·····</span>{" "}
-      {children}
-    </p>
+    <div className="relative border-b border-hairline px-4 py-5">
+      <p className="pr-20 text-[13px] text-muted/55">
+        {names.join(" · ")} <span className="text-muted/40">·····</span>{" "}
+        {children}
+      </p>
+      <span
+        aria-hidden
+        lang="zh"
+        className="skin-stamp absolute right-6 top-1/2 h-14 w-14 -translate-y-1/2 -rotate-6 border-[3px] text-[34px] opacity-75"
+      >
+        封
+      </span>
+    </div>
   );
 }
 
@@ -731,7 +789,10 @@ function Evidence({
             <span className="text-muted/40">$·····</span>
           )}
         </span>
-        <Link href="/portfolio" className="text-xs text-amber hover:underline">
+        <Link
+          href="/portfolio"
+          className="text-xs text-(--essence) hover:underline"
+        >
           portfolio →
         </Link>
       </>
@@ -749,7 +810,7 @@ function Evidence({
         {series.value === null ? (
           <span className="text-muted">—</span>
         ) : mode === "delta" ? (
-          <span className="text-amber">{signedCount(series.value)}</span>
+          <span className="text-(--essence)">{signedCount(series.value)}</span>
         ) : (
           <span className="text-muted">{commas(series.value)}</span>
         )}

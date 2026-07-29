@@ -1,8 +1,10 @@
 import { essenceOf, isSealStale, type ApertureGlance } from "@/lib/aperture";
 import {
   bandLine,
+  displayNumeral,
   essenceSwatchClass,
   essenceTextClass,
+  familyOf,
   sealedAgo,
   stageGlyphs,
 } from "@/lib/apertureview";
@@ -65,35 +67,72 @@ export function ApertureMasthead({
   const essenceText = essenceTextClass(essence);
   const swatch = essenceSwatchClass(essence);
   const glyphs = stageGlyphs(glance.rank, glance.stage);
+  const numeral = displayNumeral(glance.rank);
+  const family = familyOf(glance.rank);
 
   return (
-    <div className="px-4 pb-2 pt-4">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {/* the rank bar — off canon there is no bar at all, for the same reason
-            there is no swatch: an unpainted one would read as a colour. */}
-        {swatch && (
-          <span aria-hidden className={`h-[30px] w-1 shrink-0 ${swatch}`} />
+    <div className="relative px-4 pb-2 pt-4">
+      {/* the skin's corner signature — one small cinnabar stamp, always 命 */}
+      <span
+        aria-hidden
+        lang="zh"
+        className="skin-stamp absolute right-3.5 top-3.5 h-[34px] w-[34px] -rotate-4 text-[19px] opacity-70"
+      >
+        命
+      </span>
+
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+        {/* the large rank glyph — financial form, essence-inked; off the canon's
+            nine there is none, for the same reason there is no swatch. */}
+        {numeral && (
+          <span
+            aria-hidden
+            lang="zh"
+            className="font-[family-name:var(--font-zh)] text-[44px] leading-none text-(--essence) opacity-90"
+          >
+            {numeral}
+          </span>
         )}
         <span className="text-[26px] font-semibold leading-none tracking-[0.06em] text-fg">
           {bandLine(glance)}
         </span>
-        <span
-          className={`inline-flex items-center gap-2 text-[13px] ${essenceText}`}
-        >
-          {swatch && (
-            <span aria-hidden className={`h-[11px] w-[11px] ${swatch}`} />
-          )}
-          {/* the canon colour's name, or — off canon — the literal stage, muted */}
-          {essence ?? glance.stage}
-          {glyphs && (
-            <span
-              lang="zh"
-              className="font-[family-name:var(--font-zh)] text-xs text-muted/60"
-            >
-              {glyphs}
-            </span>
-          )}
-        </span>
+        {glyphs && (
+          <span
+            lang="zh"
+            className="font-[family-name:var(--font-zh)] text-sm text-muted/60"
+          >
+            {glyphs}
+          </span>
+        )}
+      </div>
+
+      {/* the brush-stroke underline — essence fading out rightward; off canon
+          the essence variable is muted, so the stroke reads as neutral chrome
+          rather than a colour nobody assigned. */}
+      <div aria-hidden className="skin-brush mt-2.5" />
+
+      <div
+        className={`mt-2 inline-flex items-center gap-2 text-[13px] ${essenceText}`}
+      >
+        {swatch && (
+          <span aria-hidden className={`h-[11px] w-[11px] ${swatch}`} />
+        )}
+        {/* the metal family, then the stage shade — Green Copper · jade green;
+            immortal ranks have one name, so the family line IS the name. Off
+            canon: the literal stage, muted. */}
+        {essence
+          ? family
+            ? `${family.en} · ${essence.toLowerCase()}`
+            : essence
+          : glance.stage}
+        {family && (
+          <span
+            lang="zh"
+            className="font-[family-name:var(--font-zh)] text-xs text-muted/60"
+          >
+            {family.zh}
+          </span>
+        )}
       </div>
 
       {/* An unparseable seal reads no age and lights no dot — so there is no meta
