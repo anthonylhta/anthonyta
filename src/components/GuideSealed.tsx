@@ -7,7 +7,11 @@ import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { useFinTotals, type FinTotals } from "@/components/useFinTotals";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
-import { APERTURE_CONTEXT, GYM_CONTEXT } from "@/lib/aevcontext";
+import {
+  APERTURE_CONTEXT,
+  apertureHistPath,
+  GYM_CONTEXT,
+} from "@/lib/aevcontext";
 import {
   isAdjudicationPending,
   isAttainment,
@@ -15,6 +19,11 @@ import {
   type AperturePath,
   type ApertureDoc,
 } from "@/lib/aperture";
+import {
+  planRecordFetch,
+  recordRows,
+  type RecordRow,
+} from "@/lib/aperturerecord";
 import {
   conditionChipClass,
   conditionChipPrefix,
@@ -80,6 +89,7 @@ const SECTION_LABEL: Record<string, string> = {
   "aperture-conditions": "conditions",
   "aperture-paths": "paths",
   "aperture-trials": "trials",
+  "aperture-record": "the record",
 };
 
 /** The decrypted document plus the adjudication rider's one flag. */
@@ -114,6 +124,68 @@ async function adjudicationPending(
     return isAdjudicationPending(sealedAt, latest);
   } catch {
     return false;
+  }
+}
+
+/** The record band's decrypted state: what to draw, and how much it is not
+ *  drawing — capped-out days as a count, failed opens as an honest tally. */
+interface RecordState {
+  rows: RecordRow[];
+  /** Well-formed archived days beyond the fetch cap — counted, never fetched. */
+  older: number;
+  /** Fetched days that would not serve, decrypt or normalize. */
+  unreadable: number;
+}
+
+/**
+ * The archived seal history, listed then opened — the record band's whole input.
+ * Same rider doctrine as the gym strip below: best-effort by construction, so a
+ * dead listing returns null and the band simply doesn't render, while a single
+ * day that won't open is COUNTED rather than silently dropped — a record that
+ * quietly under-reported history would defeat the point of keeping one. Each
+ * envelope opens under its OWN dated key as AAD (the aevcontext family), so a
+ * store answering one day's request with another week's bytes fails the open.
+ */
+async function recordSeries(
+  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
+): Promise<RecordState | null> {
+  try {
+    const res = await fetch("/api/aperture/hist");
+    if (res.status !== 200) return null;
+    const listing: unknown = await res.json();
+    const days =
+      typeof listing === "object" && listing !== null && "days" in listing
+        ? (listing as { days: unknown }).days
+        : null;
+    const plan = planRecordFetch(days);
+    if (plan.fetch.length === 0 && plan.older === 0) return null;
+    const opened = await Promise.all(
+      plan.fetch.map(async (day) => {
+        try {
+          const r = await fetch(`/api/aperture/hist?d=${day}`);
+          if (r.status !== 200) return null;
+          const { bytes } = await openItem(
+            new Uint8Array(await r.arrayBuffer()),
+            apertureHistPath(day),
+          );
+          const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+          const doc = normalizeAperture(parsed);
+          return doc ? { day, doc } : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const entries = opened.filter(
+      (e): e is { day: string; doc: ApertureDoc } => e !== null,
+    );
+    return {
+      rows: recordRows(entries),
+      older: plan.older,
+      unreadable: plan.fetch.length - entries.length,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -169,6 +241,11 @@ export function GuideSealed({
   const [showResolved, setShowResolved] = useState(false);
   /** The one sealed strip, once it lands — see `gymSeries`. */
   const [gym, setGym] = useState<EvidenceSeries | null>(null);
+  /** The archived seal history, once it lands — see `recordSeries`. */
+  const [record, setRecord] = useState<RecordState | null>(null);
+  // A boolean rather than the array, so the effect below re-runs only when the
+  // band's visibility actually flips, not on every render's fresh prop identity.
+  const wantsRecord = sections.includes("aperture-record");
 
   // Render-phase adjustment (not an effect): dropping the decrypted document the
   // moment the vault stops being unlocked, per the lint-blessed reset pattern.
@@ -181,6 +258,7 @@ export function GuideSealed({
       setDataErr(null);
       setShowResolved(false);
       setGym(null);
+      setRecord(null);
     }
   }
 
@@ -225,6 +303,13 @@ export function GuideSealed({
           const series = await gymSeries(today, openItem);
           if (series && !cancelled) setGym(series);
         }
+        // The seal history, only when the record band is visible — a listing
+        // plus up to a dozen fetches and decrypts is real work, and a hidden
+        // band must cost nothing.
+        if (wantsRecord && !cancelled) {
+          const rec = await recordSeries(openItem);
+          if (rec && !cancelled) setRecord(rec);
+        }
       } catch {
         if (!cancelled) setDataErr("unreachable");
       }
@@ -232,7 +317,7 @@ export function GuideSealed({
     return () => {
       cancelled = true;
     };
-  }, [status, openItem, today]);
+  }, [status, openItem, today, wantsRecord]);
 
   switch (detailStatus(status, dataErr, loaded?.doc ?? null)) {
     case "offline":
@@ -442,6 +527,46 @@ export function GuideSealed({
             </div>
           </>
         );
+
+      case "aperture-record": {
+        if (!record) return null;
+        // Every day the LISTING knew about, drawn or accounted for: rows on
+        // screen, the capped-out tail, and the ones that wouldn't open.
+        const total = record.rows.length + record.unreadable + record.older;
+        if (total === 0) return null;
+        return (
+          <>
+            <ZoneHeader
+              label="the record"
+              right={`${total} seal${total === 1 ? "" : "s"}`}
+            />
+            <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+              {record.rows.map((r) => (
+                <p key={r.day} className="text-xs">
+                  <span className="tabular-nums text-muted">{r.day}</span>{" "}
+                  <span className="text-fg/90">
+                    rank {r.rank} · {r.stage}
+                  </span>
+                  {r.essence !== null && (
+                    <span className="text-muted/60"> · {r.essence}</span>
+                  )}
+                  {r.delta !== null && (
+                    <span className="text-muted/60"> · {r.delta}</span>
+                  )}
+                </p>
+              ))}
+              {(record.older > 0 || record.unreadable > 0) && (
+                <p className="text-[11px] text-muted/60">
+                  {record.older > 0 && `+${record.older} earlier`}
+                  {record.older > 0 && record.unreadable > 0 && " · "}
+                  {record.unreadable > 0 &&
+                    `${record.unreadable} unreadable — reload to retry`}
+                </p>
+              )}
+            </div>
+          </>
+        );
+      }
 
       default:
         return null;

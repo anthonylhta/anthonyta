@@ -214,7 +214,7 @@ describe("orderedUnits", () => {
     expect(zone("fixed")).toEqual(["dropbox"]);
     expect(zone("wall")).toEqual(["aperture-wall", "aperture-conditions"]);
     expect(zone("paths")).toEqual(["aperture-paths"]);
-    expect(zone("trials")).toEqual(["aperture-trials"]);
+    expect(zone("trials")).toEqual(["aperture-trials", "aperture-record"]);
     expect(zone("today")).toEqual(TODAY_DEFAULT);
   });
 });

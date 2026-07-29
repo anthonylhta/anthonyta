@@ -187,6 +187,23 @@ function trialChanges(
 }
 
 /**
+ * The change segments between two documents — everything `diffSummary` prints
+ * after its rank lead. Exported for the record band (lib/aperturerecord), whose
+ * rows each carry their own rank reading and would only duplicate the lead.
+ * Scope stays diffSummary's: streak counts, condition statuses, trial states.
+ */
+export function diffChanges(
+  oldDoc: ApertureDoc,
+  newDoc: ApertureDoc,
+): string[] {
+  return [
+    ...streakChanges(oldDoc.sealed.streaks, newDoc.sealed.streaks),
+    ...conditionChanges(oldDoc.sealed.conditions, newDoc.sealed.conditions),
+    ...trialChanges(oldDoc.sealed.trials, newDoc.sealed.trials),
+  ];
+}
+
+/**
  * What this run changed, as one line for the script to print. The rank reading
  * leads ALWAYS — even unchanged — because it is the figure the owner is checking
  * the run against; everything after it is only what moved.
@@ -209,11 +226,7 @@ export function diffSummary(
     ? `${rankReading(o.rank, o.stage)} → ${n.rank} · ${n.stage}`
     : `rank unchanged (${n.rank} · ${n.stage})`;
 
-  const changes = [
-    ...streakChanges(oldDoc.sealed.streaks, newDoc.sealed.streaks),
-    ...conditionChanges(oldDoc.sealed.conditions, newDoc.sealed.conditions),
-    ...trialChanges(oldDoc.sealed.trials, newDoc.sealed.trials),
-  ];
+  const changes = diffChanges(oldDoc, newDoc);
   if (!rankMoved && changes.length === 0)
     return `${lead} · nothing else changed`;
   return [lead, ...changes].join(" · ");
