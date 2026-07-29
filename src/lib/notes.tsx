@@ -1286,6 +1286,108 @@ export const notes: Note[] = [
       </>
     ),
   },
+  {
+    slug: "fail-closed-and-still-surprised",
+    title: "fail-closed, and still surprised",
+    oneLiner:
+      "A refusal that only fires at use-time can hide for weeks; drill the lever, and write the checklist into the pattern it protects.",
+    updated: "2026-07-30",
+    tag: "e2ee",
+    related: [
+      "rotate-the-key-keep-every-promise",
+      "the-counter-that-never-counts",
+    ],
+    body: (
+      <>
+        <p>
+          The master-key rotation here walks every object in the store,
+          re-sealing each under the new key. Its classifier is fail-closed:
+          every key in the live listing must classify as rewrite-this or
+          skip-for-a-reason, and anything unrecognized refuses the whole
+          rotation — because the alternative is a new store slipping through
+          unclassified and coming out the other side orphaned under a dead key.
+          I wrote that refusal, tested it, trusted it. This week, reading the
+          classifier to extend it for a new feature, I found a store I had
+          shipped days earlier sitting in exactly that unrecognized bucket.
+        </p>
+        <p>
+          The design had worked perfectly and told me nothing. No data was ever
+          at risk — that is what fail-closed buys — but the rotation lever
+          itself had been silently unusable since the day the store landed. A
+          rotation is an emergency tool: run rarely, needed suddenly. The
+          refusal would have fired at the worst possible moment, and until then,
+          nothing anywhere said <em>broken</em>. A fail-closed check converts
+          silent data loss into a loud refusal,{" "}
+          <strong>
+            but the loudness happens on the tool’s schedule, not yours
+          </strong>{" "}
+          — and a tool you use twice a year can be broken for months of quiet.
+        </p>
+        <p>
+          Two changes. The classifier entry is now written into the store recipe
+          itself — the checklist every new sealed store copies, right beside the
+          context binding and the sequence counter — because a step that lives
+          in a reviewer’s memory is a step that gets skipped. And the estate
+          pre-flight deserves a calendar, not a trigger: partitioning the live
+          listing is cheap, and a red partition on a quiet Tuesday is a fix,
+          where the same red on the day you are rotating a compromised key is a
+          crisis. Drills exist because{" "}
+          <em>an alarm you have to walk toward is an alarm you never hear.</em>
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "put-the-rescue-before-the-overwrite",
+    title: "put the rescue before the overwrite",
+    oneLiner:
+      "Four writes, four crash points — the order you write them in is the recovery story you chose.",
+    updated: "2026-07-30",
+    tag: "engineering",
+    related: [
+      "the-backup-that-needed-no-encryption",
+      "absent-and-error-are-different-nothings",
+    ],
+    body: (
+      <>
+        <p>
+          A private document on this site is replaced weekly: a script validates
+          it, seals it, and overwrites the previous version in place. Clean,
+          single-writer, boring — and quietly destructive. The overwrite was the
+          only copy’s grave: each week’s version died the moment its successor
+          landed, and the off-site backup keeps a rolling newest-three, so
+          anything older had no copy anywhere.{" "}
+          <em>
+            The history I thought I was keeping existed for about three weeks at
+            a time.
+          </em>
+        </p>
+        <p>
+          The fix was small — archive each version at a dated key before
+          replacing it — but the real design work was ordering. The script now
+          makes four writes, and every gap between two of them is a place the
+          process can die, so each position is a chosen failure mode.{" "}
+          <strong>The rescue of the prior version goes first</strong>, before
+          the overwrite that would destroy it, and a failure there aborts with
+          the store untouched — better no update than one that ate a week of the
+          record. The two live objects the site actually reads stay adjacent, so
+          a death between them leaves a stale-but-honest pair that the next run
+          converges. The new version’s own dated copy goes dead last, where
+          failing costs nothing durable at all: the next run archives the same
+          document as “the prior” anyway.
+        </p>
+        <p>
+          None of those placements is clever on its own; the discipline is
+          refusing to treat the script as atomic. Read top to bottom it looks
+          like four interchangeable lines. Read as “the process dies{" "}
+          <em>here</em> — what does the store say now?”, each ordering is a
+          different recovery story, and the constraints pin exactly one of the
+          twenty-four as honest at every gap. The write order{" "}
+          <strong>is</strong> the recovery plan; everything else is comments.
+        </p>
+      </>
+    ),
+  },
 ];
 
 export function getNote(slug: string): Note | undefined {
