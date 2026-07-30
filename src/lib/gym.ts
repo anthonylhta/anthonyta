@@ -398,14 +398,17 @@ export function isPr(set: GymSet, cfg: GymConfig, exerciseId: string): boolean {
 
 /**
  * A workout being built, before it becomes a session. It lives in the island's
- * state and is mirrored to `sessionStorage` under GYM_DRAFT_KEY.
+ * state and is mirrored to `localStorage` under GYM_DRAFT_KEY.
  *
  * THE TRADEOFF, stated plainly: that mirror is PLAINTEXT. A set of sets is the
- * least sensitive thing the hub holds, and sessionStorage is per-tab and dies
- * with the tab — but it is still the one place gym data exists unsealed, and it
- * is here for exactly one reason: a phone backgrounding the tab mid-workout must
- * not eat the workout. The durable home is the sealed envelope; the draft is a
- * scratch pad with a short life, cleared the moment the session saves.
+ * least sensitive thing the hub holds, and it is the one place gym data exists
+ * unsealed. It is here for exactly one reason: closing or backgrounding the
+ * phone tab mid-workout must not eat the workout — sessionStorage was tried
+ * first and dies exactly when the insurance is needed (the owner closes the
+ * site between exercises; ADR 0120). localStorage is shared across tabs, so
+ * two tabs mid-draft would clobber each other — one owner, one workout at a
+ * time. The durable home is the sealed envelope; the draft is a scratch pad,
+ * cleared the moment the session saves or is discarded.
  */
 export interface GymDraft {
   templateId?: string;
@@ -482,6 +485,19 @@ export function prefillSet(
   if (previous) return { ...previous };
   const lastTime = lastSetsFor(cfg, exerciseId)[soFar.length];
   return lastTime ? { ...lastTime } : { w: 0, r: 0 };
+}
+
+/**
+ * Interpret one keystroke's worth of a set field: `null` rejects the edit (not a
+ * plain non-negative number — letters, signs, exponents, a second dot), otherwise
+ * the value the draft should hold. An empty or bare-dot field is a field mid
+ * retype, held as 0 until real digits land — the input keeps showing the empty
+ * text, so clearing a field never snaps a 0 back under the cursor.
+ */
+export function parseSetInput(text: string, integer: boolean): number | null {
+  if (!(integer ? /^\d*$/ : /^\d*\.?\d*$/).test(text)) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : 0;
 }
 
 /** Total kg moved in a session — sets × reps × weight. The history summary's

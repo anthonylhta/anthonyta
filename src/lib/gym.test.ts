@@ -15,6 +15,7 @@ import {
   gymPayloadBytes,
   isPr,
   parseDraft,
+  parseSetInput,
   prefillSet,
   lastDoneFor,
   lastSetsFor,
@@ -529,6 +530,38 @@ describe("parseDraft", () => {
     expect(
       parseDraft(JSON.stringify({ entries: [], note: "x", templateId: "" })),
     ).toBeNull();
+  });
+});
+
+describe("parseSetInput", () => {
+  it("parses plain numbers", () => {
+    expect(parseSetInput("50", false)).toBe(50);
+    expect(parseSetInput("2.5", false)).toBe(2.5);
+    expect(parseSetInput("8", true)).toBe(8);
+  });
+
+  it("holds an empty or mid-retype field as 0", () => {
+    expect(parseSetInput("", false)).toBe(0);
+    expect(parseSetInput("", true)).toBe(0);
+    expect(parseSetInput(".", false)).toBe(0);
+  });
+
+  it("tolerates leading zeros without changing the value", () => {
+    expect(parseSetInput("050", false)).toBe(50);
+    expect(parseSetInput("007", true)).toBe(7);
+  });
+
+  it("accepts a trailing dot while a decimal is being typed", () => {
+    expect(parseSetInput("60.", false)).toBe(60);
+  });
+
+  it("rejects anything that isn't a plain non-negative number", () => {
+    expect(parseSetInput("-5", false)).toBeNull();
+    expect(parseSetInput("abc", false)).toBeNull();
+    expect(parseSetInput("1e3", false)).toBeNull();
+    expect(parseSetInput("6 0", false)).toBeNull();
+    expect(parseSetInput("2.5.5", false)).toBeNull();
+    expect(parseSetInput("2.5", true)).toBeNull();
   });
 });
 

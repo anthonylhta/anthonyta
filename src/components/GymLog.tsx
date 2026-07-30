@@ -30,6 +30,7 @@ import {
   lastSetsFor,
   normalizeGymConfig,
   parseDraft,
+  parseSetInput,
   prefillSet,
   removeSession,
   removeTemplate,
@@ -75,19 +76,20 @@ function setsLine(sets: GymSet[]): string {
   return sets.map((s) => `${s.w}×${s.r}`).join(" · ");
 }
 
-/** The draft this tab was left with, if any — a workout a backgrounded phone
- *  killed mid-set. A draft written by an older build is dropped, not restored
- *  into a crash (`parseDraft`); a tab with no storage at all simply has no draft. */
+/** The draft this device was left with, if any — a workout the owner walked away
+ *  from mid-set, whether the tab was backgrounded, killed, or closed outright.
+ *  A draft written by an older build is dropped, not restored into a crash
+ *  (`parseDraft`); a browser with no storage at all simply has no draft. */
 function readDraft(): GymDraft {
   if (typeof window === "undefined") return EMPTY_GYM_DRAFT;
   try {
-    const stored = sessionStorage.getItem(GYM_DRAFT_KEY);
+    const stored = localStorage.getItem(GYM_DRAFT_KEY);
     if (!stored) return EMPTY_GYM_DRAFT;
     const parsed = parseDraft(stored);
     if (parsed) return parsed;
-    sessionStorage.removeItem(GYM_DRAFT_KEY);
+    localStorage.removeItem(GYM_DRAFT_KEY);
   } catch {
-    // no sessionStorage (private mode, disabled) — the draft just isn't durable
+    // no localStorage (private mode, disabled) — the draft just isn't durable
   }
   return EMPTY_GYM_DRAFT;
 }
@@ -106,9 +108,9 @@ function readDraft(): GymDraft {
  * Nothing is optimistic: a set is on the page after it is sealed, not before.
  *
  * The in-progress draft is the one exception to all of that, and deliberately so
- * (see `GymDraft`): it is mirrored to sessionStorage in PLAINTEXT so a
- * backgrounded phone tab can't eat a workout, and cleared the moment the session
- * saves.
+ * (see `GymDraft`): it is mirrored to localStorage in PLAINTEXT so a phone tab
+ * that is backgrounded — or closed and reopened between exercises — can't eat a
+ * workout, and cleared the moment the session saves.
  */
 export function GymLog({ offline }: { offline: boolean }) {
   const vault = useVault(offline);
@@ -144,8 +146,8 @@ export function GymLog({ offline }: { offline: boolean }) {
     setDraft(next);
     try {
       if (next.entries.length === 0 && !next.note)
-        sessionStorage.removeItem(GYM_DRAFT_KEY);
-      else sessionStorage.setItem(GYM_DRAFT_KEY, JSON.stringify(next));
+        localStorage.removeItem(GYM_DRAFT_KEY);
+      else localStorage.setItem(GYM_DRAFT_KEY, JSON.stringify(next));
     } catch {
       // best effort — a draft that can't be mirrored still works in memory
     }
@@ -628,6 +630,51 @@ function LogView({
   );
 }
 
+/**
+ * One numeric cell of a set row. A text input rather than type="number", on
+ * purpose: a controlled number input snaps a cleared field straight back to 0,
+ * so typing lands beside the prefill ("050"). Here the cell owns its text while
+ * focused — focusing selects the whole value so typing replaces it, an empty
+ * field stays empty under the cursor (the draft holds 0 meanwhile), and blur
+ * settles the display back to the canonical number. `inputMode` still brings up
+ * the right phone keypad; `parseSetInput` refuses non-numeric keystrokes.
+ */
+function NumCell({
+  value,
+  integer,
+  width,
+  ariaLabel,
+  onCommit,
+}: {
+  value: number;
+  integer: boolean;
+  width: string;
+  ariaLabel: string;
+  onCommit: (n: number) => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      inputMode={integer ? "numeric" : "decimal"}
+      value={text ?? String(value)}
+      onFocus={(e) => {
+        setText(String(value));
+        e.target.select();
+      }}
+      onChange={(e) => {
+        const parsed = parseSetInput(e.target.value, integer);
+        if (parsed === null) return;
+        setText(e.target.value);
+        onCommit(parsed);
+      }}
+      onBlur={() => setText(null)}
+      className={`${width} text-right tabular-nums ${input}`}
+      aria-label={ariaLabel}
+    />
+  );
+}
+
 /** One set: weight and reps, each with its own steppers, and the PR chip. */
 function SetRow({
   set,
@@ -652,15 +699,12 @@ function SetRow({
       >
         −
       </button>
-      <input
-        type="number"
-        inputMode="decimal"
-        step={WEIGHT_STEP}
-        min={0}
+      <NumCell
         value={set.w}
-        onChange={(e) => onChange({ ...set, w: Number(e.target.value) || 0 })}
-        className={`w-16 text-right tabular-nums ${input}`}
-        aria-label="weight in kg"
+        integer={false}
+        width="w-16"
+        ariaLabel="weight in kg"
+        onCommit={(w) => onChange({ ...set, w })}
       />
       <button
         type="button"
@@ -679,20 +723,12 @@ function SetRow({
       >
         −
       </button>
-      <input
-        type="number"
-        inputMode="numeric"
-        step={1}
-        min={0}
+      <NumCell
         value={set.r}
-        onChange={(e) =>
-          onChange({
-            ...set,
-            r: Math.max(0, Math.trunc(Number(e.target.value))),
-          })
-        }
-        className={`w-12 text-right tabular-nums ${input}`}
-        aria-label="reps"
+        integer
+        width="w-12"
+        ariaLabel="reps"
+        onCommit={(r) => onChange({ ...set, r })}
       />
       <button
         type="button"
