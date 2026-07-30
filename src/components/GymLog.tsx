@@ -30,6 +30,7 @@ import {
   lastSetsFor,
   normalizeGymConfig,
   parseDraft,
+  parseSetInput,
   prefillSet,
   removeSession,
   removeTemplate,
@@ -629,6 +630,51 @@ function LogView({
   );
 }
 
+/**
+ * One numeric cell of a set row. A text input rather than type="number", on
+ * purpose: a controlled number input snaps a cleared field straight back to 0,
+ * so typing lands beside the prefill ("050"). Here the cell owns its text while
+ * focused — focusing selects the whole value so typing replaces it, an empty
+ * field stays empty under the cursor (the draft holds 0 meanwhile), and blur
+ * settles the display back to the canonical number. `inputMode` still brings up
+ * the right phone keypad; `parseSetInput` refuses non-numeric keystrokes.
+ */
+function NumCell({
+  value,
+  integer,
+  width,
+  ariaLabel,
+  onCommit,
+}: {
+  value: number;
+  integer: boolean;
+  width: string;
+  ariaLabel: string;
+  onCommit: (n: number) => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      inputMode={integer ? "numeric" : "decimal"}
+      value={text ?? String(value)}
+      onFocus={(e) => {
+        setText(String(value));
+        e.target.select();
+      }}
+      onChange={(e) => {
+        const parsed = parseSetInput(e.target.value, integer);
+        if (parsed === null) return;
+        setText(e.target.value);
+        onCommit(parsed);
+      }}
+      onBlur={() => setText(null)}
+      className={`${width} text-right tabular-nums ${input}`}
+      aria-label={ariaLabel}
+    />
+  );
+}
+
 /** One set: weight and reps, each with its own steppers, and the PR chip. */
 function SetRow({
   set,
@@ -653,15 +699,12 @@ function SetRow({
       >
         −
       </button>
-      <input
-        type="number"
-        inputMode="decimal"
-        step={WEIGHT_STEP}
-        min={0}
+      <NumCell
         value={set.w}
-        onChange={(e) => onChange({ ...set, w: Number(e.target.value) || 0 })}
-        className={`w-16 text-right tabular-nums ${input}`}
-        aria-label="weight in kg"
+        integer={false}
+        width="w-16"
+        ariaLabel="weight in kg"
+        onCommit={(w) => onChange({ ...set, w })}
       />
       <button
         type="button"
@@ -680,20 +723,12 @@ function SetRow({
       >
         −
       </button>
-      <input
-        type="number"
-        inputMode="numeric"
-        step={1}
-        min={0}
+      <NumCell
         value={set.r}
-        onChange={(e) =>
-          onChange({
-            ...set,
-            r: Math.max(0, Math.trunc(Number(e.target.value))),
-          })
-        }
-        className={`w-12 text-right tabular-nums ${input}`}
-        aria-label="reps"
+        integer
+        width="w-12"
+        ariaLabel="reps"
+        onCommit={(r) => onChange({ ...set, r })}
       />
       <button
         type="button"

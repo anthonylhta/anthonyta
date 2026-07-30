@@ -487,6 +487,19 @@ export function prefillSet(
   return lastTime ? { ...lastTime } : { w: 0, r: 0 };
 }
 
+/**
+ * Interpret one keystroke's worth of a set field: `null` rejects the edit (not a
+ * plain non-negative number — letters, signs, exponents, a second dot), otherwise
+ * the value the draft should hold. An empty or bare-dot field is a field mid
+ * retype, held as 0 until real digits land — the input keeps showing the empty
+ * text, so clearing a field never snaps a 0 back under the cursor.
+ */
+export function parseSetInput(text: string, integer: boolean): number | null {
+  if (!(integer ? /^\d*$/ : /^\d*\.?\d*$/).test(text)) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** Total kg moved in a session — sets × reps × weight. The history summary's
  *  one number; crude on purpose (it can't know about tempo or range). */
 export function sessionVolume(session: GymSession): number {
