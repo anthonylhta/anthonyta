@@ -32,6 +32,7 @@ import {
   declaredSeriesKeys,
   detailStatus,
   hardenLabel,
+  imminentMajorTrial,
   isImminent,
   latestDailyDay,
   pathEvidence,
@@ -354,6 +355,11 @@ export function GuideSealed({
   const { streaks, conditions, paths, vitalGu, trials, breakthrough } =
     loaded.doc.sealed;
   const { open, resolved } = splitTrials(trials);
+  // The one trial grave enough to be read at the top of the sheet rather than in
+  // its own band — see `imminentMajorTrial`. Its countdown is the same wording the
+  // band uses; without one the dot names the tier and nothing more.
+  const majorTrial = imminentMajorTrial(open, today);
+  const majorWhen = majorTrial && trialCountdown(majorTrial.date, today);
 
   // The server's evidence, plus the one series only this browser can produce. The
   // band consumes them identically — a sealed strip is not a special kind of row,
@@ -614,15 +620,18 @@ export function GuideSealed({
 
   const streakEntries = Object.entries(streaks);
   const hasMeta =
-    streakEntries.length > 0 || vitalGu !== undefined || loaded.pending;
+    streakEntries.length > 0 ||
+    vitalGu !== undefined ||
+    loaded.pending ||
+    majorTrial !== null;
 
   return (
     <>
       {/* The masthead's own meta line, continued: the same muted 11px row, no
           divider above it, because these ARE the head of the sheet — the streaks
-          the wall is waiting on, the gu, and the one dot that says the seal is
-          behind the raw days. Nothing to say → no row at all, rather than a bordered
-          strip of padding under the rank. */}
+          the wall is waiting on, the gu, and the dots: the seal behind the raw
+          days, a major trial inside the week. Nothing to say → no row at all,
+          rather than a bordered strip of padding under the rank. */}
       {hasMeta && (
         <div className="flex flex-wrap items-baseline gap-x-3.5 gap-y-1 border-b border-hairline px-4 pb-3 text-[11px] text-muted">
           {streakEntries.map(([name, s]) => (
@@ -643,6 +652,17 @@ export function GuideSealed({
               aria-hidden
               title="raw journal days have run past the seal — adjudication pending"
               className="inline-block h-[7px] w-[7px] rounded-full bg-amber"
+            />
+          )}
+          {majorTrial && (
+            // The tribulation dot: square where the adjudication dot is round, and
+            // cinnabar — the sheet's one fixed red, the same ink as its seals.
+            <span
+              aria-hidden
+              title={`${majorTrial.tier} trial imminent${
+                majorWhen ? ` — ${majorTrial.name} ${majorWhen}` : ""
+              }`}
+              className="inline-block h-[7px] w-[7px] bg-cinnabar"
             />
           )}
           {vitalGu && (
