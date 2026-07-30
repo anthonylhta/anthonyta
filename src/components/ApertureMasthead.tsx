@@ -1,3 +1,4 @@
+import { BreakthroughMoment } from "@/components/BreakthroughMoment";
 import { essenceOf, isSealStale, type ApertureGlance } from "@/lib/aperture";
 import {
   bandLine,
@@ -134,6 +135,11 @@ export function ApertureMasthead({
           </span>
         )}
       </div>
+
+      {/* the breakthrough flourish — a client island under the essence line it
+          reads in the register of, silent on every load but the first after a
+          rank or stage moved (roadmap 70a) */}
+      <BreakthroughMoment rank={glance.rank} stage={glance.stage} />
 
       {/* An unparseable seal reads no age and lights no dot — so there is no meta
           line at all rather than an empty one. */}

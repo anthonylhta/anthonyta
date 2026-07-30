@@ -537,6 +537,43 @@ export function trialsSummary(open: ApertureTrial[], todayISO: string): string {
   return segments.join(" · ");
 }
 
+/**
+ * The two tiers grave enough to reach the masthead. CLOSED where every other
+ * vocabulary here is open, and deliberately: escalation is a claim about SEVERITY,
+ * and a tier this build has never heard of gives no grounds to make it. So an
+ * unknown tier keeps its muted literal in the band and never lights the dot — the
+ * unknown-renders-muted doctrine, applied to a mark that can only shout.
+ */
+const MAJOR_TIERS: readonly string[] = ["heavenly", "grand"];
+
+/**
+ * The nearest OPEN major-tier trial inside the imminent window, or null when
+ * nothing qualifies — the masthead's one escalation. `trialsSummary` above already
+ * counts down to the nearest stocked trial in the trials band's own header; this is
+ * the step above that, for the two tiers where a week's notice belongs at the TOP of
+ * the sheet rather than four bands down. Open state, not open TIER: an unrecognised
+ * state is still live (`splitTrials`) and so still escalates, while an unrecognised
+ * tier never does.
+ *
+ * Nearest by day wins; a tie keeps document order, which is the only ranking two
+ * trials on the same day have.
+ */
+export function imminentMajorTrial(
+  open: ApertureTrial[],
+  todayISO: string,
+): ApertureTrial | null {
+  let nearest: { gap: number; trial: ApertureTrial } | null = null;
+  for (const t of open) {
+    if (!MAJOR_TIERS.includes(t.tier)) continue;
+    const date = t.date;
+    if (!date || !isImminent(date, todayISO)) continue;
+    const gap = dayGap(date, todayISO);
+    if (gap === null) continue;
+    if (nearest === null || gap < nearest.gap) nearest = { gap, trial: t };
+  }
+  return nearest === null ? null : nearest.trial;
+}
+
 // --- the masthead's rank reading ------------------------------------------------
 
 /** The zero-tap line: "RANK 3 · UPPER". The stage is uppercased whether or not

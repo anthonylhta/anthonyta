@@ -29,6 +29,7 @@ import {
   familyOf,
   gutterPhrase,
   hardenLabel,
+  imminentMajorTrial,
   isImminent,
   latestDailyDay,
   mortalSegments,
@@ -595,6 +596,123 @@ describe("apertureview — trialsSummary", () => {
 
   it("says nothing about no open trials", () => {
     expect(trialsSummary([], TODAY)).toBe("");
+  });
+});
+
+describe("apertureview — imminentMajorTrial", () => {
+  const TODAY = "2026-03-05";
+  const tiered = (
+    name: string,
+    tier: string,
+    state: string,
+    date: string | null,
+  ): ApertureTrial => ({ name, tier, state, date });
+
+  it("escalates a heavenly or a grand trial inside the week", () => {
+    const portage = tiered(
+      "The long portage",
+      "heavenly",
+      "stocked",
+      "2026-03-11",
+    );
+    expect(imminentMajorTrial([portage], TODAY)).toBe(portage);
+    const sounding = tiered("Deep sounding", "grand", "stocked", TODAY);
+    expect(imminentMajorTrial([sounding], TODAY)).toBe(sounding);
+  });
+
+  it("leaves an earthly trial to the band that already counts it down", () => {
+    expect(
+      imminentMajorTrial(
+        [tiered("Ridge survey", "earthly", "stocked", "2026-03-08")],
+        TODAY,
+      ),
+    ).toBeNull();
+  });
+
+  it("NEVER escalates a tier this build has never heard of", () => {
+    // The one closed vocabulary in the module, and the reason: the dot claims
+    // SEVERITY, and an unknown tier gives no grounds to claim it. The row still
+    // prints the literal — unknown renders muted, not loud.
+    expect(
+      imminentMajorTrial(
+        [tiered("Star reckoning", "cosmic", "stocked", "2026-03-08")],
+        TODAY,
+      ),
+    ).toBeNull();
+    expect(
+      imminentMajorTrial(
+        [tiered("Star reckoning", "", "stocked", TODAY)],
+        TODAY,
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores a major trial that is late, undated or unparseable", () => {
+    // Already gone by is LATE, which the row says in words — the masthead only
+    // ever shouts about what is still ahead.
+    expect(
+      imminentMajorTrial(
+        [tiered("Charter defence", "heavenly", "stocked", "2026-03-04")],
+        TODAY,
+      ),
+    ).toBeNull();
+    expect(
+      imminentMajorTrial(
+        [tiered("Charter defence", "heavenly", "stocked", null)],
+        TODAY,
+      ),
+    ).toBeNull();
+    expect(
+      imminentMajorTrial(
+        [{ name: "Charter defence", tier: "heavenly", state: "stocked" }],
+        TODAY,
+      ),
+    ).toBeNull();
+    expect(
+      imminentMajorTrial(
+        [tiered("Charter defence", "heavenly", "stocked", "some winter")],
+        TODAY,
+      ),
+    ).toBeNull();
+    // The 8th day is outside the window, exactly as isImminent has it.
+    expect(
+      imminentMajorTrial(
+        [tiered("Charter defence", "grand", "stocked", "2026-03-13")],
+        TODAY,
+      ),
+    ).toBeNull();
+  });
+
+  it("takes the nearest of several, keeping document order on a tie", () => {
+    const near = tiered("Ridge crossing", "grand", "stocked", "2026-03-07");
+    const far = tiered("Charter defence", "heavenly", "stocked", "2026-03-10");
+    expect(imminentMajorTrial([far, near], TODAY)).toBe(near);
+    const first = tiered("First petition", "heavenly", "stocked", "2026-03-08");
+    const second = tiered("Second petition", "grand", "stocked", "2026-03-08");
+    expect(imminentMajorTrial([first, second], TODAY)).toBe(first);
+  });
+
+  it("escalates an active trial as readily as a stocked one", () => {
+    // Both are OPEN, and so is a state this build has never heard of — the tier is
+    // the closed vocabulary here, the state is not.
+    const active = tiered(
+      "Charter defence",
+      "heavenly",
+      "active",
+      "2026-03-06",
+    );
+    expect(imminentMajorTrial([active], TODAY)).toBe(active);
+    const deferred = tiered(
+      "Star reckoning",
+      "grand",
+      "deferred",
+      "2026-03-06",
+    );
+    expect(imminentMajorTrial([deferred], TODAY)).toBe(deferred);
+  });
+
+  it("says nothing about no trials at all", () => {
+    expect(imminentMajorTrial([], TODAY)).toBeNull();
   });
 });
 
