@@ -21,8 +21,8 @@ const cfg = (o: Partial<LayoutConfig> = {}): LayoutConfig => ({
   ...o,
 });
 
-/** The TODAY zone's default order — the day's rows, then the two exception rows
- *  that only speak when something is due or something is down. */
+/** The TODAY zone's default order — the day's rows, then the exception row that
+ *  only speaks when something is down. */
 const TODAY_DEFAULT = [
   "weather",
   "transit-next",
@@ -31,7 +31,6 @@ const TODAY_DEFAULT = [
   "briefing",
   "hand",
   "mortal",
-  "chores",
   "health",
 ];
 
@@ -82,7 +81,7 @@ describe("normalizeLayout", () => {
     const c = cfg({
       lobby: ["tft"],
       center: ["health"],
-      centerOrder: ["chores"],
+      centerOrder: ["mortal"],
     });
     expect(normalizeLayout(JSON.parse(JSON.stringify(c)))).toEqual(c);
   });
@@ -106,26 +105,27 @@ describe("normalizeLayout", () => {
         lobby: ["tft", "retired"],
         center: ["no-such-key"],
         lobbyOrder: ["github", "ghost-unit"],
-        centerOrder: ["dropbox", "chores"], // dropbox is fixed → dropped
+        centerOrder: ["dropbox", "mortal"], // dropbox is fixed → dropped
       }),
     ).toEqual(
-      cfg({ lobby: ["tft"], lobbyOrder: ["github"], centerOrder: ["chores"] }),
+      cfg({ lobby: ["tft"], lobbyOrder: ["github"], centerOrder: ["mortal"] }),
     );
   });
 
   it("drops retired command-center keys — no migration needed", () => {
     // `tft`/`totp` left the command center, `briefing-hand` split into two units,
-    // and the v1 `aperture` band became the four sheet bands; a config written
-    // before any of that still reads clean.
+    // the v1 `aperture` band became the four sheet bands, and `chores` dissolved
+    // into the needs-doing board; a config written before any of that still reads
+    // clean.
     expect(
       normalizeLayout({
         v: 2,
         lobby: [],
-        center: ["tft", "totp", "aperture", "briefing"],
+        center: ["tft", "totp", "aperture", "chores", "briefing"],
         lobbyOrder: [],
-        centerOrder: ["briefing-hand", "aperture", "chores", "totp"],
+        centerOrder: ["briefing-hand", "aperture", "chores", "totp", "mortal"],
       }),
-    ).toEqual(cfg({ center: ["briefing"], centerOrder: ["chores"] }));
+    ).toEqual(cfg({ center: ["briefing"], centerOrder: ["mortal"] }));
   });
 
   it("degrades a pre-shell config — three units left the sheet at once", () => {
@@ -138,11 +138,11 @@ describe("normalizeLayout", () => {
       normalizeLayout({
         v: 2,
         lobby: [],
-        center: ["week", "steps", "networth", "chores"],
+        center: ["week", "steps", "networth", "briefing"],
         lobbyOrder: [],
         centerOrder: ["week", "networth", "health"],
       }),
-    ).toEqual(cfg({ center: ["chores"], centerOrder: ["health"] }));
+    ).toEqual(cfg({ center: ["briefing"], centerOrder: ["health"] }));
   });
 
   it("dedupes repeated keys", () => {
@@ -173,11 +173,11 @@ describe("hiddenSet + setHidden", () => {
   });
 
   it("hides and shows idempotently, leaving order + the other surface alone", () => {
-    let c = cfg({ centerOrder: ["chores"] });
+    let c = cfg({ centerOrder: ["mortal"] });
     c = setHidden(c, "lobby", "tft", true);
     c = setHidden(c, "lobby", "tft", true);
     expect(c.lobby).toEqual(["tft"]);
-    expect(c.centerOrder).toEqual(["chores"]); // untouched
+    expect(c.centerOrder).toEqual(["mortal"]); // untouched
     c = setHidden(c, "lobby", "tft", false);
     expect(c.lobby).toEqual([]);
     expect(setHidden(c, "lobby", "no-such-key", true)).toEqual(c);
@@ -202,7 +202,7 @@ describe("orderedUnits", () => {
 
   it("keeps the fixed dropbox pinned at the front regardless of order", () => {
     const keys = orderedUnits(
-      cfg({ centerOrder: ["health", "chores"] }),
+      cfg({ centerOrder: ["health", "mortal"] }),
       "center",
     ).map((u) => u.key);
     expect(keys[0]).toBe("dropbox");

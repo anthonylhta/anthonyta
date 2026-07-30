@@ -18,6 +18,7 @@ import {
   parseSetInput,
   prefillSet,
   lastDoneFor,
+  lastSessionDate,
   lastSetsFor,
   normalizeGymConfig,
   removeSession,
@@ -442,6 +443,11 @@ describe("sessionCounts / sessionsThisWeek / sessionDays", () => {
       "2026-07-24",
       "2026-07-10",
     ]);
+  });
+
+  it("reads the last session's day off the head of the array", () => {
+    expect(lastSessionDate(cfg)).toBe("2026-07-26");
+    expect(lastSessionDate(EMPTY_GYM_CONFIG)).toBeNull();
   });
 
   it("windows oldest → newest, ending at today", () => {

@@ -1,15 +1,19 @@
 /**
- * chores — the pure spine of the maintenance-chores row (roadmap 52). The hub
- * has recurring chores (the weekly CSV import, vault-sync after journaling,
- * the monthly hub-backup) that lived in notes and memory — places the owner
- * doesn't look every morning. This row derives "last done" from EVIDENCE, not
- * self-reporting: a chip goes green because the chore actually happened.
+ * chores — the pure spine of the needs-doing board's cadence lines (roadmap 52,
+ * then 72). The hub has recurring things (journaling, training, the weekly CSV
+ * import, vault-sync, the monthly hub-backup, the weekly aperture seal) that
+ * lived in notes and memory — places the owner doesn't look every morning. Each
+ * line derives "last done" from EVIDENCE, not self-reporting: a row goes quiet
+ * because the thing actually happened.
  *
- * Sources, per chore (the row composes all three):
+ * Sources, per cadence (the board composes them all):
+ *   - gym         → the newest session date inside the DECRYPTED gym envelope
  *   - csv import  → the newest invested[] date inside the DECRYPTED fin
- *     envelope (client island — exact evidence, sealed at rest)
+ *     envelope (client islands — exact evidence, sealed at rest)
  *   - vault-sync  → R2 `LastModified` on the search index (server-side; the
  *     "when" of a blob is inside the accepted metadata boundary)
+ *   - aperture    → R2 `LastModified` on the plaintext glance, written by the
+ *     owner-run sync at each seal
  *   - hub-backup  → a plaintext date stamp the backup script writes on
  *     success (an off-hub chore is otherwise invisible to the hub)
  */
@@ -18,8 +22,10 @@
 export const BACKUP_STAMP_PATH = "meta/chores/backup";
 
 export const CHORE_CADENCE_DAYS = {
+  gym: 3,
   csv: 7,
   vaultSync: 3,
+  aperture: 7,
   backup: 30,
 } as const;
 

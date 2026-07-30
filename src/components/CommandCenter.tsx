@@ -2,14 +2,13 @@ import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { ApertureMasthead } from "@/components/ApertureMasthead";
 import { SignOut } from "@/components/auth-buttons";
-import { ChoresRow } from "@/components/ChoresRow";
 import { DropInbox } from "@/components/DropInbox";
 import { GuideSealed, type GuideEvidence } from "@/components/GuideSealed";
 import { JournalPulse } from "@/components/JournalPulse";
+import { NeedsDoing } from "@/components/NeedsDoing";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
-import { TodoGlance } from "@/components/TodoGlance";
 import { TransitGlance } from "@/components/TransitGlance";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
@@ -248,15 +247,35 @@ export async function CommandCenter({ userName }: { userName: string }) {
       <VaultTodayGlance offline={!r2Enabled()} date={today} />
     ) : null,
 
-    /* quick capture — the E2EE todo list (roadmap 53). A client island:
-       captures seal into the meta/todo envelope in the browser; sealed
-       dots until the key is in hand. */
+    /* needs doing — the day's board (roadmap 72): the E2EE captures, the life
+       cadences derived from their own evidence, and the hub's upkeep with the
+       command to run. A client island for the sealed halves; the three chore
+       states the server can see ride in as props. Always rendered — a surface
+       you consult has to exist to be consulted. */
     todo: !hidden.has("todo") ? (
       <div className="border-b border-hairline px-4 py-4">
         <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-muted">
-          capture
+          needs doing
         </div>
-        <TodoGlance offline={!r2Enabled()} />
+        <NeedsDoing
+          offline={!r2Enabled()}
+          today={today}
+          vaultSync={choreState(
+            choreReads.vaultSyncedAt,
+            CHORE_CADENCE_DAYS.vaultSync,
+            new Date(),
+          )}
+          backup={choreState(
+            choreReads.backupAt,
+            CHORE_CADENCE_DAYS.backup,
+            new Date(),
+          )}
+          aperture={choreState(
+            choreReads.apertureSealedAt,
+            CHORE_CADENCE_DAYS.aperture,
+            new Date(),
+          )}
+        />
       </div>
     ) : null,
 
@@ -334,26 +353,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
           <JournalPulse offline={!r2Enabled()} />
         </span>
       </div>
-    ) : null,
-
-    /* chores — maintenance freshness derived from evidence (roadmap 52):
-       vault-sync + backup are server-read, the csv chore decrypts the fin
-       envelope client-side, so the whole row is an island. Exception-only —
-       it names what's gone due and stays silent otherwise. */
-    chores: !hidden.has("chores") ? (
-      <ChoresRow
-        offline={!r2Enabled()}
-        vaultSync={choreState(
-          choreReads.vaultSyncedAt,
-          CHORE_CADENCE_DAYS.vaultSync,
-          new Date(),
-        )}
-        backup={choreState(
-          choreReads.backupAt,
-          CHORE_CADENCE_DAYS.backup,
-          new Date(),
-        )}
-      />
     ) : null,
 
     /* health — is the estate up (roadmap 55): one capped probe per sibling

@@ -513,6 +513,13 @@ export function sessionDays(cfg: GymConfig): string[] {
   return cfg.sessions.map((s) => s.date);
 }
 
+/** The day of the most recent session, or null for an empty log — the head of a
+ *  newest-first array (see the module note), so no sorting and no date parsing.
+ *  What the needs-doing board ages the training cadence against. */
+export function lastSessionDate(cfg: GymConfig): string | null {
+  return cfg.sessions[0]?.date ?? null;
+}
+
 /** The calendar day before `ymd` (UTC-midnight math, DST-safe) — the activity.ts
  *  helper, needed here because gym days are stored as days, not timestamps. */
 function prevDay(ymd: string): string {
