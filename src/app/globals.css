@@ -182,6 +182,57 @@ body {
 }
 
 /*
+  The breakthrough moment (roadmap 70a). Registering `--essence` IS the mechanism:
+  an unregistered custom property is an untyped token stream the browser can't
+  interpolate, so typing it a <color> is what lets one transition on the container
+  carry every consumer below it — numeral, brush, chips, strips, seals — across to
+  the new essence together, with no per-element animation anywhere. The two derived
+  tints ride along on their own: they are color-mix() over this variable, so they
+  recompute as it moves.
+
+  The initial value is the house amber written out (a registration can't reference
+  a token): it is what `var(--essence)` resolves to anywhere the skin isn't — a
+  neutral, never a rank's colour.
+*/
+@property --essence {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #f5a524;
+}
+
+/* Worn for the sweep's own duration and no longer: the island lays the OLD
+   essence on the container inline, arms this class, then drops the override so
+   the variable travels back to the value the server declared. */
+[data-skin="cultivation"].skin-sweeping {
+  transition: --essence 1.4s cubic-bezier(0.3, 0, 0.2, 1);
+}
+
+/* the line under the masthead — fades in behind the sweep, then stays put for
+   the rest of the page-view */
+@keyframes skin-breakin {
+  to {
+    opacity: 1;
+  }
+}
+[data-skin="cultivation"] .skin-breakline {
+  opacity: 0;
+  animation: skin-breakin 0.9s ease-out 0.15s forwards;
+}
+
+/* Reduced motion keeps the moment and drops the movement: the essence swaps in
+   one step and the line is simply there. Its opacity has to be restored by hand
+   — the animation is what was making it visible. */
+@media (prefers-reduced-motion: reduce) {
+  [data-skin="cultivation"].skin-sweeping {
+    transition: none;
+  }
+  [data-skin="cultivation"] .skin-breakline {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/*
   Recovery-share printing — one share per page. The classic "print only this
   subtree" trick: hide every mark, re-show the print root, and pin it to the top.
   Shares live only on paper/screen, so this is the only place they get inked.

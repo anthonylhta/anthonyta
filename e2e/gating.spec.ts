@@ -326,6 +326,7 @@ test.describe("guest gating", () => {
     "last 10 weeks", // the paths band's evidence strips (no lobby strip says this)
     "the record", // the seal-history band's divider
     "Green Copper", // an essence family name (the skin's masthead line)
+    "突破", // the breakthrough line's glyph (its English word is too common to pin)
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
