@@ -398,14 +398,17 @@ export function isPr(set: GymSet, cfg: GymConfig, exerciseId: string): boolean {
 
 /**
  * A workout being built, before it becomes a session. It lives in the island's
- * state and is mirrored to `sessionStorage` under GYM_DRAFT_KEY.
+ * state and is mirrored to `localStorage` under GYM_DRAFT_KEY.
  *
  * THE TRADEOFF, stated plainly: that mirror is PLAINTEXT. A set of sets is the
- * least sensitive thing the hub holds, and sessionStorage is per-tab and dies
- * with the tab — but it is still the one place gym data exists unsealed, and it
- * is here for exactly one reason: a phone backgrounding the tab mid-workout must
- * not eat the workout. The durable home is the sealed envelope; the draft is a
- * scratch pad with a short life, cleared the moment the session saves.
+ * least sensitive thing the hub holds, and it is the one place gym data exists
+ * unsealed. It is here for exactly one reason: closing or backgrounding the
+ * phone tab mid-workout must not eat the workout — sessionStorage was tried
+ * first and dies exactly when the insurance is needed (the owner closes the
+ * site between exercises; ADR 0120). localStorage is shared across tabs, so
+ * two tabs mid-draft would clobber each other — one owner, one workout at a
+ * time. The durable home is the sealed envelope; the draft is a scratch pad,
+ * cleared the moment the session saves or is discarded.
  */
 export interface GymDraft {
   templateId?: string;

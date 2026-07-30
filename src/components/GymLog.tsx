@@ -75,19 +75,20 @@ function setsLine(sets: GymSet[]): string {
   return sets.map((s) => `${s.w}×${s.r}`).join(" · ");
 }
 
-/** The draft this tab was left with, if any — a workout a backgrounded phone
- *  killed mid-set. A draft written by an older build is dropped, not restored
- *  into a crash (`parseDraft`); a tab with no storage at all simply has no draft. */
+/** The draft this device was left with, if any — a workout the owner walked away
+ *  from mid-set, whether the tab was backgrounded, killed, or closed outright.
+ *  A draft written by an older build is dropped, not restored into a crash
+ *  (`parseDraft`); a browser with no storage at all simply has no draft. */
 function readDraft(): GymDraft {
   if (typeof window === "undefined") return EMPTY_GYM_DRAFT;
   try {
-    const stored = sessionStorage.getItem(GYM_DRAFT_KEY);
+    const stored = localStorage.getItem(GYM_DRAFT_KEY);
     if (!stored) return EMPTY_GYM_DRAFT;
     const parsed = parseDraft(stored);
     if (parsed) return parsed;
-    sessionStorage.removeItem(GYM_DRAFT_KEY);
+    localStorage.removeItem(GYM_DRAFT_KEY);
   } catch {
-    // no sessionStorage (private mode, disabled) — the draft just isn't durable
+    // no localStorage (private mode, disabled) — the draft just isn't durable
   }
   return EMPTY_GYM_DRAFT;
 }
@@ -106,9 +107,9 @@ function readDraft(): GymDraft {
  * Nothing is optimistic: a set is on the page after it is sealed, not before.
  *
  * The in-progress draft is the one exception to all of that, and deliberately so
- * (see `GymDraft`): it is mirrored to sessionStorage in PLAINTEXT so a
- * backgrounded phone tab can't eat a workout, and cleared the moment the session
- * saves.
+ * (see `GymDraft`): it is mirrored to localStorage in PLAINTEXT so a phone tab
+ * that is backgrounded — or closed and reopened between exercises — can't eat a
+ * workout, and cleared the moment the session saves.
  */
 export function GymLog({ offline }: { offline: boolean }) {
   const vault = useVault(offline);
@@ -144,8 +145,8 @@ export function GymLog({ offline }: { offline: boolean }) {
     setDraft(next);
     try {
       if (next.entries.length === 0 && !next.note)
-        sessionStorage.removeItem(GYM_DRAFT_KEY);
-      else sessionStorage.setItem(GYM_DRAFT_KEY, JSON.stringify(next));
+        localStorage.removeItem(GYM_DRAFT_KEY);
+      else localStorage.setItem(GYM_DRAFT_KEY, JSON.stringify(next));
     } catch {
       // best effort — a draft that can't be mirrored still works in memory
     }
