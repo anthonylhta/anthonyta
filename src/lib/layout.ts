@@ -146,8 +146,8 @@ export const CENTER_UNITS: UnitDef[] = [
   {
     key: "todo",
     zone: "today",
-    label: "quick capture (todo list)",
-    modules: [{ key: "todo", label: "quick capture (todo list)" }],
+    label: "needs doing (capture + cadences)",
+    modules: [{ key: "todo", label: "needs doing (capture + cadences)" }],
   },
   {
     key: "briefing",
@@ -169,14 +169,7 @@ export const CENTER_UNITS: UnitDef[] = [
       { key: "mortal", label: "mortal pulse (riichi / tft / reading)" },
     ],
   },
-  // The exception rows, last: they say nothing at all until something is due or
-  // something is down.
-  {
-    key: "chores",
-    zone: "today",
-    label: "chores (csv / vault-sync / backup)",
-    modules: [{ key: "chores", label: "chores (csv / vault-sync / backup)" }],
-  },
+  // The exception row, last: it says nothing at all until something is down.
   {
     key: "health",
     zone: "today",
