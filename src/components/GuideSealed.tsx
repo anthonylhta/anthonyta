@@ -842,6 +842,18 @@ function Evidence({
           label={`${label}, last 10 weeks`}
         />
       </span>
+      {/* The steps count is PUSHED by the companion app, so "refresh" means
+          opening it — it syncs on foreground. Touch-only: a desktop click has
+          no app to land in. */}
+      {ev.key === "steps" && (
+        <a
+          href="intent:#Intent;package=dev.anthonyta.mandosteps;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end"
+          aria-label="sync steps now (opens the companion app)"
+          className="hidden text-xs text-muted/40 transition-colors hover:text-(--essence) pointer-coarse:inline"
+        >
+          ↻
+        </a>
+      )}
     </>
   );
 }

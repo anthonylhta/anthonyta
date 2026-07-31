@@ -234,6 +234,10 @@ test("every owner-PAGE surface answers ONE indistinguishable HTML 404", async ({
 // ---------------------------------------------------------------------------
 
 test("no route crashes (5xx) on any HTTP verb", async ({ request }) => {
+  // The probe count is routes × verbs and the manifest keeps growing (the
+  // completeness check's whole point), so the default 30s ceiling is a flake
+  // waiting for a warm machine — it tripped at 59 routes under a parallel run.
+  test.setTimeout(120_000);
   const offenders: string[] = [];
   await Promise.all(
     ROUTE_MANIFEST.map(async (r) => {
