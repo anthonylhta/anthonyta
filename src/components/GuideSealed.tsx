@@ -844,10 +844,11 @@ function Evidence({
       </span>
       {/* The steps count is PUSHED by the companion app, so "refresh" means
           opening it — it syncs on foreground. Touch-only: a desktop click has
-          no app to land in. */}
+          no app to land in. Must target the app's BROWSABLE mandosteps://
+          filter — browsers refuse to launch MAIN/LAUNCHER intents. */}
       {ev.key === "steps" && (
         <a
-          href="intent:#Intent;package=dev.anthonyta.mandosteps;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;end"
+          href="intent://sync#Intent;scheme=mandosteps;package=dev.anthonyta.mandosteps;end"
           aria-label="sync steps now (opens the companion app)"
           className="hidden text-xs text-muted/40 transition-colors hover:text-(--essence) pointer-coarse:inline"
         >
