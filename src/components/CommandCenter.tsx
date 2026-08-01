@@ -5,6 +5,7 @@ import { SignOut } from "@/components/auth-buttons";
 import { DropInbox } from "@/components/DropInbox";
 import { GuideSealed, type GuideEvidence } from "@/components/GuideSealed";
 import { JournalPulse } from "@/components/JournalPulse";
+import { MealsGlance } from "@/components/MealsGlance";
 import { NeedsDoing } from "@/components/NeedsDoing";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { StatusBar } from "@/components/terminal/StatusBar";
@@ -279,6 +280,21 @@ export async function CommandCenter({ userName }: { userName: string }) {
       </div>
     ) : null,
 
+    /* meals — the day's macros against their targets, protein first. A vault
+       island: the food library and everything eaten are sealed in `meta/meals`,
+       so the bars are drawn in the browser. Always rendered — a tracker you
+       have to see in order to log against is the 0109 exception. */
+    meals: !hidden.has("meals") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          meals
+        </span>
+        <span className="min-w-0 flex-1">
+          <MealsGlance offline={!r2Enabled()} today={today} />
+        </span>
+      </div>
+    ) : null,
+
     /* briefing — one line, the day's driver. The tape, the relevance
        annotation and the rest of the read live on /briefing. */
     briefing: !hidden.has("briefing") ? (
@@ -498,6 +514,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
               className="text-muted transition-colors hover:text-amber"
             >
               gym/
+            </Link>
+            <Link
+              href="/meals"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              meals/
             </Link>
             <Link
               href="/vault"

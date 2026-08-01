@@ -184,6 +184,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/meals",
+    probe: "/api/meals",
+    shape: "owner-api",
+    methods: ["GET", "PUT"],
+  },
+  {
     routeKey: "/api/prf/wrap",
     probe: "/api/prf/wrap",
     shape: "owner-api",
@@ -275,6 +281,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
   {
     routeKey: "/gym",
     probe: "/gym",
+    shape: "owner-page",
+    methods: ["GET"],
+  },
+  {
+    routeKey: "/meals",
+    probe: "/meals",
     shape: "owner-page",
     methods: ["GET"],
   },

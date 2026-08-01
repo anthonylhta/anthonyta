@@ -12,6 +12,7 @@ import { FIN_PATH, SNAP_INDEX_PATH } from "./finstore";
 import { GYM_PATH } from "./gymstore";
 import { KEYSTORE_PATH } from "./inbox";
 import { LAYOUT_PATH } from "./layoutstore";
+import { MEALS_PATH } from "./mealsstore";
 import { PRF_WRAP_PATH } from "./prfstore";
 import { classifyKey, partitionEstate, ROTATION_PATH } from "./rotationset";
 import { STEPS_PATH } from "./stepsstore";
@@ -72,6 +73,11 @@ describe("drift guards", () => {
       action: "rewrite",
       kind: "envelope",
       context: GYM_PATH,
+    });
+    expect(classifyKey(MEALS_PATH)).toEqual({
+      action: "rewrite",
+      kind: "envelope",
+      context: MEALS_PATH,
     });
     // The aperture envelope: sealed by the sync script rather than a browser,
     // but MK-sealed AEV2 all the same — unclassified it silently blocked every
