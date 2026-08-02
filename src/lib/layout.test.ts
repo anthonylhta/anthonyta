@@ -26,6 +26,7 @@ const cfg = (o: Partial<LayoutConfig> = {}): LayoutConfig => ({
 const TODAY_DEFAULT = [
   "weather",
   "transit-next",
+  "agenda",
   "vault-today",
   "todo",
   "meals",

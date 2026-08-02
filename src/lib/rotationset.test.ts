@@ -4,6 +4,7 @@ import {
   apertureHistPath,
   ROTATION_CONTEXT,
 } from "./aevcontext";
+import { AGENDA_PATH } from "./agendastore";
 import { APERTURE_GLANCE_PATH, APERTURE_PATH } from "./aperturestore";
 import { AUTHLOG_PATH } from "./authlogstore";
 import { BRIEFING_PATH } from "./briefingstore";
@@ -78,6 +79,11 @@ describe("drift guards", () => {
       action: "rewrite",
       kind: "envelope",
       context: MEALS_PATH,
+    });
+    expect(classifyKey(AGENDA_PATH)).toEqual({
+      action: "rewrite",
+      kind: "envelope",
+      context: AGENDA_PATH,
     });
     // The aperture envelope: sealed by the sync script rather than a browser,
     // but MK-sealed AEV2 all the same — unclassified it silently blocked every

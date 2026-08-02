@@ -138,6 +138,12 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "transit-next", label: "next trip (transit)" }],
   },
   {
+    key: "agenda",
+    zone: "today",
+    label: "agenda (schedule)",
+    modules: [{ key: "agenda", label: "agenda (schedule)" }],
+  },
+  {
     key: "vault-today",
     zone: "today",
     label: "today's daily note",
