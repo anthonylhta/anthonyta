@@ -1,59 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useVault } from "@/app/files/useVault";
-import {
-  checkSeqAndRemember,
-  rememberSavedSeq,
-  SeqAlarm,
-} from "@/components/SeqAlarm";
-import { AGENDA_CONTEXT } from "@/lib/aevcontext";
+import { useState } from "react";
+import Link from "next/link";
+import { AgendaComposer, type AgendaPreset } from "@/components/AgendaComposer";
+import { SeqAlarm } from "@/components/SeqAlarm";
+import { useAgenda } from "@/components/useAgenda";
 import {
   addEvent,
+  BOOK_AHEAD_DAYS,
   dayLabel,
-  EMPTY_AGENDA_CONFIG,
-  fitsAgendaCap,
-  normalizeAgendaConfig,
-  parseTimeInput,
-  pruneCutoff,
-  pruneEvents,
   removeEvent,
   timeLabel,
   upcoming,
-  type AgendaConfig,
   type AgendaEvent,
 } from "@/lib/agenda";
-import { randomId } from "@/lib/crypto";
-import { nextSeq } from "@/lib/seqrule";
 import { nextDays } from "@/lib/transit";
-
-const input =
-  "border border-hairline bg-transparent px-2 py-1 font-mono text-[13px] text-fg placeholder:text-muted focus:border-amber focus:outline-none disabled:opacity-50";
-const btn =
-  "border border-hairline px-2 py-1 text-muted transition-colors hover:border-amber hover:text-amber disabled:opacity-30";
 
 /** Rows the glance draws before it summarises the tail. */
 const GLANCE_COUNT = 5;
 
-/** How far ahead the composer can book. Appointments land weeks out, but this is
- *  a schedule, not a calendar — past two months the year belongs elsewhere. */
-const BOOK_AHEAD_DAYS = 60;
-
 /**
- * The agenda row — what's ahead, and the one place to put something there. Every
- * event lives in the `meta/agenda` envelope, so this is a client island: one
- * fetch, one decrypt, one normalize, and the server never sees a title. Sealed
- * dots until the vault key is in hand (the IDB cache usually means it already
- * is), and the decrypted schedule leaves the moment the vault locks.
+ * The agenda row — what's ahead, and the one place on the homepage to put
+ * something there. The envelope, the decrypt and the save all live in
+ * `useAgenda`, and the typing in `AgendaComposer`, so this is the glance itself
+ * and nothing else; /agenda draws the same schedule from the same two pieces.
  *
  * Always rendered, like the needs-doing board: ADR 0109's silent-when-fine rule
  * is for rows that report, and an entry surface has to exist to be entered into.
- *
- * Every save is the fin panel's seal → PUT → retry-once-on-409 dance over a PURE
- * transform, re-applied against freshly-fetched state on the conflict — so adding
- * a shift on the phone while the PC has the page open can't lose either. This
- * island WRITES, so it owns the rollback check (58b) the read-only glances skip.
- * Nothing is optimistic: an event is on the page after it is sealed, not before.
  */
 export function AgendaRow({
   offline,
@@ -62,205 +35,39 @@ export function AgendaRow({
   offline: boolean;
   today: string;
 }) {
-  const vault = useVault(offline);
-  const { openItem } = vault;
-  const unlocked = vault.status === "unlocked";
+  const {
+    status,
+    cfg,
+    unlocked,
+    busy,
+    notice,
+    seqAlarm,
+    saveConfig,
+    clearNotice,
+  } = useAgenda(offline, today);
 
-  const [cfg, setCfg] = useState<AgendaConfig | null>(null);
-  const [configExisted, setConfigExisted] = useState(false);
-  const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
-  const [seqAlarm, setSeqAlarm] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  // Composer — closed until asked for, and its fields are strings until `add`
-  // turns them into an event.
+  // Composer — closed until asked for, and remounted on each preset so a `+1`
+  // lands its values in fresh fields.
   const [open, setOpen] = useState(false);
-  const [day, setDay] = useState(today);
-  const [startText, setStartText] = useState("");
-  const [endText, setEndText] = useState("");
-  const [title, setTitle] = useState("");
+  const [preset, setPreset] = useState<AgendaPreset | null>(null);
+  const [presetNonce, setPresetNonce] = useState(0);
 
-  // Render-phase reset on the lock/unlock edge (the glance idiom): the decrypted
-  // schedule leaves with the key, and so does anything half-typed about it.
+  // The lock edge closes the composer: anything half-typed about the schedule
+  // leaves with the key, exactly as the decrypted schedule does.
   const [wasUnlocked, setWasUnlocked] = useState(unlocked);
   if (wasUnlocked !== unlocked) {
     setWasUnlocked(unlocked);
-    setCfg(null);
-    setDataErr(null);
-    setNotice(null);
     setOpen(false);
-    setTitle("");
-    setStartText("");
-    setEndText("");
-  }
-
-  // Load + decrypt once per unlock. A healthy 404 is first-run; other misses get
-  // the honest register — this row is the store's ONLY surface (unlike the meals
-  // glance, which defers its errors to /meals), so silent dots on a tampered
-  // envelope would hide the one signal the owner could act on.
-  useEffect(() => {
-    if (!unlocked) return;
-    let cancelled = false;
-    (async () => {
-      let config: AgendaConfig | null = null;
-      let existed = false;
-      try {
-        const res = await fetch("/api/agenda");
-        if (res.status === 404) {
-          config = EMPTY_AGENDA_CONFIG;
-        } else if (res.status === 200) {
-          try {
-            const envelope = new Uint8Array(await res.arrayBuffer());
-            const { bytes } = await openItem(envelope, AGENDA_CONTEXT);
-            const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-            config = normalizeAgendaConfig(parsed);
-            if (!config) throw new Error("bad shape");
-            existed = true;
-          } catch {
-            if (!cancelled) setDataErr("tamper");
-            return;
-          }
-        } else {
-          if (!cancelled) setDataErr("unreachable");
-          return;
-        }
-      } catch {
-        if (!cancelled) setDataErr("unreachable");
-        return;
-      }
-      if (cancelled) return;
-      setCfg(config);
-      setConfigExisted(existed);
-      // Rollback check (58b) — a 404 for a schedule this device has seen alarms too.
-      void checkSeqAndRemember("agenda", config).then((rolled) => {
-        if (rolled && !cancelled) setSeqAlarm(true);
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [unlocked, openItem]);
-
-  async function putConfig(
-    next: AgendaConfig,
-    existed: boolean,
-  ): Promise<"ok" | "conflict" | "failed"> {
-    // Bump the sealed write counter (58b); prior = the newer of loaded state
-    // and next itself (a 409-dance rebuild carries the fresher seq).
-    next = { ...next, seq: Math.max(nextSeq(cfg ?? {}), nextSeq(next)) };
-    const bytes = new TextEncoder().encode(JSON.stringify(next));
-    const sealed = await vault.sealItem(
-      { n: "agenda.json", t: "application/json", s: bytes.length },
-      bytes,
-      AGENDA_CONTEXT,
-    );
-    const res = await fetch("/api/agenda", {
-      method: "PUT",
-      headers: {
-        "content-type": "application/octet-stream",
-        ...(existed ? { "x-agenda-overwrite": "1" } : {}),
-      },
-      body: new Blob([sealed as BlobPart]),
-    });
-    if (res.status === 409) return "conflict";
-    if (res.ok) rememberSavedSeq("agenda", next);
-    return res.ok ? "ok" : "failed";
-  }
-
-  async function fetchConfigFresh(): Promise<AgendaConfig> {
-    const res = await fetch("/api/agenda");
-    if (res.status === 404) return EMPTY_AGENDA_CONFIG;
-    if (res.status !== 200) throw new Error("agenda refetch failed");
-    const envelope = new Uint8Array(await res.arrayBuffer());
-    const { bytes } = await openItem(envelope, AGENDA_CONTEXT);
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    const config = normalizeAgendaConfig(parsed);
-    if (!config) throw new Error("agenda refetch: bad shape");
-    return config;
-  }
-
-  /** Apply a pure transform, seal, PUT — retrying once against a fresh config on
-   *  a 409 (the other device may have booked something meanwhile). Every save
-   *  prunes the grace week behind it, so the past leaves without a chore. */
-  async function saveConfig(
-    apply: (base: AgendaConfig) => AgendaConfig,
-  ): Promise<boolean> {
-    if (!cfg) return false;
-    const next = (base: AgendaConfig) =>
-      pruneEvents(apply(base), pruneCutoff(today));
-    setBusy(true);
-    setNotice(null);
-    try {
-      let base = cfg;
-      // The cap is client-side law — refuse with a reason rather than let the
-      // route answer an opaque 404 on an oversized frame.
-      if (!fitsAgendaCap(next(base))) {
-        setNotice("agenda is full — the envelope cap is reached");
-        return false;
-      }
-      let result = await putConfig(next(base), configExisted);
-      if (result === "conflict") {
-        base = await fetchConfigFresh();
-        result = await putConfig(next(base), true);
-      }
-      if (result !== "ok") {
-        setNotice("could not save — try again");
-        return false;
-      }
-      setCfg(next(base));
-      setConfigExisted(true);
-      return true;
-    } catch {
-      setNotice("could not save — try again");
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // A blank field means "no time"; a field with something unusable in it means
-  // "not yet" — which is what greys the add button rather than storing a guess.
-  const start = parseTimeInput(startText);
-  const end = parseTimeInput(endText);
-  const timesBad =
-    (startText !== "" && start === null) || (endText !== "" && end === null);
-  const rangeBad =
-    (endText !== "" && startText === "") ||
-    (start !== null && end !== null && end <= start);
-  const canAdd = !busy && title.trim() !== "" && !timesBad && !rangeBad;
-
-  async function add() {
-    if (!canAdd) return;
-    // The event is built ONCE, outside the transform: `addEvent` is idempotent on
-    // its id, and a fresh id per re-run would defeat that on the 409 retry.
-    const event: AgendaEvent = {
-      id: randomId(),
-      date: day,
-      ...(start !== null ? { start } : {}),
-      ...(start !== null && end !== null ? { end } : {}),
-      title: title.trim(),
-    };
-    const ok = await saveConfig((base) => addEvent(base, event));
-    // The composer stays open — a roster drops several days at once — but resets
-    // to today so the next one can't inherit the last one's date by accident.
-    if (ok) {
-      setTitle("");
-      setStartText("");
-      setEndText("");
-      setDay(today);
-    }
+    setPreset(null);
   }
 
   /** `+1` — the same thing on another day: the composer opens carrying the
    *  event's text and times, and nothing is saved until `add`. */
   function repeat(event: AgendaEvent) {
-    setTitle(event.title);
-    setStartText(event.start ?? "");
-    setEndText(event.end ?? "");
-    setDay(today);
+    setPreset({ title: event.title, start: event.start, end: event.end });
+    setPresetNonce((n) => n + 1);
     setOpen(true);
-    setNotice(null);
+    clearNotice();
   }
 
   // --- render ---
@@ -268,11 +75,11 @@ export function AgendaRow({
   if (!cfg) {
     return (
       <span className="text-xs text-muted">
-        {dataErr === "unreachable" ? (
+        {status === "unreachable" ? (
           <span className="text-down">vault unreachable — reload to retry</span>
-        ) : dataErr === "tamper" ? (
+        ) : status === "tamper" ? (
           <span className="text-down">cannot decrypt — lock and unlock</span>
-        ) : unlocked ? (
+        ) : status === "loading" ? (
           "decrypting…"
         ) : (
           <span className="text-muted/40">···</span>
@@ -333,73 +140,24 @@ export function AgendaRow({
           ))
         )}
 
+        {/* The tail isn't summarised away — it's a door: the whole schedule, week
+            and month, is one tap down at /agenda. */}
         {hiddenCount > 0 && (
           <p className="pt-0.5 text-[11px] text-muted/60">
-            +{hiddenCount} more within 14d
+            <Link href="/agenda" className="transition-colors hover:text-amber">
+              +{hiddenCount} more within 14d
+            </Link>
           </p>
         )}
 
         {open && (
-          <div className="flex flex-wrap items-center gap-1.5 pt-2 text-xs">
-            <select
-              value={day}
-              disabled={busy}
-              onChange={(e) => setDay(e.target.value)}
-              className={input}
-              aria-label="day"
-            >
-              {dayOptions.map((d) => (
-                <option key={d.ymd} value={d.ymd}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-            {/* Text fields, not type="time": the native picker fights the
-                terminal look, and a controlled one snaps a cleared field back
-                under the cursor. The strings are the state; parseTimeInput
-                decides whether they're usable. */}
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={5}
-              value={startText}
-              disabled={busy}
-              onChange={(e) => setStartText(e.target.value)}
-              placeholder="15:00"
-              className={`w-16 shrink-0 tabular-nums ${input}`}
-              aria-label="start time (24h hh:mm)"
-            />
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={5}
-              value={endText}
-              disabled={busy}
-              onChange={(e) => setEndText(e.target.value)}
-              placeholder="23:00"
-              className={`w-16 shrink-0 tabular-nums ${input}`}
-              aria-label="end time (24h hh:mm)"
-            />
-            <input
-              type="text"
-              value={title}
-              disabled={busy}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void add()}
-              placeholder="what"
-              enterKeyHint="done"
-              className={`min-w-24 flex-1 ${input}`}
-              aria-label="what"
-            />
-            <button
-              type="button"
-              className={btn}
-              disabled={!canAdd}
-              onClick={() => void add()}
-            >
-              {busy ? "…" : "add"}
-            </button>
-          </div>
+          <AgendaComposer
+            key={presetNonce}
+            busy={busy}
+            dayOptions={dayOptions}
+            initial={preset}
+            onAdd={(event) => saveConfig((base) => addEvent(base, event))}
+          />
         )}
 
         {notice && <p className="pt-1 text-[11px] text-down">{notice}</p>}
