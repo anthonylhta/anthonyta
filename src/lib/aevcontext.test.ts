@@ -6,6 +6,7 @@ import {
   apertureHistPath,
   FIN_CONTEXT,
   GYM_CONTEXT,
+  MEALS_CONTEXT,
   TODO_CONTEXT,
   TOTP_CONTEXT,
   TRANSIT_CONTEXT,
@@ -14,6 +15,7 @@ import { APERTURE_PATH } from "./aperturestore";
 import { generateMk, open, seal, type EnvelopeMeta } from "./crypto";
 import { FIN_PATH } from "./finstore";
 import { GYM_PATH } from "./gymstore";
+import { MEALS_PATH } from "./mealsstore";
 import { TODO_PATH } from "./todostore";
 import { TOTP_PATH } from "./totpstore";
 import { TRANSIT_PATH } from "./transitstore";
@@ -24,6 +26,7 @@ const STORES = [
   { name: "todo", ctx: TODO_CONTEXT, path: TODO_PATH },
   { name: "totp", ctx: TOTP_CONTEXT, path: TOTP_PATH },
   { name: "gym", ctx: GYM_CONTEXT, path: GYM_PATH },
+  { name: "meals", ctx: MEALS_CONTEXT, path: MEALS_PATH },
 ];
 
 const meta: EnvelopeMeta = { n: "x.json", t: "application/json", s: 3 };

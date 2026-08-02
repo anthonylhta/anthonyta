@@ -28,6 +28,7 @@ const TODAY_DEFAULT = [
   "transit-next",
   "vault-today",
   "todo",
+  "meals",
   "briefing",
   "hand",
   "mortal",

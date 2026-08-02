@@ -150,6 +150,12 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "todo", label: "needs doing (capture + cadences)" }],
   },
   {
+    key: "meals",
+    zone: "today",
+    label: "meals (macros glance)",
+    modules: [{ key: "meals", label: "meals (macros glance)" }],
+  },
+  {
     key: "briefing",
     zone: "today",
     label: "briefing (one-line glance)",
