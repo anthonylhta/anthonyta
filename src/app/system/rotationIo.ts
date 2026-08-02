@@ -22,6 +22,7 @@ const CONFIG_ROUTES: Record<string, { route: string; header: string }> = {
   "meta/totp": { route: "/api/totp", header: "x-totp-overwrite" },
   "meta/gym": { route: "/api/gym", header: "x-gym-overwrite" },
   "meta/meals": { route: "/api/meals", header: "x-meals-overwrite" },
+  "meta/agenda": { route: "/api/agenda", header: "x-agenda-overwrite" },
 };
 
 function rawRoute(key: string): string | null {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENDA_CONTEXT,
   APERTURE_CONTEXT,
   APERTURE_HIST_PREFIX,
   apertureHistDay,
@@ -11,6 +12,7 @@ import {
   TOTP_CONTEXT,
   TRANSIT_CONTEXT,
 } from "./aevcontext";
+import { AGENDA_PATH } from "./agendastore";
 import { APERTURE_PATH } from "./aperturestore";
 import { generateMk, open, seal, type EnvelopeMeta } from "./crypto";
 import { FIN_PATH } from "./finstore";
@@ -27,6 +29,7 @@ const STORES = [
   { name: "totp", ctx: TOTP_CONTEXT, path: TOTP_PATH },
   { name: "gym", ctx: GYM_CONTEXT, path: GYM_PATH },
   { name: "meals", ctx: MEALS_CONTEXT, path: MEALS_PATH },
+  { name: "agenda", ctx: AGENDA_CONTEXT, path: AGENDA_PATH },
 ];
 
 const meta: EnvelopeMeta = { n: "x.json", t: "application/json", s: 3 };

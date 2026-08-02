@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
+import { AgendaRow } from "@/components/AgendaRow";
 import { ApertureMasthead } from "@/components/ApertureMasthead";
 import { SignOut } from "@/components/auth-buttons";
 import { DropInbox } from "@/components/DropInbox";
@@ -238,6 +239,22 @@ export async function CommandCenter({ userName }: { userName: string }) {
         <span className="min-w-0 flex-1">
           <TransitGlance offline={!r2Enabled()} />
         </span>
+      </div>
+    ) : null,
+
+    /* agenda — what's ahead, and the only place it's written down. A vault
+       island: every event is sealed in `meta/agenda`, so the schedule is
+       decrypted (and added to) in the browser. Always rendered — an entry
+       surface has to exist to be entered into, the same 0109 exception the
+       needs-doing board and the meals row take. */
+    agenda: !hidden.has("agenda") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          agenda
+        </span>
+        <div className="min-w-0 flex-1">
+          <AgendaRow offline={!r2Enabled()} today={today} />
+        </div>
       </div>
     ) : null,
 
