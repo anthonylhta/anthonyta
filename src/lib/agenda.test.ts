@@ -5,13 +5,21 @@ import {
   MAX_EVENTS,
   addEvent,
   agendaPayloadBytes,
+  clampMonth,
+  dayEvents,
   dayLabel,
   fitsAgendaCap,
+  monthGrid,
+  monthLabel,
+  monthOf,
+  nextDates,
   normalizeAgendaConfig,
   parseTimeInput,
   pruneCutoff,
   pruneEvents,
   removeEvent,
+  shiftMonth,
+  shortDayLabel,
   timeLabel,
   upcoming,
   type AgendaConfig,
@@ -320,6 +328,179 @@ describe("upcoming", () => {
 
   it("is empty when nothing is ahead", () => {
     expect(upcoming(EMPTY_AGENDA_CONFIG, "2026-07-20")).toEqual([]);
+  });
+});
+
+describe("dayEvents", () => {
+  const cfg = base({
+    events: [
+      event({ id: "c", date: "2026-07-20", start: "15:00", end: undefined }),
+      event({ id: "other", date: "2026-07-21" }),
+      event({
+        id: "b",
+        date: "2026-07-20",
+        start: undefined,
+        end: undefined,
+        title: "zzz all day",
+      }),
+      event({ id: "a", date: "2026-07-20", start: "09:00", end: undefined }),
+    ],
+  });
+
+  it("takes one day only, all-day first then by start", () => {
+    expect(dayEvents(cfg, "2026-07-20").map((e) => e.id)).toEqual([
+      "b",
+      "a",
+      "c",
+    ]);
+  });
+
+  it("breaks a same-minute tie on title, like upcoming does", () => {
+    const tied = base({
+      events: [
+        event({ id: "z", title: "zeta", start: "09:00", end: undefined }),
+        event({ id: "a", title: "alpha", start: "09:00", end: undefined }),
+      ],
+    });
+    expect(dayEvents(tied, "2026-07-20").map((e) => e.title)).toEqual([
+      "alpha",
+      "zeta",
+    ]);
+  });
+
+  it("is empty on a day with nothing on it", () => {
+    expect(dayEvents(cfg, "2026-07-22")).toEqual([]);
+    expect(dayEvents(EMPTY_AGENDA_CONFIG, "2026-07-20")).toEqual([]);
+  });
+
+  it("does not reorder the stored config", () => {
+    dayEvents(cfg, "2026-07-20");
+    expect(cfg.events.map((e) => e.id)).toEqual(["c", "other", "b", "a"]);
+  });
+});
+
+describe("nextDates", () => {
+  it("walks n consecutive days from the first", () => {
+    expect(nextDates("2026-08-02", 3)).toEqual([
+      "2026-08-02",
+      "2026-08-03",
+      "2026-08-04",
+    ]);
+    expect(nextDates("2026-08-02", 1)).toEqual(["2026-08-02"]);
+    expect(nextDates("2026-08-02", 0)).toEqual([]);
+  });
+
+  it("crosses a month and a year boundary", () => {
+    expect(nextDates("2026-07-30", 3)).toEqual([
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-01",
+    ]);
+    expect(nextDates("2026-12-31", 2)).toEqual(["2026-12-31", "2027-01-01"]);
+  });
+
+  it("reaches the booking horizon's far edge", () => {
+    expect(nextDates("2026-08-02", 61).at(-1)).toBe("2026-10-01");
+  });
+});
+
+describe("shortDayLabel", () => {
+  it("names the weekday and the day of the month, unpadded", () => {
+    expect(shortDayLabel("2026-08-02")).toBe("sun 2");
+    expect(shortDayLabel("2026-08-01")).toBe("sat 1");
+    expect(shortDayLabel("2026-07-20")).toBe("mon 20");
+  });
+});
+
+describe("monthOf / monthLabel", () => {
+  it("reads the month off a day and names it", () => {
+    expect(monthOf("2026-08-02")).toBe("2026-08");
+    expect(monthLabel("2026-08")).toBe("august 2026");
+    expect(monthLabel("2027-01")).toBe("january 2027");
+    expect(monthLabel("2026-12")).toBe("december 2026");
+  });
+});
+
+describe("shiftMonth", () => {
+  it("walks either way, across both year boundaries", () => {
+    expect(shiftMonth("2026-08", 1)).toBe("2026-09");
+    expect(shiftMonth("2026-08", -1)).toBe("2026-07");
+    expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+    expect(shiftMonth("2026-01", -1)).toBe("2025-12");
+    expect(shiftMonth("2026-08", 0)).toBe("2026-08");
+  });
+});
+
+describe("clampMonth", () => {
+  it("holds a month inside the range and passes one already in it", () => {
+    expect(clampMonth("2026-07", "2026-08", "2026-10")).toBe("2026-08");
+    expect(clampMonth("2026-11", "2026-08", "2026-10")).toBe("2026-10");
+    expect(clampMonth("2026-09", "2026-08", "2026-10")).toBe("2026-09");
+    expect(clampMonth("2026-08", "2026-08", "2026-08")).toBe("2026-08");
+  });
+});
+
+describe("monthGrid", () => {
+  const flat = (ym: string) => monthGrid(ym).flat();
+
+  it("starts a Monday month with no padding", () => {
+    // June 2026 opens on a Monday, so the first cell IS the 1st.
+    const grid = monthGrid("2026-06");
+    expect(grid).toHaveLength(5);
+    expect(grid[0][0]).toEqual({ ymd: "2026-06-01", day: 1, inMonth: true });
+  });
+
+  it("pads a Sunday month with six leading days", () => {
+    // November 2026 opens on a Sunday — the worst case for a Monday-start grid.
+    const grid = monthGrid("2026-11");
+    expect(grid).toHaveLength(6);
+    expect(grid[0].map((c) => c.inMonth)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(grid[0][0].ymd).toBe("2026-10-26");
+    expect(grid[0][6]).toEqual({ ymd: "2026-11-01", day: 1, inMonth: true });
+  });
+
+  it("fits a Monday February into exactly four rows", () => {
+    const grid = monthGrid("2027-02");
+    expect(grid).toHaveLength(4);
+    expect(grid.flat().every((c) => c.inMonth)).toBe(true);
+    expect(grid[3][6]).toEqual({ ymd: "2027-02-28", day: 28, inMonth: true });
+  });
+
+  it("carries a leap February's 29th", () => {
+    const feb = flat("2028-02").filter((c) => c.inMonth);
+    expect(feb).toHaveLength(29);
+    expect(feb.at(-1)?.ymd).toBe("2028-02-29");
+  });
+
+  it("varies its week count with the month's shape", () => {
+    expect(monthGrid("2026-08")).toHaveLength(6);
+    expect(monthGrid("2026-09")).toHaveLength(5);
+  });
+
+  it("is always whole weeks of contiguous days", () => {
+    for (const ym of ["2026-06", "2026-08", "2026-11", "2027-02", "2028-02"]) {
+      const cells = flat(ym);
+      expect(cells.length % 7, ym).toBe(0);
+      for (let i = 1; i < cells.length; i++)
+        expect(nextDates(cells[i - 1].ymd, 2)[1], ym).toBe(cells[i].ymd);
+    }
+  });
+
+  it("flags every day of the month itself and nothing else", () => {
+    const cells = flat("2026-08");
+    const inside = cells.filter((c) => c.inMonth);
+    expect(inside).toHaveLength(31);
+    expect(inside[0].ymd).toBe("2026-08-01");
+    expect(inside.at(-1)?.ymd).toBe("2026-08-31");
+    expect(cells.every((c) => c.day === Number(c.ymd.slice(8)))).toBe(true);
   });
 });
 

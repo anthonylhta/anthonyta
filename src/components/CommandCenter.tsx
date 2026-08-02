@@ -527,6 +527,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
               transit/
             </Link>
             <Link
+              href="/agenda"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              agenda/
+            </Link>
+            <Link
               href="/gym"
               className="text-muted transition-colors hover:text-amber"
             >

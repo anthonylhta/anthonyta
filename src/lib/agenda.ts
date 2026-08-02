@@ -67,6 +67,21 @@ const TIME_RE = /^\d{2}:\d{2}$/;
 
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
+const MONTHS = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+
 function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null;
 }
@@ -187,6 +202,12 @@ function addDays(ymd: string, n: number): string {
 /** A week of grace behind today — how far back `pruneEvents` keeps. */
 export const GRACE_DAYS = 7;
 
+/** How far ahead the composer can book. Appointments land weeks out, but this is
+ *  a schedule, not a calendar — past two months the year belongs elsewhere. Both
+ *  surfaces build their day picker from this, so neither can offer a day the
+ *  other refuses. */
+export const BOOK_AHEAD_DAYS = 60;
+
 /** The cutoff every save prunes before, so the island holds no date math. */
 export function pruneCutoff(today: string): string {
   return addDays(today, -GRACE_DAYS);
@@ -210,12 +231,29 @@ export function upcoming(
   const end = addDays(today, horizonDays);
   return cfg.events
     .filter((e) => e.date >= today && e.date <= end)
-    .sort(
-      (a, b) =>
-        a.date.localeCompare(b.date) ||
-        (a.start ?? "").localeCompare(b.start ?? "") ||
-        a.title.localeCompare(b.title),
-    );
+    .sort((a, b) => a.date.localeCompare(b.date) || withinDay(a, b));
+}
+
+/** Reading order WITHIN one day — the tail of `upcoming`'s comparator, shared so
+ *  a day reads the same wherever it is drawn. */
+function withinDay(a: AgendaEvent, b: AgendaEvent): number {
+  return (
+    (a.start ?? "").localeCompare(b.start ?? "") ||
+    a.title.localeCompare(b.title)
+  );
+}
+
+/** Everything on ONE day, in that same reading order — what a week row and the
+ *  month's day detail draw. Compares the day STRING like every reading here: the
+ *  date already IS the Sydney day it belongs to. */
+export function dayEvents(cfg: AgendaConfig, date: string): AgendaEvent[] {
+  return cfg.events.filter((e) => e.date === date).sort(withinDay);
+}
+
+/** `n` consecutive days from `from` — the week view's rows, and how the page
+ *  finds the far edge of the booking horizon without doing its own date math. */
+export function nextDates(from: string, n: number): string[] {
+  return Array.from({ length: n }, (_, i) => addDays(from, i));
 }
 
 /** The day chip: "today", "tmr", or the weekday ("wed"). Derived from the date
@@ -227,10 +265,77 @@ export function dayLabel(date: string, today: string): string {
   return WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }
 
+/** The week view's day column: "sat 2" — weekday and day of the month, unpadded.
+ *  Same UTC math as `dayLabel`, for the same reason: no clock is consulted. */
+export function shortDayLabel(date: string): string {
+  const day = new Date(`${date}T00:00:00Z`);
+  return `${WEEKDAYS[day.getUTCDay()]} ${day.getUTCDate()}`;
+}
+
 /** The time column: a range, a single start, or nothing at all (all-day). */
 export function timeLabel(event: AgendaEvent): string {
   if (event.start === undefined) return "";
   return event.end === undefined ? event.start : `${event.start}–${event.end}`;
+}
+
+// --- the month grid ------------------------------------------------------------
+
+/** The `YYYY-MM` a day belongs to. */
+export function monthOf(date: string): string {
+  return date.slice(0, 7);
+}
+
+/** The month bar's heading: "august 2026". */
+export function monthLabel(ym: string): string {
+  return `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+}
+
+/** `by` months either side of `ym` — the ‹ › walk. */
+export function shiftMonth(ym: string, by: number): string {
+  const first = Date.UTC(
+    Number(ym.slice(0, 4)),
+    Number(ym.slice(5, 7)) - 1 + by,
+    1,
+  );
+  return new Date(first).toISOString().slice(0, 7);
+}
+
+/** Hold a month inside the walkable range. `YYYY-MM` sorts lexically, so the
+ *  clamp is a string comparison — the nav ends where the booking horizon does. */
+export function clampMonth(ym: string, min: string, max: string): string {
+  if (ym < min) return min;
+  return ym > max ? max : ym;
+}
+
+export interface MonthCell {
+  ymd: string;
+  /** Day of the month — the numeral drawn in the cell. */
+  day: number;
+  /** False for the adjacent-month days padding the first and last weeks. */
+  inMonth: boolean;
+}
+
+/**
+ * The month as Monday-start weeks — four to six rows, every row seven cells,
+ * padded into the neighbouring months so no row is ragged. Pure string/UTC math
+ * like everything else here: the grid is drawn from the month it was asked for
+ * and never from the device clock, so it can't disagree with the dates in it.
+ */
+export function monthGrid(ym: string): MonthCell[][] {
+  const first = `${ym}-01`;
+  // getUTCDay is Sunday-first and the grid is Monday-first, so a Sunday leads six.
+  const lead = (new Date(`${first}T00:00:00Z`).getUTCDay() + 6) % 7;
+  // Day 0 of the NEXT month is the last day of this one.
+  const days = new Date(
+    Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0),
+  ).getUTCDate();
+  const weeks = Math.ceil((lead + days) / 7);
+  return Array.from({ length: weeks }, (_, w) =>
+    Array.from({ length: 7 }, (_, d) => {
+      const ymd = addDays(first, w * 7 + d - lead);
+      return { ymd, day: Number(ymd.slice(8)), inMonth: monthOf(ymd) === ym };
+    }),
+  );
 }
 
 // --- input parsing -------------------------------------------------------------

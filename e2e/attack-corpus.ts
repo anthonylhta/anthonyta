@@ -279,6 +279,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
 
   // -- owner-gated pages (guest → notFound() → HTML 404, nonce in body) ----------
   {
+    routeKey: "/agenda",
+    probe: "/agenda",
+    shape: "owner-page",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/files",
     probe: "/files",
     shape: "owner-page",
