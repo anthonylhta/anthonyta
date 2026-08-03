@@ -5,8 +5,11 @@ import {
   MEALS_MAX_BYTES,
   addEntry,
   addFood,
+  dayHeading,
   dayTotals,
   entriesFor,
+  nextDay,
+  prevDay,
   fitsMealsCap,
   foodName,
   mealsPayloadBytes,
@@ -370,6 +373,28 @@ describe("trailingProtein", () => {
     expect(series).toHaveLength(14);
     expect(series[13]).toBe(52);
     expect(series[0]).toBe(0);
+  });
+});
+
+describe("prevDay / nextDay / dayHeading", () => {
+  it("walks backwards across month and year boundaries", () => {
+    expect(prevDay("2026-08-01")).toBe("2026-07-31");
+    expect(prevDay("2026-01-01")).toBe("2025-12-31");
+  });
+
+  it("walks forwards across month and year boundaries", () => {
+    expect(nextDay("2026-07-31")).toBe("2026-08-01");
+    expect(nextDay("2025-12-31")).toBe("2026-01-01");
+  });
+
+  it("mirrors: nextDay undoes prevDay", () => {
+    expect(nextDay(prevDay("2026-08-03"))).toBe("2026-08-03");
+  });
+
+  it("labels the day it names", () => {
+    expect(dayHeading("2026-08-03")).toBe("mon 3 aug");
+    expect(dayHeading("2026-01-01")).toBe("thu 1 jan");
+    expect(dayHeading("2025-12-31")).toBe("wed 31 dec");
   });
 });
 

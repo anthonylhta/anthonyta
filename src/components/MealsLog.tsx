@@ -13,6 +13,7 @@ import { randomId } from "@/lib/crypto";
 import {
   addEntry,
   addFood,
+  dayHeading,
   dayTotals,
   EMPTY_MEALS_CONFIG,
   entriesFor,
@@ -20,9 +21,11 @@ import {
   foodName,
   MEALS_MAX_BYTES,
   mealsPayloadBytes,
+  nextDay,
   normalizeMealsConfig,
   parseMacroInput,
   parseQtyInput,
+  prevDay,
   removeEntry,
   removeFood,
   setTargets,
@@ -331,9 +334,15 @@ function TodayView({
   saveConfig: (apply: (base: MealsConfig) => MealsConfig) => Promise<boolean>;
 }) {
   const today = sydneyToday();
-  const totals = dayTotals(cfg, today);
+  // Which day the view reads — null means "follow today", so an overnight tab
+  // rolls forward with the clock; a concrete date means the owner stepped away.
+  const [viewed, setViewed] = useState<string | null>(null);
+  const day = viewed !== null && viewed < today ? viewed : today;
+  const onToday = day === today;
+
+  const totals = dayTotals(cfg, day);
   const targets = cfg.targets ?? null;
-  const entries = entriesFor(cfg, today);
+  const entries = entriesFor(cfg, day);
   const [foodId, setFoodId] = useState("");
   const [qtyText, setQtyText] = useState("1");
   const qty = parseQtyInput(qtyText);
@@ -341,13 +350,50 @@ function TodayView({
   async function add() {
     if (!foodId || qty === null) return;
     const ok = await saveConfig((base) =>
-      addEntry(base, { id: randomId(), date: today, foodId, qty }),
+      // Stamped with the VIEWED day, not today — stepping back and adding is
+      // how a forgotten dinner gets logged onto the day it happened.
+      addEntry(base, { id: randomId(), date: day, foodId, qty }),
     );
     if (ok) setQtyText("1");
   }
 
   return (
     <div className="flex flex-col">
+      <div className="flex items-baseline gap-2 border-b border-hairline px-4 py-2 text-xs">
+        <button
+          type="button"
+          aria-label="previous day"
+          onClick={() => setViewed(prevDay(day))}
+          className="px-1.5 text-muted/60 transition-colors hover:text-amber"
+        >
+          ‹
+        </button>
+        <span className={onToday ? "text-amber" : "text-fg/90"}>
+          {dayHeading(day)}
+        </span>
+        <button
+          type="button"
+          aria-label="next day"
+          disabled={onToday}
+          onClick={() => {
+            const n = nextDay(day);
+            setViewed(n === today ? null : n);
+          }}
+          className="px-1.5 text-muted/60 transition-colors hover:text-amber disabled:opacity-30"
+        >
+          ›
+        </button>
+        {!onToday && (
+          <button
+            type="button"
+            onClick={() => setViewed(null)}
+            className="ml-auto text-muted transition-colors hover:text-amber"
+          >
+            today →
+          </button>
+        )}
+      </div>
+
       <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-3">
         {MACRO_ROWS.map((m) => (
           <MacroBar
@@ -368,7 +414,7 @@ function TodayView({
             protein · 14d
           </p>
           <ProteinStrip
-            values={trailingProtein(cfg, today)}
+            values={trailingProtein(cfg, day)}
             target={targets?.p ?? null}
           />
         </div>
@@ -420,7 +466,11 @@ function TodayView({
       </div>
 
       {entries.length === 0 ? (
-        <p className="px-4 py-3 text-xs text-muted">nothing logged today</p>
+        <p className="px-4 py-3 text-xs text-muted">
+          {onToday
+            ? "nothing logged today"
+            : `nothing logged on ${dayHeading(day)}`}
+        </p>
       ) : (
         entries.map((e) => {
           const food = cfg.foods.find((f) => f.id === e.foodId);
