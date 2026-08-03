@@ -59,9 +59,18 @@
 }
 
 :root {
-  /* browser-drawn chrome (select popups, scrollbars, native pickers) has no
-     access to the tokens above — this is the only way to keep it dark */
+  /* browser-drawn chrome (scrollbars, native pickers) has no access to the
+     tokens above — this is the only way to keep it dark */
   color-scheme: dark;
+}
+
+/* color-scheme alone doesn't reach a select's popup: Chromium sees the
+   author-styled select (bordered, transparent bg) and derives the popup's
+   colors from it instead of theming natively — transparent derives to WHITE.
+   The rows must be painted directly. */
+option {
+  background-color: var(--color-surface);
+  color: var(--color-fg);
 }
 
 body {
