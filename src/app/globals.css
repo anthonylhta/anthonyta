@@ -58,6 +58,12 @@
     var(--font-jp);
 }
 
+:root {
+  /* browser-drawn chrome (select popups, scrollbars, native pickers) has no
+     access to the tokens above — this is the only way to keep it dark */
+  color-scheme: dark;
+}
+
 body {
   background: var(--color-bg);
   color: var(--color-fg);
