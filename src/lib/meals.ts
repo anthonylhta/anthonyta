@@ -307,10 +307,44 @@ export function dayTotals(cfg: MealsConfig, date: string): MealsTargets {
 
 /** The calendar day before `ymd` (UTC-midnight math, DST-safe) — the activity.ts
  *  helper, needed here because meal days are stored as days, not timestamps. */
-function prevDay(ymd: string): string {
+export function prevDay(ymd: string): string {
   const date = new Date(`${ymd}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() - 1);
   return date.toISOString().slice(0, 10);
+}
+
+/** The calendar day after `ymd` — `prevDay`'s mirror, for walking the log
+ *  forward again. */
+export function nextDay(ymd: string): string {
+  const date = new Date(`${ymd}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+const HEADING_WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const HEADING_MONTHS = [
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+];
+
+/** `2026-08-03` → `mon 3 aug` — the day-browser heading. Hand-rolled like
+ *  transit's day labels (no locale machinery), and pure UTC math like the
+ *  walkers above, so the label can never sit a day off the key it names. */
+export function dayHeading(ymd: string): string {
+  const date = new Date(`${ymd}T00:00:00Z`);
+  return `${HEADING_WEEKDAYS[date.getUTCDay()]} ${date.getUTCDate()} ${
+    HEADING_MONTHS[date.getUTCMonth()]
+  }`;
 }
 
 /**
