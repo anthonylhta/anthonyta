@@ -248,11 +248,14 @@ export async function CommandCenter({ userName }: { userName: string }) {
        surface has to exist to be entered into, the same 0109 exception the
        needs-doing board and the meals row take. */
     agenda: !hidden.has("agenda") ? (
-      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+      /* The one today-zone unit that drops the side label on a phone: five
+         columns per event can't share a narrow screen with it, so the label
+         moves above (the needs-doing treatment) and the rows get full width. */
+      <div className="border-b border-hairline px-4 py-2.5 text-sm sm:flex sm:items-baseline sm:gap-3">
+        <span className="mb-1.5 block text-[11px] uppercase tracking-[0.2em] text-muted sm:mb-0 sm:w-20 sm:shrink-0 sm:tracking-[0.12em]">
           agenda
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 sm:flex-1">
           <AgendaRow offline={!r2Enabled()} today={today} />
         </div>
       </div>
