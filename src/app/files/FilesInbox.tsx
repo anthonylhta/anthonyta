@@ -18,6 +18,7 @@ import {
   noteName,
   SHARE_PREFIX,
   shareSegment,
+  viewKind,
   type FileKind,
   type InboxFile,
 } from "@/lib/files";
@@ -1010,6 +1011,45 @@ function EncryptedRow({
           <DelButton pathname={f.pathname} onChanged={onChanged} />
         </div>
       </div>
+
+      {/* The in-browser viewer: a decrypted item renders straight off its object
+          URL — nothing lands in the device's Downloads folder, and the URL (with
+          the bytes behind it) still dies on lock and unmount above. Tap-to-decrypt
+          is the intent gate: only rows the owner opened grow a preview. */}
+      {item?.url && viewKind(item.meta.t) === "image" && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={item.url}
+          alt={item.meta.n}
+          className="mt-2 max-h-[60vh] max-w-full border border-hairline object-contain"
+        />
+      )}
+      {item?.url &&
+        viewKind(item.meta.t) === "pdf" &&
+        (/Android/i.test(navigator.userAgent) ? (
+          // Android Chrome has no inline PDF viewer — a blob: iframe would render
+          // a dead grey box, so the save link stays the honest door there.
+          <p className="mt-2 text-xs text-muted">
+            no inline pdf viewer on this device — save to view
+          </p>
+        ) : (
+          <iframe
+            src={item.url}
+            title={item.meta.n}
+            className="mt-2 h-[70vh] w-full border border-hairline"
+          />
+        ))}
+      {item?.url && viewKind(item.meta.t) === "video" && (
+        <video
+          src={item.url}
+          controls
+          preload="metadata"
+          className="mt-2 max-h-[60vh] w-full border border-hairline"
+        />
+      )}
+      {item?.url && viewKind(item.meta.t) === "audio" && (
+        <audio src={item.url} controls className="mt-2 w-full" />
+      )}
 
       {shareChoice && (
         <div className="mt-2 flex flex-wrap items-center gap-3 border-l border-hairline pl-3 font-mono text-xs">

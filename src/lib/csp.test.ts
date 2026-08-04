@@ -18,7 +18,7 @@ describe("buildCsp", () => {
     expect(directiveMap(policy)["script-src"]).toContain("'nonce-abc123'");
   });
 
-  it("emits all 14 directives with their exact values (store off)", () => {
+  it("emits all 15 directives with their exact values (store off)", () => {
     const dirs = directiveMap(buildCsp("abc123"));
     const expected: Record<string, string> = {
       "default-src": "'self'",
@@ -27,10 +27,13 @@ describe("buildCsp", () => {
       "img-src": "'self' data: blob:",
       "font-src": "'self'",
       "connect-src": "'self'",
+      // Client-decrypted media (inbox viewer) plays off object URLs.
+      "media-src": "'self' blob:",
       "worker-src": "'self'",
       "object-src": "'none'",
       "base-uri": "'none'",
-      "frame-src": "'none'",
+      // blob: only — the inbox viewer's PDF iframe; remote embeds stay blocked.
+      "frame-src": "blob:",
       "frame-ancestors": "'none'",
       "form-action": "'self'",
       "report-uri": "/api/csp-report",
