@@ -3,10 +3,18 @@
 import { useEffect, useState } from "react";
 import { fromB64url, importShareKey, open } from "@/lib/crypto";
 import { formatSize } from "@/lib/files";
+import {
+  buildHandoff,
+  handoffSlot,
+  parseKeyFragment,
+  readHandoff,
+  stripFragment,
+} from "@/lib/fragkey";
 
 type State =
   | { kind: "loading" }
-  /** No fragment on the URL — the key never arrived (link truncated on copy). */
+  /** No usable key: fragment absent/malformed AND no live handoff (truncated
+   *  copy, or a stripped URL reopened after the handoff died). */
   | { kind: "nokey" }
   /** The ciphertext is gone (expired past its TTL, or deleted). */
   | { kind: "gone" }
@@ -15,16 +23,38 @@ type State =
   | { kind: "ready"; name: string; size: number; type: string; url: string };
 
 const COPY: Record<"nokey" | "gone" | "corrupt", string> = {
-  nokey: "this link is missing its key — copy the whole link and try again.",
+  nokey:
+    "this link is missing its key — copy the whole link and try again. if you opened it before, links only stay unlocked for a short while.",
   gone: "this link has expired or was removed.",
   corrupt: "couldn't unlock this file — the link may be damaged.",
 };
 
+/** sessionStorage can be blocked (private mode) or full — the handoff is a
+ *  reload nicety, never a requirement, so both sides swallow storage throws. */
+function parkKey(id: string, key: string): void {
+  try {
+    sessionStorage.setItem(handoffSlot(id), buildHandoff(key, Date.now()));
+  } catch {
+    /* the fragment already decrypted this visit; only reload loses out */
+  }
+}
+
+function parkedKey(id: string): string | null {
+  try {
+    return readHandoff(sessionStorage.getItem(handoffSlot(id)), Date.now());
+  } catch {
+    return null;
+  }
+}
+
 /**
- * The recipient side of a share link. The key lives in the URL fragment (never
- * sent to the server); we import it, pull the same-origin ciphertext, and decrypt
- * in-browser. Decrypting on the main thread is fine here — one small file, and no
- * worker to ship on a public page.
+ * The recipient side of a share link. The key arrives in the URL fragment
+ * (never sent to the server), is captured ONCE and stripped from the history
+ * entry, then parked in a short-lived same-tab handoff (lib/fragkey) so a
+ * reload still decrypts — after first paint, history holds only the bare
+ * `/s/<id>`. We import the key, pull the same-origin ciphertext, and decrypt
+ * in-browser. Decrypting on the main thread is fine here — one small file, and
+ * no worker to ship on a public page.
  */
 export function ShareView({ id }: { id: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -34,8 +64,20 @@ export function ShareView({ id }: { id: string }) {
     let objectUrl: string | null = null;
 
     (async () => {
-      const raw = location.hash.slice(1);
-      if (!raw) {
+      // Capture-then-strip, BEFORE any await: the fragment must be gone from
+      // the history entry before anything can navigate, throw, or suspend —
+      // otherwise the key persists in history (and syncs) key-and-all. The
+      // parked copy is what lets a same-tab reload still decrypt.
+      const fromFragment = parseKeyFragment(location.hash);
+      if (fromFragment !== null) {
+        history.replaceState(null, "", stripFragment(location.href));
+        parkKey(id, fromFragment);
+      }
+      // A malformed fragment (truncated copy) parses as null and falls through
+      // to the handoff — absent that too, it reads as "missing its key", the
+      // message that actually helps.
+      const raw = fromFragment ?? parkedKey(id);
+      if (raw === null) {
         if (!cancelled) setState({ kind: "nokey" });
         return;
       }
