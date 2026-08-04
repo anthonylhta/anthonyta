@@ -104,6 +104,26 @@ export function isEncrypted(pathname: string): boolean {
   return leaf.startsWith("e-") && leaf.endsWith(".bin");
 }
 
+export type ViewKind = "image" | "pdf" | "video" | "audio";
+
+/**
+ * What the in-browser viewer can render for a decrypted envelope's MIME type —
+ * `null` means save-to-view stays the only door (office docs would need a
+ * third-party viewer, which hands plaintext off; HEIC/HEIF browsers can't
+ * decode). PDF rides the browser's own viewer in a blob: iframe — desktop
+ * engines only; Android Chrome has no inline PDF viewer, so the component
+ * shows a save hint there instead.
+ */
+export function viewKind(mime: string): ViewKind | null {
+  const t = mime.toLowerCase();
+  if (t === "image/heic" || t === "image/heif") return null;
+  if (t.startsWith("image/")) return "image";
+  if (t === "application/pdf") return "pdf";
+  if (t.startsWith("video/")) return "video";
+  if (t.startsWith("audio/")) return "audio";
+  return null;
+}
+
 /** Traversal/probe guard for a STORED pathname — the only shape we serve. */
 export function isValidPathname(p: string): boolean {
   if (typeof p !== "string" || !p.startsWith(INBOX_PREFIX) || p.includes(".."))

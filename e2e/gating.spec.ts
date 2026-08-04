@@ -529,7 +529,9 @@ test.describe("strict CSP (report-only)", () => {
         "default-src 'self'",
         "object-src 'none'",
         "base-uri 'none'",
-        "frame-src 'none'",
+        // blob: only (the inbox viewer's PDF iframe) — remote embeds stay blocked.
+        "frame-src blob:",
+        "media-src 'self' blob:",
         "worker-src 'self'",
         // The e2e build runs with no R2 env, so the policy is the store-off shape;
         // the with-R2 variant (endpoint origin in connect-src + img-src) is locked

@@ -50,10 +50,16 @@ export function buildCsp(
     // Uploads PUT ciphertext straight to the bucket on presigned URLs (ADR 0060),
     // so the R2 origin joins connect-src; reads stay same-origin via the raw proxies.
     `connect-src 'self'${r2}`,
+    // Client-decrypted audio/video from the inbox viewer plays off object URLs;
+    // no remote media host exists (or is admitted).
+    "media-src 'self' blob:",
     "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'none'",
-    "frame-src 'none'",
+    // `blob:` ONLY — the inbox viewer hands a client-decrypted PDF to the
+    // browser's own viewer in an iframe. Under strict-dynamic only our nonced
+    // scripts can mint blob: URLs, and remote embeds stay blocked (no https:).
+    "frame-src blob:",
     // frame-ancestors + form-action duplicate the baseline config so this policy is
     // standalone-complete — it doesn't lean on a header merged in elsewhere.
     "frame-ancestors 'none'",

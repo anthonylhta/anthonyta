@@ -15,6 +15,7 @@ import {
   sortInbox,
   TEXT_NOTE_MAX,
   toInboxFile,
+  viewKind,
 } from "./files";
 
 const ID22 = "mB4d5S3CkQxGxUKz2AkKfg"; // 22 chars of base64url, as randomId() emits
@@ -205,6 +206,33 @@ describe("fileKind", () => {
   it("is 'other' for an unknown or missing extension", () => {
     expect(fileKind("inbox/x.xyz")).toBe("other");
     expect(fileKind("inbox/README")).toBe("other");
+  });
+});
+
+describe("viewKind", () => {
+  it("routes the renderable families", () => {
+    expect(viewKind("image/jpeg")).toBe("image");
+    expect(viewKind("image/svg+xml")).toBe("image");
+    expect(viewKind("application/pdf")).toBe("pdf");
+    expect(viewKind("video/mp4")).toBe("video");
+    expect(viewKind("audio/mpeg")).toBe("audio");
+  });
+  it("is case-insensitive", () => {
+    expect(viewKind("IMAGE/PNG")).toBe("image");
+    expect(viewKind("Application/PDF")).toBe("pdf");
+  });
+  it("refuses what browsers can't decode or would need a third party for", () => {
+    expect(viewKind("image/heic")).toBeNull();
+    expect(viewKind("image/heif")).toBeNull();
+    expect(viewKind("application/msword")).toBeNull();
+    expect(
+      viewKind(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ),
+    ).toBeNull();
+    expect(viewKind("application/zip")).toBeNull();
+    expect(viewKind("application/octet-stream")).toBeNull();
+    expect(viewKind("")).toBeNull();
   });
 });
 
