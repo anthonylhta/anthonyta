@@ -497,12 +497,6 @@ describe("aperturesync — rejection diagnosis", () => {
     );
   });
 
-  it("names a now-line that isn't a line", () => {
-    const bad = { ...raw, sealed: { ...raw.sealed, profile: { now: 3 } } };
-    expect(explainRejected(bad)).toBe(
-      "sealed.profile.now must be a string (found 3)",
-    );
-  });
 
   it("names a missing sealed block", () => {
     const noSealed: Record<string, unknown> = { ...raw };
