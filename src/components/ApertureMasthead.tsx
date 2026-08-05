@@ -1,20 +1,19 @@
 import Link from "next/link";
 import { BreakthroughMoment } from "@/components/BreakthroughMoment";
+import { ExceptionLine } from "@/components/terminal/ExceptionLine";
 import { essenceOf, isSealStale, type ApertureGlance } from "@/lib/aperture";
-import {
-  bandLine,
-  displayNumeral,
-  essenceSwatchClass,
-  essenceTextClass,
-  familyOf,
-  sealedAgo,
-  stageGlyphs,
-} from "@/lib/apertureview";
+import { essenceTextClass, membraneOf, sealedAgo } from "@/lib/apertureview";
 
 /**
- * ApertureMasthead — the character sheet's head. Fixed chrome above every band, like
- * the status bar: not a layout unit, because the rank is not a module the owner can
- * reorder away from the top. The page IS the sheet, and a sheet leads with its rank.
+ * ApertureMasthead — the summary page's head, and the door to the full reading.
+ * Fixed chrome above every band, like the status bar: not a layout unit, because
+ * where one stands is not a module the owner can reorder away from the top.
+ *
+ * It is the ESSENCE SEA the inward page leads with, rendered here too — the same
+ * band, the same words, so the home page and /aperture read as one surface with a
+ * door between them rather than two mastheads that drifted. The whole band IS the
+ * door; the muted line under it says so in words as well, because a link nothing
+ * points at is a link nobody finds.
  *
  * Server-rendered from the plaintext glance — rank, stage and the seal instant are
  * the only part of the status that isn't sealed (ADR: plaintext ≠ public). It renders
@@ -22,46 +21,15 @@ import {
  * guest lobby never mounts this, which is exactly the property the guest-HTML e2e
  * lock pins. Nothing here weakens that; there is no guest branch to get wrong.
  *
- * The essence hue lives in the bar, the swatch and the colour's NAME. The rank line
- * itself stays warm off-white: it is the loudest type on the page, and the one
- * headline figure the design allows does not also need to be coloured.
- *
- * No bottom border, deliberately — the sealed island's meta line continues this
- * block (streaks, vital gu, the adjudication dot), so the hairline belongs to
- * whatever renders below rather than cutting the meta in half.
+ * The large numeral, the 命 stamp and the streak meta line all moved off this head
+ * with the restructure: the page below is a summary now, and a rank stated twice at
+ * two zooms is the bloat the summary exists to undo.
  */
 
-/** Both clock-dependent readings off ONE instant, so the age and the staleness dot
- *  can never disagree. Read in a helper rather than the render body the way
+/** Both clock-dependent readings off ONE instant, so the age and the staleness can
+ *  never disagree. Read in a helper rather than the render body the way
  *  `todayLabel()` is: the command center is dynamic, so a per-request clock is
  *  exactly right, but render itself stays pure. */
-/**
- * The way in — the sheet reads outward (rank, wall, paths, the day), the page
- * behind this line reads inward (the stones, the gu, what the next rung asks
- * for). One muted line, because the door is not the point of the masthead.
- *
- * It renders in BOTH of the masthead's states, unplaced included: the page owns
- * the empty case and says so in its own words, which is a better answer than a
- * missing door and no way to find out why.
- */
-function ApertureDoor() {
-  return (
-    <Link
-      href="/aperture"
-      className="mt-2 inline-flex items-baseline gap-1.5 text-[11px] text-muted transition-colors hover:text-amber"
-    >
-      <span
-        aria-hidden
-        lang="zh"
-        className="font-[family-name:var(--font-zh)] text-(--essence)"
-      >
-        竅
-      </span>
-      aperture →
-    </Link>
-  );
-}
-
 function freshness(glance: ApertureGlance): {
   ago: string | null;
   stale: boolean;
@@ -71,6 +39,27 @@ function freshness(glance: ApertureGlance): {
     ago: sealedAgo(glance.sealedAt, now),
     stale: isSealStale(glance.sealedAt, now),
   };
+}
+
+/**
+ * The one muted line under the sea: how old the seal is, and the way in. The band
+ * above it already links, so this is discoverability rather than navigation — it
+ * renders in BOTH of the masthead's states, unplaced included, because the page
+ * behind it owns the empty case and says so in its own words, which is a better
+ * answer than a missing door and no way to find out why.
+ */
+function MetaLine({ ago }: { ago: string | null }) {
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11px] text-muted">
+      {ago && <span className="tabular-nums">{ago}</span>}
+      <Link
+        href="/aperture"
+        className="text-(--essence) transition-colors hover:text-amber"
+      >
+        aperture →
+      </Link>
+    </p>
+  );
 }
 
 export function ApertureMasthead({
@@ -86,111 +75,65 @@ export function ApertureMasthead({
     // for the same reason — nothing follows it.
     return (
       <div className="border-b border-hairline px-4 py-4">
-        <p className="text-xs text-muted">unplaced — run aperture-sync</p>
-        <ApertureDoor />
+        <p className="mb-2 text-xs text-muted">unplaced — run aperture-sync</p>
+        <MetaLine ago={null} />
       </div>
     );
   }
 
   const { ago, stale } = freshness(glance);
   const essence = essenceOf(glance.rank, glance.stage);
-  const essenceText = essenceTextClass(essence);
-  const swatch = essenceSwatchClass(essence);
-  const glyphs = stageGlyphs(glance.rank, glance.stage);
-  const numeral = displayNumeral(glance.rank);
-  const family = familyOf(glance.rank);
+  const membrane = membraneOf(glance.stage);
 
   return (
-    <div className="relative px-4 pb-2 pt-4">
-      {/* the skin's corner signature — one small cinnabar stamp, always 命 */}
-      <span
-        aria-hidden
-        lang="zh"
-        className="skin-stamp absolute right-3.5 top-3.5 h-[34px] w-[34px] -rotate-4 text-[19px] opacity-70"
+    <div>
+      {/* the essence sea — the colour the rank names, where one stands inside it,
+          and the aperture glyph. The whole band is the door: one block-level link,
+          so the target is the size of the thing it is about. */}
+      <Link
+        href="/aperture"
+        aria-label="aperture — the full reading"
+        className="block border-l-2 border-l-(--essence) bg-(--essence-faint) px-4 py-4 transition-opacity hover:opacity-90"
       >
-        命
-      </span>
-
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-        {/* the large rank glyph — financial form, essence-inked; off the canon's
-            nine there is none, for the same reason there is no swatch. */}
-        {numeral && (
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            {/* off canon there is no colour name to print, so the stage itself
+                stands in — muted by `essenceTextClass`, never a colour nobody
+                assigned. */}
+            <p className={`text-2xl leading-none ${essenceTextClass(essence)}`}>
+              {essence ?? glance.stage}
+            </p>
+            <p className="mt-1.5 text-xs text-muted">
+              rank {glance.rank} · {glance.stage}
+              {membrane && ` — ${membrane}`}
+            </p>
+          </div>
           <span
             aria-hidden
             lang="zh"
-            className="font-[family-name:var(--font-zh)] text-[44px] leading-none text-(--essence) opacity-90"
+            className="font-[family-name:var(--font-zh)] text-[34px] leading-none text-(--essence) opacity-80"
           >
-            {numeral}
+            竅
           </span>
-        )}
-        <span className="text-[26px] font-semibold leading-none tracking-[0.06em] text-fg">
-          {bandLine(glance)}
-        </span>
-        {glyphs && (
-          <span
-            lang="zh"
-            className="font-[family-name:var(--font-zh)] text-sm text-muted/60"
-          >
-            {glyphs}
-          </span>
-        )}
-      </div>
+        </div>
+      </Link>
 
-      {/* the brush-stroke underline — essence fading out rightward; off canon
-          the essence variable is muted, so the stroke reads as neutral chrome
-          rather than a colour nobody assigned. */}
-      <div aria-hidden className="skin-brush mt-2.5" />
-
-      <div
-        className={`mt-2 inline-flex items-center gap-2 text-[13px] ${essenceText}`}
-      >
-        {swatch && (
-          <span aria-hidden className={`h-[11px] w-[11px] ${swatch}`} />
-        )}
-        {/* the metal family, then the stage shade — Green Copper · jade green;
-            immortal ranks have one name, so the family line IS the name. Off
-            canon: the literal stage, muted. */}
-        {essence
-          ? family
-            ? `${family.en} · ${essence.toLowerCase()}`
-            : essence
-          : glance.stage}
-        {family && (
-          <span
-            lang="zh"
-            className="font-[family-name:var(--font-zh)] text-xs text-muted/60"
-          >
-            {family.zh}
-          </span>
-        )}
-      </div>
-
-      {/* the breakthrough flourish — a client island under the essence line it
-          reads in the register of, silent on every load but the first after a
-          rank or stage moved (roadmap 70a) */}
-      <BreakthroughMoment rank={glance.rank} stage={glance.stage} />
-
-      {/* An unparseable seal reads no age and lights no dot — so there is no meta
-          line at all rather than an empty one. */}
-      <div
-        className={`flex flex-wrap items-baseline gap-x-3.5 gap-y-1 text-[11px] text-muted ${ago || stale ? "mt-1.5" : ""}`}
-      >
-        {ago && <span className="tabular-nums">{ago}</span>}
+      <div className="px-4 pb-3 pt-2">
+        {/* the breakthrough flourish — a client island in the register of the band
+            it sits under, silent on every load but the first after a rank or stage
+            moved (roadmap 70a) */}
+        <BreakthroughMoment rank={glance.rank} stage={glance.stage} />
+        <MetaLine ago={ago} />
+        {/* A late seal is the owner's own lateness, not an error — so it joins the
+            exception band in amber rather than lighting a red line. It lives here
+            rather than in the sealed island because staleness is a fact about the
+            PLAINTEXT glance: this component holds it, and no key is needed to say it. */}
         {stale && (
-          // A dot, never a colour: a stale seal is the owner's own lateness, not an
-          // error, so it whispers and explains itself on hover.
-          <span className="inline-flex items-baseline gap-1.5">
-            <span
-              aria-hidden
-              title="seal stale — the weekly ritual is overdue"
-              className="inline-block h-[7px] w-[7px] rounded-full bg-muted"
-            />
-            <span className="text-muted/60">seal stale</span>
-          </span>
+          <ExceptionLine tone="amber">
+            seal stale — run aperture-sync
+          </ExceptionLine>
         )}
       </div>
-
-      <ApertureDoor />
     </div>
   );
 }

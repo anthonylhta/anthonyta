@@ -319,14 +319,14 @@ test.describe("guest gating", () => {
     "aperture", // every aperture surface is namespaced, incl. the empty state
     "unplaced", // the no-glance state
     "Jade Green", // an essence colour name
-    "RANK ", // the masthead's rank reading (with its space — nonce-collision proof)
+    "light membrane", // the sea band's stage reading (masthead + /aperture header)
     "the wall", // a band divider
-    "vital gu", // the streak line
+    "vital gu", // the inward page's gu slot
     "strikes this week", // the wall band
     "mortal", // the day's pulse row (and its registry label)
-    "last 10 weeks", // the paths band's evidence strips (no lobby strip says this)
-    "the record", // the seal-history band's divider
-    "Green Copper", // an essence family name (the skin's masthead line)
+    "last 10 weeks", // the paths band's evidence strips, on /aperture
+    "the record", // the seal-history band's divider, on /aperture
+    "青铜之气", // the skin's left-gutter phrase (the essence family as qi)
     "突破", // the breakthrough line's glyph (its English word is too common to pin)
     "primeval stones", // the inward page's first band
     "the foundation", // the inward page's invested reading

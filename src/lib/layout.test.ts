@@ -62,20 +62,14 @@ describe("unit / module registries", () => {
     // reappear further down the registry: an interleaved unit would render in its
     // zone anyway and read as scrambled in the /system panel's default listing.
     const zones = CENTER_UNITS.map((u) => u.zone);
-    expect([...new Set(zones)]).toEqual([
-      "fixed",
-      "wall",
-      "paths",
-      "trials",
-      "today",
-    ]);
+    expect([...new Set(zones)]).toEqual(["fixed", "wall", "today"]);
     expect(zones).toEqual([...zones].sort(byZoneOrder));
   });
 });
 
 /** Sort key over the render order above — only used to prove no zone interleaves. */
 function byZoneOrder(a?: string, b?: string): number {
-  const order = ["fixed", "wall", "paths", "trials", "today"];
+  const order = ["fixed", "wall", "today"];
   return order.indexOf(a ?? "") - order.indexOf(b ?? "");
 }
 
@@ -117,9 +111,8 @@ describe("normalizeLayout", () => {
 
   it("drops retired command-center keys — no migration needed", () => {
     // `tft`/`totp` left the command center, `briefing-hand` split into two units,
-    // the v1 `aperture` band became the four sheet bands, and `chores` dissolved
-    // into the needs-doing board; a config written before any of that still reads
-    // clean.
+    // the v1 `aperture` band became the sheet bands, and `chores` dissolved into
+    // the needs-doing board; a config written before any of that still reads clean.
     expect(
       normalizeLayout({
         v: 2,
@@ -129,6 +122,34 @@ describe("normalizeLayout", () => {
         centerOrder: ["briefing-hand", "aperture", "chores", "totp", "mortal"],
       }),
     ).toEqual(cfg({ center: ["briefing"], centerOrder: ["mortal"] }));
+  });
+
+  it("degrades a pre-summary config — the reading left for /aperture", () => {
+    // The home page became a summary: the paths, the trials and the seal history
+    // moved to /aperture, which is not a configurable surface. A config that hides
+    // or orders any of those three predates the move and must read clean rather
+    // than 400 the /system panel.
+    expect(
+      normalizeLayout({
+        v: 2,
+        lobby: [],
+        center: [
+          "aperture-paths",
+          "aperture-trials",
+          "aperture-record",
+          "briefing",
+        ],
+        lobbyOrder: [],
+        centerOrder: [
+          "aperture-wall",
+          "aperture-paths",
+          "aperture-record",
+          "mortal",
+        ],
+      }),
+    ).toEqual(
+      cfg({ center: ["briefing"], centerOrder: ["aperture-wall", "mortal"] }),
+    );
   });
 
   it("degrades a pre-shell config — three units left the sheet at once", () => {
@@ -216,8 +237,6 @@ describe("orderedUnits", () => {
       orderedUnitsInZone(EMPTY_LAYOUT, "center", z).map((u) => u.key);
     expect(zone("fixed")).toEqual(["dropbox"]);
     expect(zone("wall")).toEqual(["aperture-wall", "aperture-conditions"]);
-    expect(zone("paths")).toEqual(["aperture-paths"]);
-    expect(zone("trials")).toEqual(["aperture-trials", "aperture-record"]);
     expect(zone("today")).toEqual(TODAY_DEFAULT);
   });
 });
@@ -248,15 +267,8 @@ describe("moveUnit + canMove", () => {
     expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-wall", -1)).toEqual(
       EMPTY_LAYOUT,
     );
-    // Conditions end the wall zone: down does NOT drop them into paths.
+    // Conditions end the wall zone: down does NOT drop them into TODAY.
     expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", 1)).toEqual(
-      EMPTY_LAYOUT,
-    );
-    // A one-unit zone can't move either way.
-    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-paths", -1)).toEqual(
-      EMPTY_LAYOUT,
-    );
-    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-paths", 1)).toEqual(
       EMPTY_LAYOUT,
     );
     // weather opens TODAY and health closes it.
@@ -275,7 +287,7 @@ describe("moveUnit + canMove", () => {
 
   it("leaves the other zones untouched when reordering one", () => {
     const c = moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", -1);
-    for (const z of ["fixed", "paths", "trials", "today"] as Zone[]) {
+    for (const z of ["fixed", "today"] as Zone[]) {
       expect(orderedUnitsInZone(c, "center", z).map((u) => u.key)).toEqual(
         orderedUnitsInZone(EMPTY_LAYOUT, "center", z).map((u) => u.key),
       );
@@ -287,9 +299,12 @@ describe("moveUnit + canMove", () => {
     expect(canMove(EMPTY_LAYOUT, "center", "weather", 1)).toBe(true);
     expect(canMove(EMPTY_LAYOUT, "center", "health", 1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "dropbox", 1)).toBe(false);
-    // Both arrows are dead on a zone that holds a single unit.
-    expect(canMove(EMPTY_LAYOUT, "center", "aperture-paths", -1)).toBe(false);
-    expect(canMove(EMPTY_LAYOUT, "center", "aperture-paths", 1)).toBe(false);
+    // The wall zone's two units swap against each other and nothing else.
+    expect(canMove(EMPTY_LAYOUT, "center", "aperture-wall", -1)).toBe(false);
+    expect(canMove(EMPTY_LAYOUT, "center", "aperture-wall", 1)).toBe(true);
+    expect(canMove(EMPTY_LAYOUT, "center", "aperture-conditions", 1)).toBe(
+      false,
+    );
   });
 
   it("leads the sheet with the wall, and TODAY with the weather", () => {

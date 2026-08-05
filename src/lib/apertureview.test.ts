@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   IMMORTAL_ESSENCE,
   MORTAL_ESSENCE,
+  essenceOf,
   isAdjudicationPending,
   isSealStale,
   type AperturePath,
@@ -11,10 +12,8 @@ import {
 } from "./aperture";
 import {
   ACTIVITY_SERIES,
-  ESSENCE_SWATCH,
   ESSENCE_TEXT,
   ESSENCE_VAR,
-  bandLine,
   conditionChipClass,
   conditionChipPrefix,
   conditionStatusWord,
@@ -22,13 +21,10 @@ import {
   dayGap,
   declaredSeriesKeys,
   detailStatus,
-  displayNumeral,
-  essenceSwatchClass,
   essenceTextClass,
   essenceVarClass,
   familyOf,
   gutterPhrase,
-  hardenLabel,
   imminentMajorTrial,
   isImminent,
   latestDailyDay,
@@ -39,7 +35,6 @@ import {
   sealedAgo,
   signedCount,
   splitTrials,
-  stageGlyphs,
   tierGlyph,
   trialCountdown,
   trialsSummary,
@@ -113,28 +108,24 @@ describe("apertureview — essence classes", () => {
     ...Object.values(IMMORTAL_ESSENCE),
   ];
 
-  it("gives every one of the 24 canon names a text, swatch and var class", () => {
+  it("gives every one of the 24 canon names a text and a var class", () => {
     // Iterating the canon tables rather than a copied list: the day a rank or
     // stage is added upstream, this test fails instead of the band rendering an
     // invisible name.
     expect(canon).toHaveLength(24);
     for (const name of canon) {
       expect(ESSENCE_TEXT[name], `${name} text class`).toBeTruthy();
-      expect(ESSENCE_SWATCH[name], `${name} swatch class`).toBeTruthy();
       expect(ESSENCE_VAR[name], `${name} var class`).toBeTruthy();
       expect(essenceTextClass(name)).toBe(ESSENCE_TEXT[name]);
-      expect(essenceSwatchClass(name)).toBe(ESSENCE_SWATCH[name]);
       expect(essenceVarClass(name)).toBe(ESSENCE_VAR[name]);
     }
   });
 
-  it("maps each name to a distinct triple of literal classes", () => {
+  it("maps each name to a distinct pair of literal classes", () => {
     expect(new Set(canon.map((n) => ESSENCE_TEXT[n])).size).toBe(24);
-    expect(new Set(canon.map((n) => ESSENCE_SWATCH[n])).size).toBe(24);
     expect(new Set(canon.map((n) => ESSENCE_VAR[n])).size).toBe(24);
     for (const name of canon) {
       expect(ESSENCE_TEXT[name].startsWith("text-")).toBe(true);
-      expect(ESSENCE_SWATCH[name].startsWith("bg-")).toBe(true);
       // The var class DECLARES --essence over the same @theme token the text
       // class consumes — the skin's whole input, one line per canon name.
       expect(ESSENCE_VAR[name].startsWith("[--essence:var(--color-")).toBe(
@@ -143,13 +134,11 @@ describe("apertureview — essence classes", () => {
     }
   });
 
-  it("mutes an unknown or absent name, and paints no swatch for it", () => {
+  it("mutes an unknown or absent name", () => {
     expect(essenceTextClass(null)).toBe("text-muted");
     expect(essenceTextClass("Moonstone")).toBe("text-muted");
-    expect(essenceSwatchClass(null)).toBeNull();
-    expect(essenceSwatchClass("Moonstone")).toBeNull();
-    // Off canon the ESSENCE VARIABLE is muted too — the skin's chrome (brush,
-    // gutters, headers) stays legible without inventing a colour.
+    // Off canon the ESSENCE VARIABLE is muted too — the skin's chrome (gutters,
+    // headers, washes) stays legible without inventing a colour.
     expect(essenceVarClass(null)).toBe("[--essence:var(--color-muted)]");
     expect(essenceVarClass("Moonstone")).toBe("[--essence:var(--color-muted)]");
   });
@@ -175,13 +164,6 @@ describe("apertureview — the skin's vocabulary (ADR 0118)", () => {
     expect(gutterPhrase(99)).toBeNull();
   });
 
-  it("gives the nine ranks their display numerals and no one else any", () => {
-    expect(displayNumeral(1)).toBe("壹");
-    expect(displayNumeral(9)).toBe("玖");
-    for (const rank of [0, 10, 1.5, NaN])
-      expect(displayNumeral(rank), `rank ${rank}`).toBeNull();
-  });
-
   it("glyphs the three known trial tiers and stays silent on the rest", () => {
     expect(tierGlyph("earthly")).toBe("地");
     expect(tierGlyph("heavenly")).toBe("天");
@@ -190,11 +172,6 @@ describe("apertureview — the skin's vocabulary (ADR 0118)", () => {
     expect(tierGlyph("")).toBeNull();
   });
 
-  it("reads a harden date in the meta line's register", () => {
-    expect(hardenLabel("2026-08-12")).toBe("hardens ~aug 12");
-    expect(hardenLabel("2026-12-01")).toBe("hardens ~dec 1");
-    expect(hardenLabel("not-a-date")).toBeNull();
-  });
 });
 
 describe("apertureview — condition chips", () => {
@@ -719,32 +696,6 @@ describe("apertureview — imminentMajorTrial", () => {
   });
 });
 
-describe("apertureview — stageGlyphs", () => {
-  it("renders the rank numeral and the stage glyph", () => {
-    expect(stageGlyphs(1, "initial")).toBe("一转·初期");
-    expect(stageGlyphs(3, "upper")).toBe("三转·后期");
-    expect(stageGlyphs(5, "peak")).toBe("五转·巅峰");
-    expect(stageGlyphs(2, "middle")).toBe("二转·中期");
-  });
-
-  it("keeps the rank alone when the stage means nothing here", () => {
-    // Immortal ranks are stageless by canon, and a newer emitter's stage is a word
-    // this build has no glyph for — both leave the numeral standing on its own.
-    expect(stageGlyphs(7, "")).toBe("七转");
-    expect(stageGlyphs(6, "transcendent")).toBe("六转");
-    expect(stageGlyphs(1, "INITIAL")).toBe("一转"); // the vocabulary is lowercase
-  });
-
-  it("renders nothing for a rank outside the canon's nine numerals", () => {
-    // Decoration is allowed to say less than the line above it, never more.
-    expect(stageGlyphs(10, "initial")).toBeNull();
-    expect(stageGlyphs(0, "initial")).toBeNull();
-    expect(stageGlyphs(-1, "initial")).toBeNull();
-    expect(stageGlyphs(1.5, "initial")).toBeNull();
-    expect(stageGlyphs(Number.NaN, "initial")).toBeNull();
-  });
-});
-
 describe("apertureview — membraneOf", () => {
   it("names the membrane over each of the four stages", () => {
     expect(membraneOf("initial")).toBe("light membrane");
@@ -812,26 +763,7 @@ describe("apertureview — latestDailyDay", () => {
   });
 });
 
-describe("apertureview — bandLine + sealedAgo", () => {
-  it("uppercases the stage, known or not", () => {
-    expect(
-      bandLine({
-        v: 1,
-        sealedAt: "2026-03-05T00:00:00Z",
-        rank: 3,
-        stage: "upper",
-      }),
-    ).toBe("RANK 3 · UPPER");
-    expect(
-      bandLine({
-        v: 1,
-        sealedAt: "2026-03-05T00:00:00Z",
-        rank: 6,
-        stage: "transcendent",
-      }),
-    ).toBe("RANK 6 · TRANSCENDENT");
-  });
-
+describe("apertureview — sealedAgo", () => {
   it("says today under a full day, then counts whole days", () => {
     expect(sealedAgo("2026-03-05T00:00:00Z", NOW)).toBe("sealed today");
     expect(sealedAgo("2026-03-04T01:00:00Z", NOW)).toBe("sealed today");
@@ -996,11 +928,12 @@ describe("apertureview — the sheet, a quiet week", () => {
   const { sealed } = quiet;
   const { open, resolved } = splitTrials(sealed.trials);
 
-  it("heads the masthead with the rank and its canon glyphs", () => {
-    expect(
-      bandLine({ v: 1, sealedAt: quiet.sealedAt, rank: 3, stage: "upper" }),
-    ).toBe("RANK 3 · UPPER");
-    expect(stageGlyphs(3, "upper")).toBe("三转·后期");
+  it("heads the sea band with the essence and the stage's membrane", () => {
+    // The masthead is the same band on both surfaces now — the colour the rank
+    // names, then where inside it one stands.
+    expect(essenceOf(3, "upper")).toBe("Bright Silver");
+    expect(essenceTextClass(essenceOf(3, "upper"))).toBe("text-bright-silver");
+    expect(membraneOf("upper")).toBe("stone membrane");
   });
 
   it("summarises the bands", () => {

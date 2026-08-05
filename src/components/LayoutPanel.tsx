@@ -27,8 +27,6 @@ type Phase = "loading" | "ready" | "unreachable";
 const CENTER_ZONES: { zone: Zone; label: string }[] = [
   { zone: "fixed", label: "pinned" },
   { zone: "wall", label: "the wall" },
-  { zone: "paths", label: "paths" },
-  { zone: "trials", label: "trials" },
   { zone: "today", label: "today" },
 ];
 

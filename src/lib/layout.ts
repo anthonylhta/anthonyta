@@ -39,7 +39,7 @@ export interface ModuleDef {
 /** The reorderable zone a unit belongs to (command center only), in render
  *  order. `fixed` units are pinned above the zones and never reorder; lobby
  *  units have no zone. */
-export type Zone = "fixed" | "wall" | "paths" | "trials" | "today";
+export type Zone = "fixed" | "wall" | "today";
 
 export interface UnitDef {
   /** Stable orderable-unit id (== the module key for single-module units). */
@@ -88,9 +88,11 @@ export const CENTER_UNITS: UnitDef[] = [
     label: "drop inbox (sealed messages)",
     modules: [{ key: "dropbox", label: "drop inbox (sealed messages)" }],
   },
-  // The status bands. The wall zone holds two units because they always travel
+  // The status bands the SUMMARY keeps. One zone, two units: they always travel
   // together visually — the wall being worked, and the conditions that hold it
-  // open — but conditions still reorder against the wall inside the zone.
+  // open — but conditions still reorder against the wall inside the zone. The
+  // paths, the trials and the seal history are the full reading and live on
+  // /aperture, which is not a configurable surface: it is complete or it is wrong.
   {
     key: "aperture-wall",
     zone: "wall",
@@ -104,26 +106,6 @@ export const CENTER_UNITS: UnitDef[] = [
     zone: "wall",
     label: "conditions",
     modules: [{ key: "aperture-conditions", label: "conditions" }],
-  },
-  {
-    key: "aperture-paths",
-    zone: "paths",
-    label: "paths (attainment + evidence)",
-    modules: [
-      { key: "aperture-paths", label: "paths (attainment + evidence)" },
-    ],
-  },
-  {
-    key: "aperture-trials",
-    zone: "trials",
-    label: "trials",
-    modules: [{ key: "aperture-trials", label: "trials" }],
-  },
-  {
-    key: "aperture-record",
-    zone: "trials",
-    label: "the record (seal history)",
-    modules: [{ key: "aperture-record", label: "the record (seal history)" }],
   },
   {
     key: "weather",
