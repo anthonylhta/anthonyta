@@ -174,6 +174,12 @@ export const CENTER_UNITS: UnitDef[] = [
     modules: [{ key: "hand", label: "today's hand (riichi)" }],
   },
   {
+    key: "stones",
+    zone: "today",
+    label: "stones",
+    modules: [{ key: "stones", label: "stones" }],
+  },
+  {
     key: "mortal",
     zone: "today",
     label: "mortal pulse (riichi / tft / reading)",

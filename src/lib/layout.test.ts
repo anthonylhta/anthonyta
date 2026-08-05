@@ -32,6 +32,7 @@ const TODAY_DEFAULT = [
   "meals",
   "briefing",
   "hand",
+  "stones",
   "mortal",
   "health",
 ];

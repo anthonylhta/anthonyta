@@ -8,6 +8,7 @@ import { GuideSealed, type GuideEvidence } from "@/components/GuideSealed";
 import { JournalPulse } from "@/components/JournalPulse";
 import { MealsGlance } from "@/components/MealsGlance";
 import { NeedsDoing } from "@/components/NeedsDoing";
+import { StonesGlance } from "@/components/StonesGlance";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
@@ -363,6 +364,29 @@ export async function CommandCenter({ userName }: { userName: string }) {
       </div>
     ) : null,
 
+    /* stones — what's liquid and how long the foundation holds, then the way
+       inward. A vault island: both figures come out of the sealed fin envelope,
+       so the row is drawn in the browser and reads as dots until the key is in.
+       The glyph marks it as an aperture surface, the way the masthead's door
+       does — this row is the door's other end. */
+    stones: !hidden.has("stones") ? (
+      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+          <span
+            aria-hidden
+            lang="zh"
+            className="font-[family-name:var(--font-zh)] text-(--essence)"
+          >
+            竅
+          </span>{" "}
+          stones
+        </span>
+        <span className="min-w-0 flex-1">
+          <StonesGlance offline={!r2Enabled()} />
+        </span>
+      </div>
+    ) : null,
+
     /* mortal — the day's small pursuits in one muted line. What's left of the
        retired activity digest: the domains that answer to no path (games, the
        reading count, the raw journal days) still deserve a pulse, but they no
@@ -546,6 +570,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
               className="text-muted transition-colors hover:text-amber"
             >
               meals/
+            </Link>
+            <Link
+              href="/aperture"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              aperture/
             </Link>
             <Link
               href="/vault"

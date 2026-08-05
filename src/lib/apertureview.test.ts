@@ -34,12 +34,12 @@ import {
   latestDailyDay,
   membraneOf,
   mortalSegments,
+  pathAnchor,
   pathEvidence,
   sealedAgo,
   signedCount,
   splitTrials,
   stageGlyphs,
-  tallyMarks,
   tierGlyph,
   trialCountdown,
   trialsSummary,
@@ -188,17 +188,6 @@ describe("apertureview — the skin's vocabulary (ADR 0118)", () => {
     expect(tierGlyph("grand")).toBe("大");
     expect(tierGlyph("cosmic")).toBeNull();
     expect(tierGlyph("")).toBeNull();
-  });
-
-  it("inks strike tallies by fives, and only where a tally still reads", () => {
-    expect(tallyMarks(1)).toBe("丨");
-    expect(tallyMarks(4)).toBe("丨丨丨丨");
-    expect(tallyMarks(5)).toBe("正");
-    expect(tallyMarks(7)).toBe("正丨丨");
-    expect(tallyMarks(15)).toBe("正正正");
-    // Zero, the uncountable, and the woodpile all fall back to the digit alone.
-    for (const n of [0, -3, 2.5, NaN, 16, 100])
-      expect(tallyMarks(n), `n=${n}`).toBeNull();
   });
 
   it("reads a harden date in the meta line's register", () => {
@@ -431,6 +420,19 @@ describe("apertureview — signedCount", () => {
     expect(signedCount(12)).toBe("+12");
     expect(signedCount(0)).toBe("+0");
     expect(signedCount(-3)).toBe("-3");
+  });
+});
+
+describe("apertureview — pathAnchor", () => {
+  it("slugs a path name the same way at both ends of the door", () => {
+    expect(pathAnchor("craft")).toBe("craft");
+    expect(pathAnchor("The Body")).toBe("the-body");
+    expect(pathAnchor("  wealth  ")).toBe("wealth");
+    // Any run of whitespace collapses to one dash — a double space in the
+    // check-in's wording must not send the row at a card that doesn't exist.
+    expect(pathAnchor(" Japanese\tlanguage  study ")).toBe(
+      "japanese-language-study",
+    );
   });
 });
 

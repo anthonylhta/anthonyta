@@ -331,6 +331,7 @@ test.describe("guest gating", () => {
     "primeval stones", // the inward page's first band
     "the foundation", // the inward page's invested reading
     "gu held", // the inward page's paths band
+    "竅", // the aperture glyph — the masthead's door and the stones row
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
