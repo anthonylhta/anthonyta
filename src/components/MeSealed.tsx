@@ -12,7 +12,7 @@ import { audCompact } from "@/lib/money";
 import type { RiQuote } from "@/lib/quotes";
 
 /**
- * MeSealed — the me-block: who this page belongs to, what he is doing, what he is
+ * MeSealed — the me-block: who this page belongs to, what he is
  * worth, and the door inward. It is the head of the private home page and NOT a
  * layout unit — identity isn't a module to be reordered away from the top.
  *
@@ -39,7 +39,6 @@ import type { RiQuote } from "@/lib/quotes";
 /** What the sealed slots read as before the key is in — dots, never a zero and
  *  never a complaint. */
 const AGE_DOTS = "—";
-const NOW_DOTS = "····";
 const WORTH_DOTS = "$····";
 
 export function MeSealed({
@@ -118,22 +117,10 @@ export function MeSealed({
         <p className="text-xs text-muted">{meta.join(" · ")}</p>
       </div>
 
-      {/* what is being done at the moment, in the check-in's own words */}
-      {!offline && (
-        <p className="mt-2 text-sm">
-          <span className="text-muted">now:</span>{" "}
-          {profile?.now ? (
-            <span className="text-fg/90">{profile.now}</span>
-          ) : (
-            <span className="text-muted/40">{NOW_DOTS}</span>
-          )}
-        </p>
-      )}
-
       {/* what it all adds up to, and the way inward. The figure is the fin
           envelope's, decrypted here; the door beside it is the only route from
           this page into the full reading. */}
-      <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-sm">
+      <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-sm">
         {!offline && (
           <>
             {totals ? (

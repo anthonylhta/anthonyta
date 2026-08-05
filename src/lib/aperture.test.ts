@@ -427,23 +427,18 @@ describe("aperture — the inward page's fields", () => {
 });
 
 describe("aperture — the sealed profile", () => {
-  // Who the sheet is about — the home page's own two fields. The birth DAY stays
-  // sealed (this repo is public) and only the age it implies is ever rendered, so
-  // the frame has to be as strict about it as about any other figure.
+  // Who the sheet is about. The birth DAY stays sealed (this repo is public) and
+  // only the age it implies is ever rendered, so the frame has to be as strict
+  // about it as about any other figure.
   const profiled = withSealed({
-    profile: { born: "2001-08-19", now: "charting the eastern reaches" },
+    profile: { born: "2001-08-19" },
   });
 
   it("accepts a well-formed profile", () => {
     expect(normalizeAperture(profiled)).toEqual(profiled);
   });
 
-  it("accepts either field on its own", () => {
-    const bornOnly = withSealed({ profile: { born: "2001-08-19" } });
-    expect(normalizeAperture(bornOnly)).toEqual(bornOnly);
-    const nowOnly = withSealed({ profile: { now: "walking the coast road" } });
-    expect(normalizeAperture(nowOnly)).toEqual(nowOnly);
-    // An empty profile is a real emission — the block simply has nothing to say.
+  it("accepts an empty profile — a real emission with nothing to say", () => {
     expect(
       normalizeAperture(withSealed({ profile: {} }))?.sealed.profile,
     ).toEqual({});
@@ -459,7 +454,7 @@ describe("aperture — the sealed profile", () => {
 
   it("drops an unknown key inside the profile", () => {
     const out = normalizeAperture(
-      withSealed({ profile: { born: "2001-08-19", smuggled: "x" } }),
+      withSealed({ profile: { born: "2001-08-19", now: "cut same-day", smuggled: "x" } }),
     );
     expect(out?.sealed.profile).toEqual({ born: "2001-08-19" });
   });
@@ -472,7 +467,6 @@ describe("aperture — the sealed profile", () => {
     bad({ born: "19 August 2001" }); // a date, but not a day
     bad({ born: "2001-08-19T00:00:00Z" }); // an instant, not a day
     bad({ born: "2001-13-01" }); // shaped like a day, parses as nothing
-    bad({ now: 3 });
   });
 });
 

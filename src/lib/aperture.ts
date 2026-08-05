@@ -214,12 +214,11 @@ export interface ApertureBreakthrough {
 }
 
 /**
- * Standing context about the person the sheet is about — the home page's own two
- * fields. `born` is a `YYYY-MM-DD` calendar day the browser turns into an age;
- * `now` is one sentence saying what is being done at the moment, in the emitter's
- * own words.
+ * Standing context about the person the sheet is about. `born` is a `YYYY-MM-DD`
+ * calendar day the browser turns into an age. (A `now` line was designed and cut
+ * the same day — the age and the daily quote carry the block.)
  *
- * BOTH LIVE SEALED, and `born` deliberately so: this repository is public and a
+ * IT LIVES SEALED, deliberately: this repository is public and a
  * birth date is personal data, so the day itself never leaves the envelope and the
  * age is computed client-side from it (`apertureview.ageOn`) — the same bargain the
  * declared weekly burn keeps, where the figure the site divides by is one the server
@@ -227,7 +226,6 @@ export interface ApertureBreakthrough {
  */
 export interface ApertureProfile {
   born?: string;
-  now?: string;
 }
 
 /** Everything behind the unlock. `streaks` is an open record keyed by streak name
@@ -422,14 +420,12 @@ function normVitalGu(x: unknown): ApertureVitalGu | null {
 
 function normProfile(x: unknown): ApertureProfile | null {
   if (!isObj(x)) return null;
-  const { born, now } = x;
+  const { born } = x;
   // Both fields are optional, and a PRESENT one is held to its type — a birth day
   // that isn't a day rejects the document rather than reaching `ageOn` as junk.
   if (born !== undefined && !isDay(born)) return null;
-  if (now !== undefined && !isStr(now)) return null;
   return {
     ...(born !== undefined ? { born } : {}),
-    ...(now !== undefined ? { now } : {}),
   };
 }
 
