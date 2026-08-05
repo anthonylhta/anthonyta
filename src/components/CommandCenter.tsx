@@ -4,7 +4,7 @@ import { AgendaRow } from "@/components/AgendaRow";
 import { ApertureMasthead } from "@/components/ApertureMasthead";
 import { SignOut } from "@/components/auth-buttons";
 import { DropInbox } from "@/components/DropInbox";
-import { GuideSealed, type GuideEvidence } from "@/components/GuideSealed";
+import { GuideSealed } from "@/components/GuideSealed";
 import { JournalPulse } from "@/components/JournalPulse";
 import { MealsGlance } from "@/components/MealsGlance";
 import { NeedsDoing } from "@/components/NeedsDoing";
@@ -14,18 +14,14 @@ import { StatusBar } from "@/components/terminal/StatusBar";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { TransitGlance } from "@/components/TransitGlance";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
-import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
 import { getApertureGlance } from "@/lib/connectors/aperture";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getChoreReads } from "@/lib/connectors/chores";
-import { getGithub } from "@/lib/connectors/github";
 import { getHealth } from "@/lib/connectors/health";
 import { getLayout } from "@/lib/connectors/layout";
 import { getRiichiStats } from "@/lib/connectors/riichi";
-import { getSteps } from "@/lib/connectors/steps";
 import { getTft } from "@/lib/connectors/tft";
-import { getLanguageStats } from "@/lib/connectors/translator";
 import { getWeather } from "@/lib/connectors/weather";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { listDrops } from "@/lib/dropstore";
@@ -46,7 +42,6 @@ import {
   orderedUnitsInZone,
   type Zone as CenterZone,
 } from "@/lib/layout";
-import { stepsForDay, trailingSeries } from "@/lib/steps";
 import { uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing } from "@/lib/sampleBriefing";
@@ -94,29 +89,32 @@ const ZONES: { zone: CenterZone; label?: string; right?: () => string }[] = [
 ];
 
 /** The sheet's sealed bands, in render order — the zones whose units the island
- *  draws rather than the server loop. */
-const SEALED_ZONES: CenterZone[] = ["wall", "paths", "trials"];
+ *  draws rather than the server loop. One zone since the restructure: the paths,
+ *  the trials and the record are the READING, and the reading moved to /aperture. */
+const SEALED_ZONES: CenterZone[] = ["wall"];
 
 /**
  * Your private daily driver — what `/` becomes when you're logged in (ADR 0004).
- * The page IS the character sheet: the rank masthead, then the wall being worked,
- * the conditions holding it open, the paths and their evidence, the trials — then
- * TODAY, the day's rows plus the exception rows that only speak when something is
- * due or down.
+ * The page is the SUMMARY of the character sheet: the essence sea and the door
+ * through it, whatever is currently wrong (and nothing at all when nothing is),
+ * the wall being worked, the conditions holding it open — then TODAY, the day's
+ * rows plus the exception rows that only speak when something is due or down.
+ *
+ * PRESENT TENSE ONLY. The paths and their evidence strips, the trials and the seal
+ * history all read at length, so they live behind the masthead's door on /aperture
+ * rather than below the fold here; the page states where things stand and what
+ * wants doing today, and nothing is stated twice at two zooms.
  *
  * The hierarchy is inverted from the old dashboard on purpose. Nothing on this page
  * is a "module" reporting a number any more; every band answers the same question
  * (what advances the pursuit), and the day's logistics come last because they are
- * the least of it. The one figure that used to headline the page — net worth — is
- * now the wealth path's evidence, where it means something.
+ * the least of it.
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
   const [
     briefing,
-    lang,
     reading,
-    gh,
     indexRead,
     riichi,
     tft,
@@ -124,14 +122,11 @@ export async function CommandCenter({ userName }: { userName: string }) {
     wx,
     choreReads,
     health,
-    steps,
     drops,
     aperture,
   ] = await Promise.all([
     getBriefing(),
-    getLanguageStats(),
     getCurrentlyReading(),
-    getGithub(),
     getSnapIndex(),
     getRiichiStats(),
     getTft(),
@@ -139,7 +134,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getWeather(),
     getChoreReads(),
     getHealth(),
-    getSteps(today),
     dropCount(),
     getApertureGlance(),
   ]);
@@ -147,13 +141,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
   // Owner-curated visibility (roadmap 59) — the /system layout panel decides
   // which of these blocks render at all.
   const hidden = hiddenSet(layout, "center");
-
-  // Steps (roadmap: the daily section) — plaintext, server-rendered off the phone's
-  // daily push. It is the evidence of whichever path declares it now, rather than a
-  // row of its own, so its strip runs the same ten weeks as every other strip in the
-  // band. `null` today = nothing posted yet (the honest empty state, a dash).
-  const stepsToday = stepsForDay(steps, today);
-  const stepsLevels = toLevels(trailingSeries(steps, ACTIVITY_DAYS, today));
 
   // Reading week-over-week rides the sealed reading index (the cron's plaintext day
   // series), not the retired snapshot store. A store miss or a bad shape → no days →
@@ -174,20 +161,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
       ? readingChapters - readingBaseline.readingChapters
       : null;
 
-  // Path evidence — the trailing ten weeks each path's declared series draws, plus
-  // the one number beside it. Keyed by the names `paths[].activity` uses, so a path
-  // pointing at a series the sheet doesn't carry gets silence, not empty chrome.
-  const evidence: GuideEvidence = {
-    commits: {
-      levels: toLevels(gh.daily.slice(-ACTIVITY_DAYS)),
-      value: gh.thisWeek,
-    },
-    languages: { levels: toLevels(lang.activity), value: lang.thisWeek },
-    steps: { levels: stepsLevels, value: stepsToday },
-  };
-
-  // The sealed bands the island should draw: the visible aperture units of the three
-  // sealed zones, in the owner's configured order. The registry stays the one source
+  // The sealed bands the island should draw: the visible aperture units of the
+  // sealed zone, in the owner's configured order. The registry stays the one source
   // of truth for hiding and ordering — the island only obeys this list.
   const sections = SEALED_ZONES.flatMap((zone) =>
     orderedUnitsInZone(layout, "center", zone).map((u) => u.key),
@@ -488,14 +463,13 @@ export async function CommandCenter({ userName }: { userName: string }) {
         {/* the rank, off the plaintext glance — fixed chrome, never a unit. */}
         <ApertureMasthead glance={aperture} />
 
-        {/* the sealed sheet: four bands, one envelope, one decrypt. Mounted only
-            when there IS a rank to stand behind (no glance means nothing was ever
-            sealed, so there is nothing to unlock toward) and only when the owner has
-            left at least one of its bands visible. */}
+        {/* the sealed summary: the exception lines and two bands, one envelope, one
+            decrypt. Mounted only when there IS a rank to stand behind (no glance
+            means nothing was ever sealed, so there is nothing to unlock toward) and
+            only when the owner has left at least one of its bands visible. */}
         {aperture && sections.length > 0 && (
           <GuideSealed
             sections={sections}
-            evidence={evidence}
             today={today}
             offline={!r2Enabled()}
           />

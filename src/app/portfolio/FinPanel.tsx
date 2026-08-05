@@ -52,7 +52,7 @@ function importStamp(now: Date = new Date()): string {
 }
 
 // A logged pay-in is a bare Sydney calendar day, so it formats over UTC — the day
-// written is the day shown, whatever timezone the browser sits in (`hardenLabel`).
+// written is the day shown, whatever timezone the browser sits in.
 const INCOME_DAY = new Intl.DateTimeFormat("en-AU", {
   weekday: "short",
   day: "numeric",

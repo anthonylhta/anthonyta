@@ -3,7 +3,6 @@ import {
   type AperturePath,
   type ApertureCondition,
   type ApertureDoc,
-  type ApertureGlance,
   type ApertureStage,
   type ApertureTrial,
 } from "./aperture";
@@ -101,34 +100,6 @@ export const ESSENCE_TEXT: Record<string, string> = {
   "Yellow Apricot": "text-yellow-apricot",
 };
 
-/** The same canon as fills — the masthead's rank bar and its swatch. */
-export const ESSENCE_SWATCH: Record<string, string> = {
-  "Jade Green": "bg-jade-green",
-  "Pale Green": "bg-pale-green",
-  "Dark Green": "bg-dark-green",
-  "Black Green": "bg-black-green",
-  "Light Red": "bg-light-red",
-  Scarlet: "bg-scarlet",
-  Crimson: "bg-crimson",
-  "Dark Red": "bg-dark-red",
-  "Light Silver": "bg-light-silver",
-  "Blossom Silver": "bg-blossom-silver",
-  "Bright Silver": "bg-bright-silver",
-  "Snow Silver": "bg-snow-silver",
-  "Light Gold": "bg-light-gold",
-  "Bright Gold": "bg-bright-gold",
-  "Essence Gold": "bg-essence-gold",
-  "True Gold": "bg-true-gold",
-  "Light Purple": "bg-light-purple",
-  Violet: "bg-violet",
-  "Deep Purple": "bg-deep-purple",
-  "Crystal Purple": "bg-crystal-purple",
-  "Green Grape": "bg-green-grape",
-  "Red Date": "bg-red-date",
-  "White Litchi": "bg-white-litchi",
-  "Yellow Apricot": "bg-yellow-apricot",
-};
-
 /** The class every unknown thing wears — one literal, one doctrine. */
 const MUTED = "text-muted";
 
@@ -136,12 +107,6 @@ const MUTED = "text-muted";
  *  renders muted rather than picking a colour nobody assigned. */
 export function essenceTextClass(name: string | null): string {
   return (name && ESSENCE_TEXT[name]) || MUTED;
-}
-
-/** A canon name's swatch class, or null — no canon means NO swatch at all, not a
- *  grey one: an unpainted square would read as a colour the canon never gave. */
-export function essenceSwatchClass(name: string | null): string | null {
-  return (name && ESSENCE_SWATCH[name]) || null;
 }
 
 /**
@@ -351,6 +316,21 @@ export const ACTIVITY_SERIES: Readonly<
     gym: { source: "gym", label: "sessions", mode: "delta", unit: "sessions" },
   }),
 );
+
+/** Per-series evidence for a path row: the strip's levels and the one number beside
+ *  it (a week's movement, or the latest day's count — `ActivitySeries.mode` says
+ *  which). `null` value = measured but nothing to show, which renders as a dash. */
+export interface EvidenceSeries {
+  levels: number[];
+  value: number | null;
+}
+
+/** The assembled evidence, keyed by the same names `paths[].activity` uses. Open by
+ *  design: a series the page doesn't carry is simply absent, and the row renders
+ *  bare rather than showing empty chrome. Built on the SERVER from the connectors
+ *  (commits, languages, steps) and handed to the inward page; the one sealed series
+ *  (gym) is merged in by the browser, because the server cannot see it to draw it. */
+export type PathSeries = Readonly<Record<string, EvidenceSeries | undefined>>;
 
 /**
  * What a path row carries on its right. A `strip` is one of the series above; the
@@ -585,52 +565,7 @@ export function imminentMajorTrial(
   return nearest === null ? null : nearest.trial;
 }
 
-// --- the masthead's rank reading ------------------------------------------------
-
-/** The zero-tap line: "RANK 3 · UPPER". The stage is uppercased whether or not
- *  this build knows it — it's a literal either way, and an unknown stage still
- *  belongs on the masthead. */
-export function bandLine(glance: ApertureGlance): string {
-  return `RANK ${glance.rank} · ${glance.stage.toUpperCase()}`;
-}
-
-/** 一 through 九 — the nine ranks. Index is `rank - 1`; anything off the end is a
- *  rank this canon has no numeral for. */
-const RANK_NUMERALS: readonly string[] = [
-  "一",
-  "二",
-  "三",
-  "四",
-  "五",
-  "六",
-  "七",
-  "八",
-  "九",
-];
-
-/** The four mortal stages, in the canon's own glyphs. */
-const STAGE_GLYPHS: Record<string, string> = {
-  initial: "初期",
-  middle: "中期",
-  upper: "后期",
-  peak: "巅峰",
-};
-
-/**
- * The masthead's quiet flourish: 一转·初期 for rank 1 initial. Muted decoration over
- * the rank line, never the reading itself, so it is allowed to say LESS than the
- * line above it and never more: a rank outside the canon's nine numerals renders
- * nothing at all (rather than a numeral nobody assigned), and a stage this build has
- * never heard of — including every immortal rank, which is stageless by canon —
- * leaves the glyphs at the rank alone.
- */
-export function stageGlyphs(rank: number, stage: string): string | null {
-  if (!Number.isInteger(rank)) return null;
-  const numeral = RANK_NUMERALS[rank - 1];
-  if (numeral === undefined) return null;
-  const glyph = isApertureStage(stage) ? STAGE_GLYPHS[stage] : undefined;
-  return glyph === undefined ? `${numeral}转` : `${numeral}转·${glyph}`;
-}
+// --- the sea band's reading -------------------------------------------------------
 
 /** What each stage's aperture is sheathed in — the canon's own reading of how far
  *  into a rank one stands. Typed as a TOTAL record over the stage vocabulary, so a
@@ -644,33 +579,12 @@ const STAGE_MEMBRANE: Record<ApertureStage, string> = {
 
 /**
  * The membrane over a stage, or null for a stage this build has never heard of —
- * including every immortal rank, which is stageless by canon. The inward page's
- * header omits the phrase entirely rather than naming a sheath nobody assigned,
- * the same bargain `stageGlyphs` keeps one section up.
+ * including every immortal rank, which is stageless by canon. The sea band omits
+ * the phrase entirely rather than naming a sheath nobody assigned — the same
+ * bargain every open vocabulary here keeps.
  */
 export function membraneOf(stage: string): string | null {
   return isApertureStage(stage) ? STAGE_MEMBRANE[stage] : null;
-}
-
-/** 壹 through 玖 — the financial forms, the display register for the masthead's
- *  large numeral (the running-text 一转·初期 above keeps the plain forms). */
-const DISPLAY_NUMERALS: readonly string[] = [
-  "壹",
-  "贰",
-  "叁",
-  "肆",
-  "伍",
-  "陆",
-  "柒",
-  "捌",
-  "玖",
-];
-
-/** The masthead's large rank glyph, or null off the canon's nine — a rank with
- *  no numeral shows none, exactly like the stage glyphs above. */
-export function displayNumeral(rank: number): string | null {
-  if (!Number.isInteger(rank)) return null;
-  return DISPLAY_NUMERALS[rank - 1] ?? null;
 }
 
 // --- the skin's small glyph vocabulary -------------------------------------------
@@ -685,26 +599,6 @@ const TIER_GLYPHS: Record<string, string> = {
 
 export function tierGlyph(tier: string): string | null {
   return TIER_GLYPHS[tier] ?? null;
-}
-
-// en-US short month over UTC: harden dates are bare Sydney calendar days, and
-// formatting the UTC-midnight they parse to preserves the written day.
-const HARDEN_DAY = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-
-/**
- * A streak's harden date in the meta line's register: "hardens ~aug 12". The ~
- * is honest — the date slips automatically with any pause, so it is an earliest,
- * never a promise. Null on anything unparseable; a broken date must never render
- * as a wrong day.
- */
-export function hardenLabel(dateISO: string): string | null {
-  const t = Date.parse(dateISO);
-  if (!Number.isFinite(t)) return null;
-  return `hardens ~${HARDEN_DAY.format(t).toLowerCase()}`;
 }
 
 // --- the mortal pulse row -------------------------------------------------------

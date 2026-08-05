@@ -3,18 +3,25 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { ApertureInner } from "@/components/ApertureInner";
 import { StatusBar } from "@/components/terminal/StatusBar";
+import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import { essenceOf } from "@/lib/aperture";
 import {
   essenceTextClass,
   essenceVarClass,
   membraneOf,
+  type PathSeries,
 } from "@/lib/apertureview";
 import { getApertureGlance } from "@/lib/connectors/aperture";
+import { getGithub } from "@/lib/connectors/github";
+import { getSteps } from "@/lib/connectors/steps";
+import { getLanguageStats } from "@/lib/connectors/translator";
+import { sydneyToday } from "@/lib/fin";
 import { r2Enabled } from "@/lib/r2";
+import { stepsForDay, trailingSeries } from "@/lib/steps";
 
 export const metadata = { title: "aperture" };
 
-// The inward look — owner-only, and everything under the header decrypts in the
+// The full reading — owner-only, and everything under the header decrypts in the
 // browser.
 export const dynamic = "force-dynamic";
 
@@ -26,16 +33,39 @@ export default async function AperturePage() {
   if (!session?.user) notFound();
 
   const who = session.user.name ?? "anthony";
-  const glance = await getApertureGlance();
+  const today = sydneyToday();
+  const [glance, gh, lang, steps] = await Promise.all([
+    getApertureGlance(),
+    getGithub(),
+    getLanguageStats(),
+    getSteps(today),
+  ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
   const membrane = glance ? membraneOf(glance.stage) : null;
 
+  // Path evidence — the trailing ten weeks each path's declared series draws, plus
+  // the one number beside it. Keyed by the names `paths[].activity` uses, so a path
+  // pointing at a series this build doesn't carry gets silence, not empty chrome.
+  // The gym series is missing on purpose: it lives in an E2EE envelope, so the
+  // island decrypts it and merges it in.
+  const series: PathSeries = {
+    commits: {
+      levels: toLevels(gh.daily.slice(-ACTIVITY_DAYS)),
+      value: gh.thisWeek,
+    },
+    languages: { levels: toLevels(lang.activity), value: lang.thisWeek },
+    steps: {
+      levels: toLevels(trailingSeries(steps, ACTIVITY_DAYS, today)),
+      value: stepsForDay(steps, today),
+    },
+  };
+
   return (
     // The cultivation skin (ADR 0118) rides the container, unconditionally here
-    // where the command center makes it conditional: this page IS the inward
-    // look, and off the canon `essenceVarClass` already resolves to muted — so an
-    // unplaced sheet degrades to neutral chrome rather than losing the stamps and
-    // washes the page is drawn in.
+    // where the command center makes it conditional: this page IS the full
+    // reading, and off the canon `essenceVarClass` already resolves to muted — so
+    // an unplaced sheet degrades to neutral chrome rather than losing the stamps
+    // and washes the page is drawn in.
     <main
       data-skin="cultivation"
       className={`mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6 ${essenceVarClass(
@@ -58,9 +88,10 @@ export default async function AperturePage() {
         </div>
 
         {/* the essence sea — the one band that needs no key: rank, stage and the
-            colour they name, off the plaintext glance. */}
+            colour they name, off the plaintext glance. The same band heads the
+            summary page, where it is the door in; here it is where you land. */}
         {glance ? (
-          <div className="flex items-start justify-between gap-3 border-l-2 border-l-(--essence) bg-(--essence-faint) px-4 py-4">
+          <div className="flex items-start justify-between gap-3 border-b border-hairline border-l-2 border-l-(--essence) bg-(--essence-faint) px-4 py-4">
             <div>
               <p
                 className={`text-2xl leading-none ${essenceTextClass(essence)}`}
@@ -83,12 +114,12 @@ export default async function AperturePage() {
         ) : (
           // Nothing sealed, or a read that failed — the masthead's own wording,
           // because it is the same fact stated on a different page.
-          <div className="px-4 py-4">
+          <div className="border-b border-hairline px-4 py-4">
             <p className="text-xs text-muted">unplaced — run aperture-sync</p>
           </div>
         )}
 
-        <ApertureInner offline={!r2Enabled()} />
+        <ApertureInner offline={!r2Enabled()} series={series} today={today} />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
