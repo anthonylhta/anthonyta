@@ -17,12 +17,12 @@
  *     riichi card). The command center's `dropbox` is a FIXED unit — hideable,
  *     but pinned above every zone.
  *
- * The command center's ZONES are the character sheet's bands, in render order:
- * `fixed` chrome, the `wall` currently being worked (with its conditions), the
- * `paths` and their evidence, the `trials`, then `today` — the day's rows plus
- * the exception rows that only speak when something is wrong. A unit reorders
- * within its own zone and never across one, so no arrow can drag the day's
- * weather up into the status bands. The lobby has no zones (one flow).
+ * The command center has two ZONES left, in render order: `fixed` chrome, then
+ * `today` — the day's rows plus the exception rows that only speak when something
+ * is wrong. A unit reorders within its own zone and never across one. The status
+ * bands that used to sit between them are the aperture READING and live on
+ * /aperture, which is not a configurable surface: it is complete or it is wrong.
+ * The lobby has no zones (one flow).
  *
  * Forward-compat that keeps deploys safe: the config names HIDDEN keys only (a
  * module added later is visible by default — a config predating it can't hide
@@ -39,7 +39,7 @@ export interface ModuleDef {
 /** The reorderable zone a unit belongs to (command center only), in render
  *  order. `fixed` units are pinned above the zones and never reorder; lobby
  *  units have no zone. */
-export type Zone = "fixed" | "wall" | "today";
+export type Zone = "fixed" | "today";
 
 export interface UnitDef {
   /** Stable orderable-unit id (== the module key for single-module units). */
@@ -88,25 +88,8 @@ export const CENTER_UNITS: UnitDef[] = [
     label: "drop inbox (sealed messages)",
     modules: [{ key: "dropbox", label: "drop inbox (sealed messages)" }],
   },
-  // The status bands the SUMMARY keeps. One zone, two units: they always travel
-  // together visually — the wall being worked, and the conditions that hold it
-  // open — but conditions still reorder against the wall inside the zone. The
-  // paths, the trials and the seal history are the full reading and live on
-  // /aperture, which is not a configurable surface: it is complete or it is wrong.
-  {
-    key: "aperture-wall",
-    zone: "wall",
-    label: "the wall (breakthrough + strikes)",
-    modules: [
-      { key: "aperture-wall", label: "the wall (breakthrough + strikes)" },
-    ],
-  },
-  {
-    key: "aperture-conditions",
-    zone: "wall",
-    label: "conditions",
-    modules: [{ key: "aperture-conditions", label: "conditions" }],
-  },
+  // The me-block above TODAY is fixed chrome and NOT a unit: who one is isn't a
+  // module to be reordered away from the top of one's own page.
   {
     key: "weather",
     zone: "today",
@@ -154,12 +137,6 @@ export const CENTER_UNITS: UnitDef[] = [
     zone: "today",
     label: "today's hand (riichi)",
     modules: [{ key: "hand", label: "today's hand (riichi)" }],
-  },
-  {
-    key: "stones",
-    zone: "today",
-    label: "stones",
-    modules: [{ key: "stones", label: "stones" }],
   },
   {
     key: "mortal",

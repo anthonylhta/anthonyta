@@ -1,14 +1,12 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { AgendaRow } from "@/components/AgendaRow";
-import { ApertureMasthead } from "@/components/ApertureMasthead";
 import { SignOut } from "@/components/auth-buttons";
 import { DropInbox } from "@/components/DropInbox";
-import { GuideSealed } from "@/components/GuideSealed";
 import { JournalPulse } from "@/components/JournalPulse";
 import { MealsGlance } from "@/components/MealsGlance";
+import { MeSealed } from "@/components/MeSealed";
 import { NeedsDoing } from "@/components/NeedsDoing";
-import { StonesGlance } from "@/components/StonesGlance";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
@@ -32,16 +30,13 @@ import {
   type SnapIndexDay,
 } from "@/lib/fin";
 import { essenceOf } from "@/lib/aperture";
-import {
-  essenceVarClass,
-  gutterPhrase,
-  mortalSegments,
-} from "@/lib/apertureview";
+import { essenceVarClass, mortalSegments } from "@/lib/apertureview";
 import {
   hiddenSet,
   orderedUnitsInZone,
   type Zone as CenterZone,
 } from "@/lib/layout";
+import { quoteForDay } from "@/lib/quotes";
 import { uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing } from "@/lib/sampleBriefing";
@@ -79,36 +74,31 @@ async function dropCount(): Promise<number> {
   }
 }
 
-/** The zones this page renders on the SERVER, top to bottom, with the divider each
- *  one gets. Only TODAY is here: the sheet's three status bands all live in one
- *  sealed envelope, so they are drawn by the client island below — which consumes
- *  the very same registry through its `sections` prop, so hiding or reordering a
- *  band in /system still works exactly as it does for a row down here. */
+/** The zones this page renders, top to bottom, with the divider each one gets.
+ *  TODAY is the only one left: the me-block above it is fixed chrome, and every
+ *  status band is the aperture READING, which moved to /aperture entire. */
 const ZONES: { zone: CenterZone; label?: string; right?: () => string }[] = [
   { zone: "today", label: "today", right: todayLabel },
 ];
 
-/** The sheet's sealed bands, in render order — the zones whose units the island
- *  draws rather than the server loop. One zone since the restructure: the paths,
- *  the trials and the record are the READING, and the reading moved to /aperture. */
-const SEALED_ZONES: CenterZone[] = ["wall"];
+/** The public name — the same one the lobby carries, not the session's. Who this
+ *  page is about is a fact about the page, not about which credential opened it. */
+const NAME = "anthony ta";
 
 /**
  * Your private daily driver — what `/` becomes when you're logged in (ADR 0004).
- * The page is the SUMMARY of the character sheet: the essence sea and the door
- * through it, whatever is currently wrong (and nothing at all when nothing is),
- * the wall being worked, the conditions holding it open — then TODAY, the day's
- * rows plus the exception rows that only speak when something is due or down.
+ * The page is about ME: who I am, what I'm doing, what I'm worth, and one line
+ * worth carrying — then TODAY, the day's rows plus the exception rows that only
+ * speak when something is due or down.
  *
- * PRESENT TENSE ONLY. The paths and their evidence strips, the trials and the seal
- * history all read at length, so they live behind the masthead's door on /aperture
- * rather than below the fold here; the page states where things stand and what
- * wants doing today, and nothing is stated twice at two zooms.
+ * IT IS WARM TERMINAL, PLAINLY. The character sheet's bands, its essence colours,
+ * its seals and its ornaments all live on /aperture now, behind the single door in
+ * the me-block: the sheet is a thing you go and READ, and the page landed on twenty
+ * times a day should be the day. The one sanctioned exception is the breakthrough
+ * flourish (roadmap 70a), which has to fire where the owner actually is.
  *
- * The hierarchy is inverted from the old dashboard on purpose. Nothing on this page
- * is a "module" reporting a number any more; every band answers the same question
- * (what advances the pursuit), and the day's logistics come last because they are
- * the least of it.
+ * The only cultivation ink left up here is the rank word — muted, lowercase, in the
+ * same line as the city, a fact about oneself the way an age is.
  */
 export async function CommandCenter({ userName }: { userName: string }) {
   const today = sydneyISODate();
@@ -160,13 +150,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
     readingBaseline && reading.length > 0
       ? readingChapters - readingBaseline.readingChapters
       : null;
-
-  // The sealed bands the island should draw: the visible aperture units of the
-  // sealed zone, in the owner's configured order. The registry stays the one source
-  // of truth for hiding and ordering — the island only obeys this list.
-  const sections = SEALED_ZONES.flatMap((zone) =>
-    orderedUnitsInZone(layout, "center", zone).map((u) => u.key),
-  ).filter((key) => !hidden.has(key));
 
   // Each command-center module keyed by its layout UNIT key so the zones can
   // render in the owner's configured order (roadmap 59). The values are the
@@ -339,29 +322,6 @@ export async function CommandCenter({ userName }: { userName: string }) {
       </div>
     ) : null,
 
-    /* stones — what's liquid and how long the foundation holds, then the way
-       inward. A vault island: both figures come out of the sealed fin envelope,
-       so the row is drawn in the browser and reads as dots until the key is in.
-       The glyph marks it as an aperture surface, the way the masthead's door
-       does — this row is the door's other end. */
-    stones: !hidden.has("stones") ? (
-      <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          <span
-            aria-hidden
-            lang="zh"
-            className="font-[family-name:var(--font-zh)] text-(--essence)"
-          >
-            竅
-          </span>{" "}
-          stones
-        </span>
-        <span className="min-w-0 flex-1">
-          <StonesGlance offline={!r2Enabled()} />
-        </span>
-      </div>
-    ) : null,
-
     /* mortal — the day's small pursuits in one muted line. What's left of the
        retired activity digest: the domains that answer to no path (games, the
        reading count, the raw journal days) still deserve a pulse, but they no
@@ -425,34 +385,28 @@ export async function CommandCenter({ userName }: { userName: string }) {
       ) : null,
   };
 
-  // The cultivation skin (ADR 0118) rides the container: the data-skin attribute
-  // scopes every skin style, and the essence variable — looked up from the
-  // PLAINTEXT glance's rank/stage, so even the locked page tints — is declared
-  // here once for everything below to consume. No glance, no skin: the unplaced
-  // sheet stays plain Warm Terminal.
+  // The rank, as the one word the me-block prints of it: the canon essence name,
+  // lowercased and muted, off the PLAINTEXT glance. No glance, no word — the page
+  // says nothing about a rank nothing was ever sealed for.
   const essence = aperture ? essenceOf(aperture.rank, aperture.stage) : null;
-  const phrase = aperture ? gutterPhrase(aperture.rank) : null;
+  const rankWord = essence?.toLowerCase() ?? null;
+  // The day's line. Tiered by rank, so the plaintext glance is enough to choose it;
+  // with no glance the first tier stands in, since a line is public text either way.
+  const quote = quoteForDay(aperture?.rank ?? 1, today);
 
   return (
+    // The skin attribute and the essence variable survive on this page for ONE
+    // reason: the breakthrough flourish (ADR 0119) is scoped to them — it lays the
+    // old essence on this container and sweeps the variable to the new one. None of
+    // the skin's chrome is worn up here any more (no wash, no stamps, no masonry,
+    // no gutters — all of it moved to /aperture with the reading), so what the
+    // attribute buys is a moment once per breakthrough and nothing else.
     <main
       data-skin={aperture ? "cultivation" : undefined}
       className={`mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6 ${
         aperture ? essenceVarClass(essence) : ""
       }`}
     >
-      {/* vertical ink ornaments — fixed in the page gutters, wide desktop only
-          (CSS hides them long before they could crowd the sheet) */}
-      {aperture && (
-        <>
-          <div aria-hidden lang="zh" className="skin-gutter skin-gutter-l">
-            {phrase}
-            <span className="skin-gutter-stroke" />
-          </div>
-          <div aria-hidden lang="zh" className="skin-gutter skin-gutter-r">
-            观微知著
-          </div>
-        </>
-      )}
       <div className="border border-hairline bg-surface/20">
         <StatusBar user={userName} />
 
@@ -460,20 +414,16 @@ export async function CommandCenter({ userName }: { userName: string }) {
             messages left on /contact open here and nowhere else (ADR: sealed box). */}
         {centerNodes.dropbox}
 
-        {/* the rank, off the plaintext glance — fixed chrome, never a unit. */}
-        <ApertureMasthead glance={aperture} />
-
-        {/* the sealed summary: the exception lines and two bands, one envelope, one
-            decrypt. Mounted only when there IS a rank to stand behind (no glance
-            means nothing was ever sealed, so there is nothing to unlock toward) and
-            only when the owner has left at least one of its bands visible. */}
-        {aperture && sections.length > 0 && (
-          <GuideSealed
-            sections={sections}
-            today={today}
-            offline={!r2Enabled()}
-          />
-        )}
+        {/* who this is, what he's doing, what he's worth, and the door inward —
+            fixed chrome, never a unit. */}
+        <MeSealed
+          offline={!r2Enabled()}
+          name={NAME}
+          rankWord={rankWord}
+          quote={quote}
+          glance={aperture}
+          today={today}
+        />
 
         {/* zones render from the owner's layout order (roadmap 59); the default
             order reproduces the hand-tuned layout. A zone's divider appears only

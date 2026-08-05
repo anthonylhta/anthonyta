@@ -310,20 +310,21 @@ test.describe("guest gating", () => {
 
   /**
    * The character sheet's own vocabulary, none of which the lobby has any reason to
-   * say. Each string is rendered by exactly one owner-only surface: the masthead's
-   * rank reading, a band divider, the wall's strike counters, the streak line's gu,
-   * the mortal pulse row. They are checked as a set because the sheet is now the
-   * WHOLE signed-in page — a leak would be the entire private status, not one figure.
+   * say. Each string is rendered by an owner-only surface — nearly all of them by
+   * the inward reading on /aperture, the rest by the signed-in home page. They are
+   * checked as a SET, because a leak would be the private status entire rather than
+   * one figure, and the set stays stable as strings move between owner surfaces:
+   * what it pins is "no guest ever sees any of this".
    */
   const SHEET_STRINGS = [
     "aperture", // every aperture surface is namespaced, incl. the empty state
-    "unplaced", // the no-glance state
-    "Jade Green", // an essence colour name
-    "light membrane", // the sea band's stage reading (masthead + /aperture header)
-    "the wall", // a band divider
+    "unplaced", // the no-glance state, on /aperture
+    "Jade Green", // an essence colour name — /aperture's sea band
+    "light membrane", // the sea band's stage reading, on /aperture
+    "the wall", // a band divider, on /aperture
     "vital gu", // the inward page's gu slot
-    "strikes this week", // the wall band
-    "mortal", // the day's pulse row (and its registry label)
+    "strikes this week", // the wall band, on /aperture
+    "mortal", // the home page's pulse row (and its registry label)
     "last 10 weeks", // the paths band's evidence strips, on /aperture
     "the record", // the seal-history band's divider, on /aperture
     "青铜之气", // the skin's left-gutter phrase (the essence family as qi)
@@ -331,7 +332,7 @@ test.describe("guest gating", () => {
     "primeval stones", // the inward page's first band
     "the foundation", // the inward page's invested reading
     "gu held", // the inward page's paths band
-    "竅", // the aperture glyph — the masthead's door and the stones row
+    "竅", // the aperture glyph — /aperture's sea band
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {

@@ -484,6 +484,26 @@ describe("aperturesync — rejection diagnosis", () => {
     );
   });
 
+  it("names a birth day that isn't a day", () => {
+    // The one field the site never renders as it was written — it becomes an age
+    // in the browser — so a bad emission has to be named at seal time or it will
+    // simply read as a dash on the home page and nobody will know why.
+    const bad = {
+      ...raw,
+      sealed: { ...raw.sealed, profile: { born: "19 August 2001" } },
+    };
+    expect(explainRejected(bad)).toBe(
+      'sealed.profile.born must be a YYYY-MM-DD day (found "19 August 2001")',
+    );
+  });
+
+  it("names a now-line that isn't a line", () => {
+    const bad = { ...raw, sealed: { ...raw.sealed, profile: { now: 3 } } };
+    expect(explainRejected(bad)).toBe(
+      "sealed.profile.now must be a string (found 3)",
+    );
+  });
+
   it("names a missing sealed block", () => {
     const noSealed: Record<string, unknown> = { ...raw };
     delete noSealed.sealed;

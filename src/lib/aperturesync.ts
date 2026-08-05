@@ -296,6 +296,16 @@ function needFiniteNum(v: unknown, at: string): Fail {
     : `${at} must be a finite number (found ${show(v)})`;
 }
 
+/** A calendar day — the birth day's own shape, named so a bad emission reads as
+ *  "not a day" rather than the vaguer "not a string". */
+function needDay(v: unknown, at: string): Fail {
+  if (typeof v !== "string")
+    return `${at} must be a YYYY-MM-DD day (found ${show(v)})`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(Date.parse(v))
+    ? null
+    : `${at} must be a YYYY-MM-DD day (found ${show(v)})`;
+}
+
 function needBool(v: unknown, at: string): Fail {
   return typeof v === "boolean"
     ? null
@@ -432,6 +442,14 @@ function walkSealed(x: unknown): Fail {
     eachRow(x.trials, "sealed.trials", walkTrial),
     walkBreakthrough(x.breakthrough, "sealed.breakthrough"),
     x.rented === undefined ? null : eachRow(x.rented, "sealed.rented", needStr),
+    ifPresent(x.profile, "sealed.profile", (v, at) =>
+      !isObj(v)
+        ? `${at} must be an object (found ${show(v)})`
+        : first(
+            ifPresent(v.born, `${at}.born`, needDay),
+            ifPresent(v.now, `${at}.now`, needStr),
+          ),
+    ),
   );
 }
 

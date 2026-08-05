@@ -11,14 +11,16 @@ import {
 } from "@/lib/breakthrough";
 
 /**
- * BreakthroughMoment — the sheet's one-time flourish (roadmap 70a). The page after
- * a breakthrough already IS the new rank: the masthead's line, the numeral and the
- * essence the container declares are all server-rendered from the new glance, so
- * there is nothing here to reveal and nothing that could leak. What is missing is
- * the moment itself — the sheet changes colour between two visits and the owner
- * never sees it happen. So the island puts back the essence the last visit ended
- * on, holds a beat, and lets the whole sheet sweep to the one it is already
- * wearing underneath.
+ * BreakthroughMoment — the one-time flourish (roadmap 70a). The page after a
+ * breakthrough already IS the new rank: the me-block's rank word and the essence
+ * the container declares are both server-rendered from the new glance, so there is
+ * nothing here to reveal and nothing that could leak. What is missing is the moment
+ * itself — the rank changes between two visits and the owner never sees it happen.
+ * So the island puts back the essence the last visit ended on, holds a beat, and
+ * lets the page sweep to the one it is already wearing underneath.
+ *
+ * It lives on the HOME page, where the owner actually is twenty times a day, and it
+ * is the one sanctioned break in that page's plain Warm Terminal palette.
  *
  * The sweep is CSS (globals.css): `--essence` is a registered custom property, so
  * the browser interpolates the VARIABLE and every consumer below the container —

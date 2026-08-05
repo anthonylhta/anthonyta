@@ -32,7 +32,6 @@ const TODAY_DEFAULT = [
   "meals",
   "briefing",
   "hand",
-  "stones",
   "mortal",
   "health",
 ];
@@ -62,14 +61,14 @@ describe("unit / module registries", () => {
     // reappear further down the registry: an interleaved unit would render in its
     // zone anyway and read as scrambled in the /system panel's default listing.
     const zones = CENTER_UNITS.map((u) => u.zone);
-    expect([...new Set(zones)]).toEqual(["fixed", "wall", "today"]);
+    expect([...new Set(zones)]).toEqual(["fixed", "today"]);
     expect(zones).toEqual([...zones].sort(byZoneOrder));
   });
 });
 
 /** Sort key over the render order above — only used to prove no zone interleaves. */
 function byZoneOrder(a?: string, b?: string): number {
-  const order = ["fixed", "wall", "today"];
+  const order = ["fixed", "today"];
   return order.indexOf(a ?? "") - order.indexOf(b ?? "");
 }
 
@@ -125,10 +124,11 @@ describe("normalizeLayout", () => {
   });
 
   it("degrades a pre-summary config — the reading left for /aperture", () => {
-    // The home page became a summary: the paths, the trials and the seal history
-    // moved to /aperture, which is not a configurable surface. A config that hides
-    // or orders any of those three predates the move and must read clean rather
-    // than 400 the /system panel.
+    // The home page became a summary and then became "me": the paths, the trials,
+    // the seal history, then the wall, the conditions and the stones row all moved
+    // to /aperture, which is not a configurable surface. A config that hides or
+    // orders any of them predates a move and must read clean rather than 400 the
+    // /system panel.
     expect(
       normalizeLayout({
         v: 2,
@@ -137,19 +137,22 @@ describe("normalizeLayout", () => {
           "aperture-paths",
           "aperture-trials",
           "aperture-record",
+          "aperture-wall",
+          "aperture-conditions",
+          "stones",
           "briefing",
         ],
         lobbyOrder: [],
         centerOrder: [
           "aperture-wall",
+          "aperture-conditions",
           "aperture-paths",
           "aperture-record",
+          "stones",
           "mortal",
         ],
       }),
-    ).toEqual(
-      cfg({ center: ["briefing"], centerOrder: ["aperture-wall", "mortal"] }),
-    );
+    ).toEqual(cfg({ center: ["briefing"], centerOrder: ["mortal"] }));
   });
 
   it("degrades a pre-shell config — three units left the sheet at once", () => {
@@ -236,7 +239,6 @@ describe("orderedUnits", () => {
     const zone = (z: Zone) =>
       orderedUnitsInZone(EMPTY_LAYOUT, "center", z).map((u) => u.key);
     expect(zone("fixed")).toEqual(["dropbox"]);
-    expect(zone("wall")).toEqual(["aperture-wall", "aperture-conditions"]);
     expect(zone("today")).toEqual(TODAY_DEFAULT);
   });
 });
@@ -252,26 +254,18 @@ describe("moveUnit + canMove", () => {
   });
 
   it("moves a unit up within its zone", () => {
-    // The wall zone carries two units: the wall itself and the conditions holding
-    // it open. They travel together, but they still swap against each other.
-    const c = moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", -1);
-    expect(orderedUnitsInZone(c, "center", "wall").map((u) => u.key)).toEqual([
-      "aperture-conditions",
-      "aperture-wall",
+    const c = moveUnit(EMPTY_LAYOUT, "center", "agenda", -1);
+    expect(orderedUnitsInZone(c, "center", "today").map((u) => u.key)).toEqual([
+      "weather",
+      "agenda",
+      "transit-next",
+      ...TODAY_DEFAULT.slice(3),
     ]);
   });
 
   it("never crosses a zone boundary", () => {
-    // The wall leads its zone; moving it up is a no-op, not a promotion into the
-    // pinned row above it.
-    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-wall", -1)).toEqual(
-      EMPTY_LAYOUT,
-    );
-    // Conditions end the wall zone: down does NOT drop them into TODAY.
-    expect(moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", 1)).toEqual(
-      EMPTY_LAYOUT,
-    );
-    // weather opens TODAY and health closes it.
+    // weather opens TODAY and health closes it: up is a no-op, not a promotion
+    // into the pinned row above, and down is a no-op, not a fall off the end.
     expect(moveUnit(EMPTY_LAYOUT, "center", "weather", -1)).toEqual(
       EMPTY_LAYOUT,
     );
@@ -286,8 +280,8 @@ describe("moveUnit + canMove", () => {
   });
 
   it("leaves the other zones untouched when reordering one", () => {
-    const c = moveUnit(EMPTY_LAYOUT, "center", "aperture-conditions", -1);
-    for (const z of ["fixed", "today"] as Zone[]) {
+    const c = moveUnit(EMPTY_LAYOUT, "center", "agenda", -1);
+    for (const z of ["fixed"] as Zone[]) {
       expect(orderedUnitsInZone(c, "center", z).map((u) => u.key)).toEqual(
         orderedUnitsInZone(EMPTY_LAYOUT, "center", z).map((u) => u.key),
       );
@@ -299,21 +293,11 @@ describe("moveUnit + canMove", () => {
     expect(canMove(EMPTY_LAYOUT, "center", "weather", 1)).toBe(true);
     expect(canMove(EMPTY_LAYOUT, "center", "health", 1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "dropbox", 1)).toBe(false);
-    // The wall zone's two units swap against each other and nothing else.
-    expect(canMove(EMPTY_LAYOUT, "center", "aperture-wall", -1)).toBe(false);
-    expect(canMove(EMPTY_LAYOUT, "center", "aperture-wall", 1)).toBe(true);
-    expect(canMove(EMPTY_LAYOUT, "center", "aperture-conditions", 1)).toBe(
-      false,
-    );
   });
 
-  it("leads the sheet with the wall, and TODAY with the weather", () => {
-    // Default positions are part of the spec, not an accident of the registry's
-    // order: the wall being worked opens the sheet, and the day's first row is
-    // the one thing that is true before any unlock.
-    expect(orderedUnitsInZone(EMPTY_LAYOUT, "center", "wall")[0].key).toBe(
-      "aperture-wall",
-    );
+  it("leads TODAY with the weather", () => {
+    // A default position is part of the spec, not an accident of the registry's
+    // order: the day's first row is the one thing that is true before any unlock.
     expect(orderedUnitsInZone(EMPTY_LAYOUT, "center", "today")[0].key).toBe(
       "weather",
     );

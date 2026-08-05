@@ -2,13 +2,16 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { ApertureInner } from "@/components/ApertureInner";
+import { ExceptionLine } from "@/components/terminal/ExceptionLine";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
-import { essenceOf } from "@/lib/aperture";
+import { essenceOf, isSealStale, type ApertureGlance } from "@/lib/aperture";
 import {
   essenceTextClass,
   essenceVarClass,
+  gutterPhrase,
   membraneOf,
+  sealedAgo,
   type PathSeries,
 } from "@/lib/apertureview";
 import { getApertureGlance } from "@/lib/connectors/aperture";
@@ -20,6 +23,28 @@ import { r2Enabled } from "@/lib/r2";
 import { stepsForDay, trailingSeries } from "@/lib/steps";
 
 export const metadata = { title: "aperture" };
+
+/**
+ * How old the reading is, and whether the week has run away from it — both off ONE
+ * instant, so the age and the staleness can never disagree. Read in a helper rather
+ * than the render body: the page is dynamic, so a per-request clock is exactly
+ * right, but render itself stays pure.
+ *
+ * Freshness is a fact about the PLAINTEXT glance — no key is needed to say how old a
+ * seal is — which is why it is stated out here rather than inside the island where
+ * everything else about the seal lives.
+ */
+function freshness(glance: ApertureGlance | null): {
+  ago: string | null;
+  stale: boolean;
+} {
+  if (!glance) return { ago: null, stale: false };
+  const now = new Date().getTime();
+  return {
+    ago: sealedAgo(glance.sealedAt, now),
+    stale: isSealStale(glance.sealedAt, now),
+  };
+}
 
 // The full reading — owner-only, and everything under the header decrypts in the
 // browser.
@@ -42,6 +67,8 @@ export default async function AperturePage() {
   ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
   const membrane = glance ? membraneOf(glance.stage) : null;
+  const phrase = glance ? gutterPhrase(glance.rank) : null;
+  const { ago, stale } = freshness(glance);
 
   // Path evidence — the trailing ten weeks each path's declared series draws, plus
   // the one number beside it. Keyed by the names `paths[].activity` uses, so a path
@@ -68,10 +95,23 @@ export default async function AperturePage() {
     // and washes the page is drawn in.
     <main
       data-skin="cultivation"
-      className={`mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6 ${essenceVarClass(
+      className={`skin-wash mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6 ${essenceVarClass(
         essence,
       )}`}
     >
+      {/* vertical ink ornaments — fixed in the page gutters, wide desktop only
+          (CSS hides them long before they could crowd the reading) */}
+      {glance && (
+        <>
+          <div aria-hidden lang="zh" className="skin-gutter skin-gutter-l">
+            {phrase}
+            <span className="skin-gutter-stroke" />
+          </div>
+          <div aria-hidden lang="zh" className="skin-gutter skin-gutter-r">
+            观微知著
+          </div>
+        </>
+      )}
       <div className="border border-hairline bg-surface/20">
         <StatusBar user={who} />
 
@@ -88,8 +128,8 @@ export default async function AperturePage() {
         </div>
 
         {/* the essence sea — the one band that needs no key: rank, stage and the
-            colour they name, off the plaintext glance. The same band heads the
-            summary page, where it is the door in; here it is where you land. */}
+            colour they name, off the plaintext glance. The home page prints the
+            colour's NAME and nothing more; here is where it is worn. */}
         {glance ? (
           <div className="flex items-start justify-between gap-3 border-b border-hairline border-l-2 border-l-(--essence) bg-(--essence-faint) px-4 py-4">
             <div>
@@ -112,10 +152,26 @@ export default async function AperturePage() {
             </span>
           </div>
         ) : (
-          // Nothing sealed, or a read that failed — the masthead's own wording,
-          // because it is the same fact stated on a different page.
+          // Nothing sealed, or a read that failed. This page owns the empty case:
+          // the home page says nothing about a rank rather than nothing-yet.
           <div className="border-b border-hairline px-4 py-4">
             <p className="text-xs text-muted">unplaced — run aperture-sync</p>
+          </div>
+        )}
+
+        {/* how old the reading is, and — when the week has run away from it — the
+            one line that says so. Amber, not red: a late seal is the owner's own
+            lateness, not something broken. */}
+        {(ago || stale) && (
+          <div className="border-b border-hairline px-4 py-2.5">
+            {ago && (
+              <p className="text-[11px] tabular-nums text-muted">{ago}</p>
+            )}
+            {stale && (
+              <ExceptionLine tone="amber">
+                seal stale — run aperture-sync
+              </ExceptionLine>
+            )}
           </div>
         )}
 
