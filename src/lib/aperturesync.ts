@@ -445,10 +445,7 @@ function walkSealed(x: unknown): Fail {
     ifPresent(x.profile, "sealed.profile", (v, at) =>
       !isObj(v)
         ? `${at} must be an object (found ${show(v)})`
-        : first(
-            ifPresent(v.born, `${at}.born`, needDay),
-            ifPresent(v.now, `${at}.now`, needStr),
-          ),
+        : ifPresent(v.born, `${at}.born`, needDay),
     ),
   );
 }
