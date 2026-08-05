@@ -35,10 +35,10 @@ import {
   imminentMajorTrial,
   isImminent,
   latestDailyDay,
+  pathAnchor,
   pathEvidence,
   signedCount,
   splitTrials,
-  tallyMarks,
   tierGlyph,
   trialCountdown,
   trialsSummary,
@@ -411,17 +411,6 @@ export function GuideSealed({
                       <Fragment key={name}>
                         {i > 0 && <span className="text-muted"> · </span>}
                         <span className="text-fg/90">{name}</span>{" "}
-                        {/* the count inked as tally marks where it fits — the
-                            digit always prints, the 正 only ever adds */}
-                        {tallyMarks(n) && (
-                          <span
-                            aria-hidden
-                            lang="zh"
-                            className="font-[family-name:var(--font-zh)] tracking-[0.15em] text-cinnabar"
-                          >
-                            {tallyMarks(n)}{" "}
-                          </span>
-                        )}
                         <span className="text-(--essence)">{n}</span>
                       </Fragment>
                     ))}
@@ -724,6 +713,11 @@ function StatusLine({ children }: { children: React.ReactNode }) {
  * reads them as siblings at different depths, not as a nested list. An attainment
  * this build knows reads a shade brighter; an unknown rung stays the muted literal,
  * never dressed as known.
+ *
+ * A TOP-LEVEL row is a door: it links at its own card on /aperture, where the same
+ * path is read inward (its gu, and what the next rung asks for). Sub-paths stay
+ * plain — the page renders them INSIDE their parent's card, so a sub-path has no
+ * anchor of its own to point at.
  */
 function PathRows({
   path,
@@ -736,9 +730,27 @@ function PathRows({
   evidence: GuideEvidence;
   totals: FinTotals | null;
 }) {
+  const linked = depth === 0;
+
   return (
     <>
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline/40 px-4 py-2 text-sm last:border-b-0">
+      <div
+        className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline/40 px-4 py-2 text-sm last:border-b-0 ${
+          linked ? "relative transition-colors hover:bg-surface/30" : ""
+        }`}
+      >
+        {/* The door as an overlay rather than a container: the wealth row's
+            evidence carries its own link to /portfolio, and an anchor inside an
+            anchor is not a thing HTML has. Covering the row leaves the layout
+            untouched and keeps both doors real — the evidence group below is
+            raised over this one, so the portfolio link still takes its own click. */}
+        {linked && (
+          <Link
+            href={`/aperture#${pathAnchor(path.name)}`}
+            aria-label={`${path.name} · aperture`}
+            className="absolute inset-0"
+          />
+        )}
         <span
           className={`w-[92px] shrink-0 text-fg/90 ${depth > 0 ? "pl-3.5" : ""}`}
         >
@@ -761,7 +773,10 @@ function PathRows({
           {path.note && <span className="text-muted/60"> · {path.note}</span>}
         </span>
         <span className="ml-auto flex shrink-0 items-baseline gap-2.5">
-          <Evidence path={path} evidence={evidence} totals={totals} />
+          <span className="relative flex items-baseline gap-2.5">
+            <Evidence path={path} evidence={evidence} totals={totals} />
+          </span>
+          {linked && <span className="text-xs text-muted/40">→</span>}
         </span>
       </div>
       {path.sub?.map((s, i) => (

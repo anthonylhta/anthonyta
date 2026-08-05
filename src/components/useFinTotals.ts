@@ -33,6 +33,10 @@ export interface FinTotals {
   hisa: number;
   /** Month-to-date Δ in dollars; null during the first month of data. */
   delta: number | null;
+  /** The owner's declared weekly burn, in cents — null until one is recorded.
+   *  Carried raw rather than divided into a runway here: what a caller wants of
+   *  it (months, years, nothing) is the caller's reading, not this hook's. */
+  burnWeeklyCents: number | null;
 }
 
 export function useFinTotals(offline: boolean): FinTotals | null {
@@ -94,6 +98,7 @@ export function useFinTotals(offline: boolean): FinTotals | null {
             cash,
             hisa,
             delta,
+            burnWeeklyCents: cfg.burnWeeklyCents ?? null,
           });
       } catch {
         // any failure in the unlocked path → placeholder fallback

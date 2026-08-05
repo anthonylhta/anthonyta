@@ -415,6 +415,16 @@ export function signedCount(n: number): string {
   return n >= 0 ? `+${n}` : `${n}`;
 }
 
+/**
+ * A path's id on the inward page — `craft`, `the body` → `the-body`. Lives here
+ * rather than beside either surface because BOTH ends have to agree: the sheet's
+ * path rows link at `/aperture#<id>` and the page's cards carry it. Two copies of
+ * this one line is exactly how a door starts opening onto nothing.
+ */
+export function pathAnchor(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
 // --- dates ---------------------------------------------------------------------
 
 /**
@@ -675,21 +685,6 @@ const TIER_GLYPHS: Record<string, string> = {
 
 export function tierGlyph(tier: string): string | null {
   return TIER_GLYPHS[tier] ?? null;
-}
-
-/** How many strokes of tally the wall will ink before falling back to digits
- *  alone — three full 正 reads at a glance, more reads as a woodpile. */
-const TALLY_MAX = 15;
-
-/**
- * A strike count as Chinese tally marks — 正 per completed five, 丨 per remainder
- * (the count-to-正 convention: five strokes complete the character). Null for
- * zero, non-integers, and anything past the cap — the digit beside it is always
- * printed, so the tally only ever ADDS a reading, never replaces one.
- */
-export function tallyMarks(n: number): string | null {
-  if (!Number.isInteger(n) || n <= 0 || n > TALLY_MAX) return null;
-  return "正".repeat(Math.floor(n / 5)) + "丨".repeat(n % 5);
 }
 
 // en-US short month over UTC: harden dates are bare Sydney calendar days, and

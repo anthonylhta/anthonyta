@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { BreakthroughMoment } from "@/components/BreakthroughMoment";
 import { essenceOf, isSealStale, type ApertureGlance } from "@/lib/aperture";
 import {
@@ -34,6 +35,33 @@ import {
  *  can never disagree. Read in a helper rather than the render body the way
  *  `todayLabel()` is: the command center is dynamic, so a per-request clock is
  *  exactly right, but render itself stays pure. */
+/**
+ * The way in — the sheet reads outward (rank, wall, paths, the day), the page
+ * behind this line reads inward (the stones, the gu, what the next rung asks
+ * for). One muted line, because the door is not the point of the masthead.
+ *
+ * It renders in BOTH of the masthead's states, unplaced included: the page owns
+ * the empty case and says so in its own words, which is a better answer than a
+ * missing door and no way to find out why.
+ */
+function ApertureDoor() {
+  return (
+    <Link
+      href="/aperture"
+      className="mt-2 inline-flex items-baseline gap-1.5 text-[11px] text-muted transition-colors hover:text-amber"
+    >
+      <span
+        aria-hidden
+        lang="zh"
+        className="font-[family-name:var(--font-zh)] text-(--essence)"
+      >
+        竅
+      </span>
+      aperture →
+    </Link>
+  );
+}
+
 function freshness(glance: ApertureGlance): {
   ago: string | null;
   stale: boolean;
@@ -59,6 +87,7 @@ export function ApertureMasthead({
     return (
       <div className="border-b border-hairline px-4 py-4">
         <p className="text-xs text-muted">unplaced — run aperture-sync</p>
+        <ApertureDoor />
       </div>
     );
   }
@@ -160,6 +189,8 @@ export function ApertureMasthead({
           </span>
         )}
       </div>
+
+      <ApertureDoor />
     </div>
   );
 }

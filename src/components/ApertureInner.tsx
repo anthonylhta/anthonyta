@@ -11,7 +11,7 @@ import {
   type ApertureGu,
   type ApertureVitalGu,
 } from "@/lib/aperture";
-import { detailStatus } from "@/lib/apertureview";
+import { detailStatus, pathAnchor } from "@/lib/apertureview";
 import {
   absorbedThisWeek,
   investedAt,
@@ -63,11 +63,6 @@ const WEEKS_PER_MONTH = 52 / 12;
  *  knowable here" — never a zero the page made up. */
 function cents(v: number | null): string {
   return v === null ? "—" : aud(v / 100);
-}
-
-/** A path's card id, so the sheet's path rows can link straight at it (#craft). */
-function anchor(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, "-");
 }
 
 export function ApertureInner({ offline }: { offline: boolean }) {
@@ -381,7 +376,10 @@ function VitalGuSlot({ gu }: { gu?: ApertureVitalGu }) {
  *  the pre-emission state, shown honestly rather than hidden. */
 function PathCard({ path }: { path: AperturePath }) {
   return (
-    <div id={anchor(path.name)} className="border border-hairline px-3 py-2.5">
+    <div
+      id={pathAnchor(path.name)}
+      className="border border-hairline px-3 py-2.5"
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span className="text-sm text-fg/90">
           {path.name}
