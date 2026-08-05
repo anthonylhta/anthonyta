@@ -8,10 +8,11 @@ import {
 } from "./aperture";
 
 /**
- * apertureview — the pure view spine of the character sheet: the masthead and the
- * sealed island below it. Every decision those components make lives here: which of
- * the six island states to render, which literal Tailwind class a colour or a status
- * wears, how a date turns into a countdown, what a band's right-hand summary says,
+ * apertureview — the pure view spine of the character sheet: the inward reading on
+ * /aperture, and the me-block that opens the door to it. Every decision those
+ * components make lives here: which of the six island states to render, which
+ * literal Tailwind class a colour or a status wears, how a date turns into a
+ * countdown or a birth day into an age, what a band's right-hand summary says,
  * which trials collapse behind the "+n" toggle. The components are thin JSX over
  * these values and hold no branching logic of their own.
  *
@@ -286,8 +287,8 @@ export interface ActivitySeries {
  * `gym` is the first SEALED series here, and the reason `source` no longer means
  * "connector": its days live in the E2EE gym envelope, so the server that renders
  * the other three cannot produce this one. The island decrypts it and merges it in
- * (GuideSealed) — the entry is still needed here, because being in this map is what
- * makes a path's `activity: "gym"` drawable at all.
+ * (ApertureInner) — the entry is still needed here, because being in this map is
+ * what makes a path's `activity: "gym"` drawable at all.
  *
  * Typed with `undefined` in the value so a lookup can't be mistaken for a hit —
  * `noUncheckedIndexedAccess` is off in this project, and the whole contract here
@@ -421,6 +422,43 @@ export function dayGap(dateISO: string, todayISO: string): number | null {
   return Math.floor((t - today) / DAY_MS);
 }
 
+/** A calendar day split into its three numbers, or null when the string is not one.
+ *  The round-trip through `Date.UTC` is what makes it strict: `2001-02-31` matches
+ *  the shape and even parses, but it is not a day anyone was born on. */
+function parseDay(iso: string): { y: number; m: number; d: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (m === null) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const probe = new Date(Date.UTC(y, mo - 1, d));
+  if (
+    probe.getUTCFullYear() !== y ||
+    probe.getUTCMonth() !== mo - 1 ||
+    probe.getUTCDate() !== d
+  )
+    return null;
+  return { y, m: mo, d };
+}
+
+/**
+ * Whole years elapsed from a birth day to a given day — the me-block's age. The
+ * birthday itself counts (one is 24 ON the day, not the day after) and a birthday
+ * still ahead in the year does not, which is why this compares month and day rather
+ * than dividing elapsed milliseconds: a division by 365.25 drifts a day every leap
+ * year and would print the wrong age for a week around every February.
+ *
+ * Both ends are `YYYY-MM-DD` CALENDAR days, and null on anything either end can't
+ * parse as one — an age is a fact about calendars, and a broken date must never
+ * become a number (the doctrine every date function here keeps).
+ */
+export function ageOn(bornISO: string, todayISO: string): number | null {
+  const born = parseDay(bornISO);
+  const today = parseDay(todayISO);
+  if (born === null || today === null) return null;
+  const beforeBirthday =
+    today.m < born.m || (today.m === born.m && today.d < born.d);
+  return today.y - born.y - (beforeBirthday ? 1 : 0);
+}
+
 /** How close a date has to be for the sheet to raise its voice about it. */
 const IMMINENT_DAYS = 7;
 
@@ -529,7 +567,7 @@ export function trialsSummary(open: ApertureTrial[], todayISO: string): string {
 }
 
 /**
- * The two tiers grave enough to reach the masthead. CLOSED where every other
+ * The two tiers grave enough to be read at the top of the page. CLOSED where every other
  * vocabulary here is open, and deliberately: escalation is a claim about SEVERITY,
  * and a tier this build has never heard of gives no grounds to make it. So an
  * unknown tier keeps its muted literal in the band and never lights the dot — the
@@ -539,10 +577,10 @@ const MAJOR_TIERS: readonly string[] = ["heavenly", "grand"];
 
 /**
  * The nearest OPEN major-tier trial inside the imminent window, or null when
- * nothing qualifies — the masthead's one escalation. `trialsSummary` above already
+ * nothing qualifies — the reading's one escalation. `trialsSummary` above already
  * counts down to the nearest stocked trial in the trials band's own header; this is
  * the step above that, for the two tiers where a week's notice belongs at the TOP of
- * the sheet rather than four bands down. Open state, not open TIER: an unrecognised
+ * the page rather than four bands down. Open state, not open TIER: an unrecognised
  * state is still live (`splitTrials`) and so still escalates, while an unrecognised
  * tier never does.
  *

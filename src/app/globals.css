@@ -117,7 +117,14 @@ body {
      once, so components only ever reference a var and never a color-mix */
   --essence-soft: color-mix(in srgb, var(--essence) 45%, transparent);
   --essence-faint: color-mix(in srgb, var(--essence) 7%, transparent);
-  /* faint ink-wash: two barely-there pools, the lower one breathing the essence */
+}
+
+/* Faint ink-wash: two barely-there pools, the lower one breathing the essence. Its
+   own class, not the attribute's own rule, because the home page takes the skin's
+   VARIABLES without its chrome — the breakthrough sweep is scoped to the attribute,
+   and that page is Warm Terminal down to the background every other second of the
+   year. Only the inward reading wears the wash. */
+[data-skin="cultivation"].skin-wash {
   background-image:
     radial-gradient(
       1100px 500px at 85% -10%,

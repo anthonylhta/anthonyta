@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
+import { ExceptionLine } from "@/components/terminal/ExceptionLine";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import {
@@ -13,6 +14,7 @@ import {
   GYM_CONTEXT,
 } from "@/lib/aevcontext";
 import {
+  isAdjudicationPending,
   isAttainment,
   normalizeAperture,
   type AperturePath,
@@ -32,7 +34,9 @@ import {
   conditionsSummary,
   declaredSeriesKeys,
   detailStatus,
+  imminentMajorTrial,
   isImminent,
+  latestDailyDay,
   pathAnchor,
   pathEvidence,
   signedCount,
@@ -56,6 +60,7 @@ import {
 import { normalizeGymConfig, sessionCounts, sessionsThisWeek } from "@/lib/gym";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
+import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
 
 /**
  * ApertureInner — the full reading, as ONE client island: the sealed status document
@@ -120,6 +125,34 @@ interface RecordState {
   older: number;
   /** Fetched days that would not serve, decrypt or normalize. */
   unreadable: number;
+}
+
+/** Fetch one sealed vault blob's ciphertext through the same-origin owner-gated proxy. */
+async function fetchRaw(p: string): Promise<Uint8Array> {
+  const res = await fetch(`/api/vault/raw?p=${encodeURIComponent(p)}`);
+  if (!res.ok) throw new Error(`vault raw ${p}: ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/**
+ * Whether the sealed reading is behind the raw journal — the adjudication line.
+ * Needs the newest raw day, which lives in the sealed vault index, so it is a SECOND
+ * fetch and decrypt. Best-effort by construction: any miss returns false, because a
+ * line that can't be computed is a line that shouldn't be shown.
+ */
+async function adjudicationPending(
+  sealedAt: string,
+  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
+): Promise<boolean> {
+  try {
+    const { bytes } = await openItem(await fetchRaw(VAULT_INDEX_PATH));
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!isVaultIndex(parsed)) return false;
+    const latest = latestDailyDay(parsed.notes.map((n) => n.title));
+    return isAdjudicationPending(sealedAt, latest);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -227,6 +260,8 @@ export function ApertureInner({
   const [gym, setGym] = useState<EvidenceSeries | null>(null);
   /** The archived seal history, once it lands — see `recordSeries`. */
   const [record, setRecord] = useState<RecordState | null>(null);
+  /** Raw journal days have run ≥2 days past the seal — flag, never resolve. */
+  const [pending, setPending] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
 
   // Render-phase adjustment (not an effect): dropping everything decrypted the
@@ -241,6 +276,7 @@ export function ApertureInner({
       setDataErr(null);
       setGym(null);
       setRecord(null);
+      setPending(false);
       setShowResolved(false);
     }
   }
@@ -300,6 +336,12 @@ export function ApertureInner({
         } catch {
           if (!cancelled) setFin(null);
         }
+
+        // The adjudication rider — one line at the head of the reading, so it goes
+        // early; like every rider here it can only ADD, never hold the page back
+        // and never fail it.
+        const behind = await adjudicationPending(next.sealedAt, openItem);
+        if (behind && !cancelled) setPending(true);
 
         // The sealed strip, only when a path actually asks for it — it costs a
         // request and a decrypt, and most documents won't name it.
@@ -412,11 +454,36 @@ export function ApertureInner({
     ? record.rows.length + record.unreadable + record.older
     : 0;
 
+  // The one trial grave enough to be read at the TOP of the page rather than in
+  // the trials band below it — see `imminentMajorTrial`.
+  const majorTrial = imminentMajorTrial(open, today);
+  const majorWhen = majorTrial && trialCountdown(majorTrial.date, today);
+
   return (
     <>
-      {/* The status bands, in the register the sheet reads them in — the summary
-          page keeps the wall and the conditions, and everything below them was
-          only ever readable at length. */}
+      {/* The two alarms, above every band. Nothing firing → nothing at all, which
+          is the whole register: a quiet week opens straight into the wall. They
+          live here rather than on the home page because this is where the reading
+          is now, and an alarm belongs beside what it is an alarm about. */}
+      {(majorTrial || pending) && (
+        <div className="px-4 pb-3 pt-1">
+          {majorTrial && (
+            <ExceptionLine tone="down">
+              ⚠ {majorTrial.name} · {majorTrial.tier}
+              {majorWhen && ` — ${majorWhen}`}
+            </ExceptionLine>
+          )}
+          {pending && (
+            <ExceptionLine tone="amber">
+              adjudication pending — seal the week
+            </ExceptionLine>
+          )}
+        </div>
+      )}
+
+      {/* The status bands, in the register the sheet reads them in — the wall and
+          the conditions first, then everything that was only ever readable at
+          length. */}
       {(hasWallBody || breakthrough.wall) && (
         <>
           <ZoneHeader

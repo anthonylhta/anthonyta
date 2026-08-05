@@ -14,6 +14,7 @@ import {
   ACTIVITY_SERIES,
   ESSENCE_TEXT,
   ESSENCE_VAR,
+  ageOn,
   conditionChipClass,
   conditionChipPrefix,
   conditionStatusWord,
@@ -40,7 +41,7 @@ import {
   trialsSummary,
 } from "./apertureview";
 
-// These ARE the masthead + island's component tests. Nothing renders in this suite,
+// These ARE the me-block + island's component tests. Nothing renders in this suite,
 // because nothing in the components decides anything: the six island states, the
 // colour of every chip, the wording of every date and every band's right-hand
 // summary are the functions below, so testing them here is testing the UI itself
@@ -171,7 +172,6 @@ describe("apertureview — the skin's vocabulary (ADR 0118)", () => {
     expect(tierGlyph("cosmic")).toBeNull();
     expect(tierGlyph("")).toBeNull();
   });
-
 });
 
 describe("apertureview — condition chips", () => {
@@ -776,6 +776,41 @@ describe("apertureview — sealedAgo", () => {
   });
 });
 
+describe("apertureview — ageOn", () => {
+  const BORN = "2001-08-19";
+
+  it("counts the birthday itself, and not the day before", () => {
+    // The whole reason this isn't a division: one is 24 ON the day, and 23 for
+    // every day of the year leading up to it.
+    expect(ageOn(BORN, "2026-08-18")).toBe(24);
+    expect(ageOn(BORN, "2026-08-19")).toBe(25);
+    expect(ageOn(BORN, "2026-08-20")).toBe(25);
+  });
+
+  it("holds the age across a year's turn", () => {
+    expect(ageOn(BORN, "2026-01-01")).toBe(24);
+    expect(ageOn(BORN, "2026-12-31")).toBe(25);
+    expect(ageOn(BORN, BORN)).toBe(0);
+  });
+
+  it("gets the leap-year edge right", () => {
+    // A February-29th birth day reads as not-yet-had in a common year, which is
+    // the honest answer for a calendar with no such day in it — and exactly what
+    // a milliseconds-over-365.25 age would get wrong.
+    expect(ageOn("2004-02-29", "2026-02-28")).toBe(21);
+    expect(ageOn("2004-02-29", "2026-03-01")).toBe(22);
+    expect(ageOn("2004-02-29", "2024-02-29")).toBe(20);
+  });
+
+  it("refuses anything that isn't a calendar day", () => {
+    expect(ageOn("19 August 2001", "2026-08-19")).toBeNull();
+    expect(ageOn("2001-08-19T00:00:00Z", "2026-08-19")).toBeNull();
+    expect(ageOn("2001-8-19", "2026-08-19")).toBeNull();
+    expect(ageOn("2001-02-31", "2026-08-19")).toBeNull(); // shaped like a day
+    expect(ageOn(BORN, "whenever")).toBeNull();
+  });
+});
+
 /**
  * The sheet in its three states, as the island would read them. Two whole documents
  * — a quiet week and a loud one — driven through every function the four bands call,
@@ -929,8 +964,8 @@ describe("apertureview — the sheet, a quiet week", () => {
   const { open, resolved } = splitTrials(sealed.trials);
 
   it("heads the sea band with the essence and the stage's membrane", () => {
-    // The masthead is the same band on both surfaces now — the colour the rank
-    // names, then where inside it one stands.
+    // The sea band heads the inward page — the colour the rank names, then where
+    // inside it one stands.
     expect(essenceOf(3, "upper")).toBe("Bright Silver");
     expect(essenceTextClass(essenceOf(3, "upper"))).toBe("text-bright-silver");
     expect(membraneOf("upper")).toBe("stone membrane");

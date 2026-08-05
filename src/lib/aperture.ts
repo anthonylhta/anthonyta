@@ -213,6 +213,23 @@ export interface ApertureBreakthrough {
   recentStrikes: Record<string, number>;
 }
 
+/**
+ * Standing context about the person the sheet is about — the home page's own two
+ * fields. `born` is a `YYYY-MM-DD` calendar day the browser turns into an age;
+ * `now` is one sentence saying what is being done at the moment, in the emitter's
+ * own words.
+ *
+ * BOTH LIVE SEALED, and `born` deliberately so: this repository is public and a
+ * birth date is personal data, so the day itself never leaves the envelope and the
+ * age is computed client-side from it (`apertureview.ageOn`) — the same bargain the
+ * declared weekly burn keeps, where the figure the site divides by is one the server
+ * never holds. The plaintext glance stays rank and stage alone.
+ */
+export interface ApertureProfile {
+  born?: string;
+  now?: string;
+}
+
 /** Everything behind the unlock. `streaks` is an open record keyed by streak name
  *  for the same reason as the strike counters: the names are data. */
 export interface ApertureSealed {
@@ -224,6 +241,8 @@ export interface ApertureSealed {
   breakthrough: ApertureBreakthrough;
   /** Borrowed capability — what is rented rather than held, one line each. */
   rented?: string[];
+  /** Who the sheet is about — absent on every document sealed before it existed. */
+  profile?: ApertureProfile;
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -262,6 +281,15 @@ function isPosInt(x: unknown): x is number {
 /** A string an engine can actually turn into an instant. */
 function isInstant(x: unknown): x is string {
   return typeof x === "string" && Number.isFinite(Date.parse(x));
+}
+/** A calendar DAY — `YYYY-MM-DD`, and one an engine can parse. Days and instants
+ *  are different facts here (a birth date has no time of day), so they get
+ *  different predicates rather than one loose `isInstant` covering both. */
+const DAY_ISO = /^\d{4}-\d{2}-\d{2}$/;
+function isDay(x: unknown): x is string {
+  return (
+    typeof x === "string" && DAY_ISO.test(x) && Number.isFinite(Date.parse(x))
+  );
 }
 
 /** Rebuild an array field-for-field, rejecting the WHOLE array if any row is off
@@ -392,6 +420,19 @@ function normVitalGu(x: unknown): ApertureVitalGu | null {
   };
 }
 
+function normProfile(x: unknown): ApertureProfile | null {
+  if (!isObj(x)) return null;
+  const { born, now } = x;
+  // Both fields are optional, and a PRESENT one is held to its type — a birth day
+  // that isn't a day rejects the document rather than reaching `ageOn` as junk.
+  if (born !== undefined && !isDay(born)) return null;
+  if (now !== undefined && !isStr(now)) return null;
+  return {
+    ...(born !== undefined ? { born } : {}),
+    ...(now !== undefined ? { now } : {}),
+  };
+}
+
 function normTrial(x: unknown): ApertureTrial | null {
   if (!isObj(x)) return null;
   if (!isStr(x.name)) return null;
@@ -437,6 +478,8 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (vitalGu === null) return null;
   const rented = x.rented === undefined ? undefined : normStrings(x.rented);
   if (rented === null) return null;
+  const profile = x.profile === undefined ? undefined : normProfile(x.profile);
+  if (profile === null) return null;
   return {
     streaks,
     conditions,
@@ -445,6 +488,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     trials,
     breakthrough,
     ...(rented !== undefined ? { rented } : {}),
+    ...(profile !== undefined ? { profile } : {}),
   };
 }
 

@@ -426,6 +426,56 @@ describe("aperture — the inward page's fields", () => {
   });
 });
 
+describe("aperture — the sealed profile", () => {
+  // Who the sheet is about — the home page's own two fields. The birth DAY stays
+  // sealed (this repo is public) and only the age it implies is ever rendered, so
+  // the frame has to be as strict about it as about any other figure.
+  const profiled = withSealed({
+    profile: { born: "2001-08-19", now: "charting the eastern reaches" },
+  });
+
+  it("accepts a well-formed profile", () => {
+    expect(normalizeAperture(profiled)).toEqual(profiled);
+  });
+
+  it("accepts either field on its own", () => {
+    const bornOnly = withSealed({ profile: { born: "2001-08-19" } });
+    expect(normalizeAperture(bornOnly)).toEqual(bornOnly);
+    const nowOnly = withSealed({ profile: { now: "walking the coast road" } });
+    expect(normalizeAperture(nowOnly)).toEqual(nowOnly);
+    // An empty profile is a real emission — the block simply has nothing to say.
+    expect(
+      normalizeAperture(withSealed({ profile: {} }))?.sealed.profile,
+    ).toEqual({});
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    // Every document sealed before the profile existed — absent stays absent, and
+    // nothing else about the normalize moves.
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("profile");
+  });
+
+  it("drops an unknown key inside the profile", () => {
+    const out = normalizeAperture(
+      withSealed({ profile: { born: "2001-08-19", smuggled: "x" } }),
+    );
+    expect(out?.sealed.profile).toEqual({ born: "2001-08-19" });
+  });
+
+  it("hard-rejects a present-but-malformed profile", () => {
+    const bad = (profile: unknown) =>
+      expect(normalizeAperture(withSealed({ profile }))).toBeNull();
+    bad("2001-08-19");
+    bad({ born: 2001 });
+    bad({ born: "19 August 2001" }); // a date, but not a day
+    bad({ born: "2001-08-19T00:00:00Z" }); // an instant, not a day
+    bad({ born: "2001-13-01" }); // shaped like a day, parses as nothing
+    bad({ now: 3 });
+  });
+});
+
 describe("aperture — vocabulary openness", () => {
   // Unknown vocabulary renders MUTED — it is never dropped and never rejected.
   // The day the sync script learns a new status, tier, or rung, this build has
