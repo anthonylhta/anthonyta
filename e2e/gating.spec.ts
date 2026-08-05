@@ -41,6 +41,7 @@ test.describe("guest gating", () => {
     "/api/todo", // E2EE quick-capture envelope (ADR: quick capture)
     "/reader", // the owner-only morning feeds page (ADR: rss reader)
     "/api/aperture", // E2EE private status envelope (the aperture module)
+    "/aperture", // the owner-only inward page (stones, gu, attainment)
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);
@@ -327,6 +328,9 @@ test.describe("guest gating", () => {
     "the record", // the seal-history band's divider
     "Green Copper", // an essence family name (the skin's masthead line)
     "突破", // the breakthrough line's glyph (its English word is too common to pin)
+    "primeval stones", // the inward page's first band
+    "the foundation", // the inward page's invested reading
+    "gu held", // the inward page's paths band
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
@@ -380,6 +384,7 @@ test.describe("guest gating", () => {
       expect(body, `${path} leaks /portfolio`).not.toContain("/portfolio");
       expect(body, `${path} leaks /files`).not.toContain("/files");
       expect(body, `${path} leaks /system`).not.toContain("/system");
+      expect(body, `${path} leaks /aperture`).not.toContain("/aperture");
     }
   });
 

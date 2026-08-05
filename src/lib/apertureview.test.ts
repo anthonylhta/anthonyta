@@ -32,6 +32,7 @@ import {
   imminentMajorTrial,
   isImminent,
   latestDailyDay,
+  membraneOf,
   mortalSegments,
   pathEvidence,
   sealedAgo,
@@ -739,6 +740,24 @@ describe("apertureview — stageGlyphs", () => {
     expect(stageGlyphs(-1, "initial")).toBeNull();
     expect(stageGlyphs(1.5, "initial")).toBeNull();
     expect(stageGlyphs(Number.NaN, "initial")).toBeNull();
+  });
+});
+
+describe("apertureview — membraneOf", () => {
+  it("names the membrane over each of the four stages", () => {
+    expect(membraneOf("initial")).toBe("light membrane");
+    expect(membraneOf("middle")).toBe("water membrane");
+    expect(membraneOf("upper")).toBe("stone membrane");
+    expect(membraneOf("peak")).toBe("crystal");
+  });
+
+  it("names none for a stage this build has never heard of", () => {
+    // The inward page's header omits the phrase rather than inventing a sheath —
+    // including for every immortal rank, which is stageless by canon.
+    expect(membraneOf("threshold")).toBeNull();
+    expect(membraneOf("")).toBeNull();
+    expect(membraneOf("INITIAL")).toBeNull(); // the vocabulary is lowercase
+    expect(membraneOf("toString")).toBeNull(); // never a prototype member
   });
 });
 
