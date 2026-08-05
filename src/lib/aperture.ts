@@ -158,6 +158,15 @@ export interface ApertureCondition {
   unit: string;
 }
 
+/** One gu a path holds — a named capability, its `type` open vocabulary like every
+ *  other enum-shaped field here. `bears` marks the one carrying the path's
+ *  attainment; the rest are held, not load-bearing. */
+export interface ApertureGu {
+  name: string;
+  type?: string;
+  bears?: boolean;
+}
+
 /** One path. Sub-paths reuse the same shape — `role` only appears on top-level
  *  paths in practice, but the type deliberately doesn't forbid it on a sub. */
 export interface AperturePath {
@@ -167,14 +176,22 @@ export interface AperturePath {
   verified?: boolean;
   note?: string;
   activity?: string;
+  /** The gu the path holds. Absent on a path the check-in hasn't inventoried. */
+  gu?: ApertureGu[];
+  /** What the next rung asks for, in the emitter's own words. */
+  next?: string;
   sub?: AperturePath[];
 }
 
-/** The vital gu, if one is held: a named companion with its own rank ceiling. */
+/** The vital gu, if one is held: a named companion with its own rank ceiling.
+ *  An UNNAMED vital gu (`name: ""`, `rank: 0`) is a real state, not a broken one —
+ *  the aperture is open and nothing has been named into it yet. */
 export interface ApertureVitalGu {
   name: string;
   rank: number;
   max: number;
+  /** What is being weighed for the slot, while it is still unnamed. */
+  candidates?: string[];
 }
 
 /** One trial. `date` is null while the outcome has no day attached to it yet. */
@@ -205,6 +222,8 @@ export interface ApertureSealed {
   vitalGu?: ApertureVitalGu;
   trials: ApertureTrial[];
   breakthrough: ApertureBreakthrough;
+  /** Borrowed capability — what is rented rather than held, one line each. */
+  rented?: string[];
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -312,15 +331,37 @@ function normCondition(x: unknown): ApertureCondition | null {
   };
 }
 
+function normGu(x: unknown): ApertureGu | null {
+  if (!isObj(x)) return null;
+  if (!isStr(x.name)) return null;
+  const { type, bears } = x;
+  if (type !== undefined && !isStr(type)) return null;
+  if (bears !== undefined && typeof bears !== "boolean") return null;
+  return {
+    name: x.name,
+    ...(type !== undefined ? { type } : {}),
+    ...(bears !== undefined ? { bears } : {}),
+  };
+}
+
+/** A list of plain strings, whole-array reject on one bad row — the `routes`
+ *  discipline, reused by the gu candidates and the rented lines. */
+function normStrings(x: unknown): string[] | null {
+  return normArray(x, (v) => (isStr(v) ? v : null));
+}
+
 function normPath(x: unknown): AperturePath | null {
   if (!isObj(x)) return null;
   if (!isStr(x.name)) return null;
-  const { role, attainment, verified, note, activity, sub } = x;
+  const { role, attainment, verified, note, activity, gu, next, sub } = x;
   if (role !== undefined && !isStr(role)) return null;
   if (attainment !== undefined && !isStr(attainment)) return null;
   if (verified !== undefined && typeof verified !== "boolean") return null;
   if (note !== undefined && !isStr(note)) return null;
   if (activity !== undefined && !isStr(activity)) return null;
+  if (next !== undefined && !isStr(next)) return null;
+  const gus = gu === undefined ? undefined : normArray(gu, normGu);
+  if (gus === null) return null;
   const subs = sub === undefined ? undefined : normArray(sub, normPath);
   if (subs === null) return null;
   return {
@@ -330,6 +371,8 @@ function normPath(x: unknown): AperturePath | null {
     ...(verified !== undefined ? { verified } : {}),
     ...(note !== undefined ? { note } : {}),
     ...(activity !== undefined ? { activity } : {}),
+    ...(gus !== undefined ? { gu: gus } : {}),
+    ...(next !== undefined ? { next } : {}),
     ...(subs !== undefined ? { sub: subs } : {}),
   };
 }
@@ -338,7 +381,15 @@ function normVitalGu(x: unknown): ApertureVitalGu | null {
   if (!isObj(x)) return null;
   if (!isStr(x.name)) return null;
   if (!isFiniteNum(x.rank) || !isFiniteNum(x.max)) return null;
-  return { name: x.name, rank: x.rank, max: x.max };
+  const candidates =
+    x.candidates === undefined ? undefined : normStrings(x.candidates);
+  if (candidates === null) return null;
+  return {
+    name: x.name,
+    rank: x.rank,
+    max: x.max,
+    ...(candidates !== undefined ? { candidates } : {}),
+  };
 }
 
 function normTrial(x: unknown): ApertureTrial | null {
@@ -363,7 +414,7 @@ function normTrial(x: unknown): ApertureTrial | null {
 function normBreakthrough(x: unknown): ApertureBreakthrough | null {
   if (!isObj(x)) return null;
   if (!isStr(x.wall) || !isStr(x.event)) return null;
-  const routes = normArray(x.routes, (v) => (isStr(v) ? v : null));
+  const routes = normStrings(x.routes);
   if (routes === null) return null;
   const recentStrikes = normRecord(x.recentStrikes, (v) =>
     isFiniteNum(v) ? v : null,
@@ -384,6 +435,8 @@ function normSealed(x: unknown): ApertureSealed | null {
   // Absent optional → stays absent; PRESENT-but-malformed → hard reject.
   const vitalGu = x.vitalGu === undefined ? undefined : normVitalGu(x.vitalGu);
   if (vitalGu === null) return null;
+  const rented = x.rented === undefined ? undefined : normStrings(x.rented);
+  if (rented === null) return null;
   return {
     streaks,
     conditions,
@@ -391,6 +444,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(vitalGu !== undefined ? { vitalGu } : {}),
     trials,
     breakthrough,
+    ...(rented !== undefined ? { rented } : {}),
   };
 }
 

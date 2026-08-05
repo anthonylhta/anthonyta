@@ -4,6 +4,7 @@ import {
   type ApertureCondition,
   type ApertureDoc,
   type ApertureGlance,
+  type ApertureStage,
   type ApertureTrial,
 } from "./aperture";
 
@@ -619,6 +620,26 @@ export function stageGlyphs(rank: number, stage: string): string | null {
   if (numeral === undefined) return null;
   const glyph = isApertureStage(stage) ? STAGE_GLYPHS[stage] : undefined;
   return glyph === undefined ? `${numeral}转` : `${numeral}转·${glyph}`;
+}
+
+/** What each stage's aperture is sheathed in — the canon's own reading of how far
+ *  into a rank one stands. Typed as a TOTAL record over the stage vocabulary, so a
+ *  stage without a membrane is a tsc error rather than an `undefined` in the line. */
+const STAGE_MEMBRANE: Record<ApertureStage, string> = {
+  initial: "light membrane",
+  middle: "water membrane",
+  upper: "stone membrane",
+  peak: "crystal",
+};
+
+/**
+ * The membrane over a stage, or null for a stage this build has never heard of —
+ * including every immortal rank, which is stageless by canon. The inward page's
+ * header omits the phrase entirely rather than naming a sheath nobody assigned,
+ * the same bargain `stageGlyphs` keeps one section up.
+ */
+export function membraneOf(stage: string): string | null {
+  return isApertureStage(stage) ? STAGE_MEMBRANE[stage] : null;
 }
 
 /** 壹 through 玖 — the financial forms, the display register for the masthead's

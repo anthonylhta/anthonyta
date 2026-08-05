@@ -285,6 +285,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET"],
   },
   {
+    routeKey: "/aperture",
+    probe: "/aperture",
+    shape: "owner-page",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/files",
     probe: "/files",
     shape: "owner-page",

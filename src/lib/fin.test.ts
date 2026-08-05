@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  absorbedThisWeek,
   buildFullSeries,
   buildStepSeries,
   cashAt,
@@ -13,10 +14,12 @@ import {
   monthToDateBaseline,
   normalizeFinConfig,
   pickBaseline,
+  recoveredThisWeek,
   SNAP_INDEX_MAX_DAYS,
   sydneyDaysAgo,
   sydneyToday,
   upsertEntry,
+  upsertIncome,
   upsertInvested,
   upsertIndexDay,
   type FinConfig,
@@ -302,6 +305,134 @@ describe("upsertEntry / upsertInvested", () => {
     upsertEntry(base, { date: "2026-06-20", cash: 2, hisa: 2, rate: null });
     upsertInvested(base, { date: "2026-06-20", investedCents: 5 });
     expect(JSON.stringify(base)).toBe(before);
+  });
+});
+
+describe("upsertIncome", () => {
+  const base = cfg2({
+    income: [
+      { date: "2026-08-05", amountCents: 119300 },
+      { date: "2026-08-19", amountCents: 121000 },
+    ],
+  });
+
+  it("seeds the series on an envelope that has never logged income", () => {
+    const out = upsertIncome(cfg2(), { date: "2026-08-05", amountCents: 1 });
+    expect(out.income).toEqual([{ date: "2026-08-05", amountCents: 1 }]);
+    expect(isFinConfig(out)).toBe(true);
+  });
+
+  it("inserts a middle entry keeping ascending order", () => {
+    const out = upsertIncome(base, { date: "2026-08-12", amountCents: 120000 });
+    expect(out.income?.map((e) => e.date)).toEqual([
+      "2026-08-05",
+      "2026-08-12",
+      "2026-08-19",
+    ]);
+    expect(isFinConfig(out)).toBe(true);
+  });
+
+  it("replaces a same-day entry without growing", () => {
+    const out = upsertIncome(base, { date: "2026-08-19", amountCents: 99 });
+    expect(out.income).toHaveLength(2);
+    expect(out.income?.[1].amountCents).toBe(99);
+  });
+
+  it("leaves the input and the other series untouched", () => {
+    const before = JSON.stringify(base);
+    const out = upsertIncome(base, { date: "2026-08-12", amountCents: 5 });
+    expect(JSON.stringify(base)).toBe(before);
+    expect(out.entries).toEqual(base.entries);
+    expect(out.invested).toEqual(base.invested);
+  });
+});
+
+describe("recoveredThisWeek / absorbedThisWeek", () => {
+  const cfg = cfg2({
+    income: [
+      { date: "2026-07-29", amountCents: 100000 },
+      { date: "2026-08-05", amountCents: 119300 },
+    ],
+    invested: [
+      { date: "2026-07-29", investedCents: 400000 },
+      { date: "2026-08-05", investedCents: 460000 },
+    ],
+  });
+
+  it("reads the newest pay-in inside the trailing week", () => {
+    expect(recoveredThisWeek(cfg, "2026-08-05")).toBe(119300);
+    // Seven days back, today included — the 7/29 row is the last day that counts.
+    expect(recoveredThisWeek(cfg, "2026-08-04")).toBe(100000);
+    expect(recoveredThisWeek(cfg, "2026-08-05")).not.toBe(100000);
+  });
+
+  it("returns null rather than zero when the week logged nothing", () => {
+    // "nothing logged" and "nothing earned" are different facts; only one of
+    // them is knowable here, so the reading declines to guess.
+    expect(recoveredThisWeek(cfg, "2026-08-20")).toBeNull();
+    expect(recoveredThisWeek(cfg2(), "2026-08-05")).toBeNull();
+  });
+
+  it("ignores a pay-in dated ahead of today", () => {
+    expect(recoveredThisWeek(cfg, "2026-08-01")).toBe(100000);
+  });
+
+  it("reads the newest invested step inside the week as a delta", () => {
+    expect(absorbedThisWeek(cfg, "2026-08-05")).toBe(60000);
+    expect(absorbedThisWeek(cfg, "2026-08-04")).toBe(400000); // first step ever
+  });
+
+  it("returns null for a week with no import at all", () => {
+    expect(absorbedThisWeek(cfg, "2026-08-20")).toBeNull();
+    expect(absorbedThisWeek(cfg2(), "2026-08-05")).toBeNull();
+  });
+});
+
+describe("income + burn (envelope fields)", () => {
+  const base = cfg2();
+
+  it("accepts absent, well-formed and rejects malformed", () => {
+    expect(isFinConfig(base)).toBe(true);
+    expect(
+      isFinConfig({
+        ...base,
+        income: [{ date: "2026-08-05", amountCents: 1 }],
+      }),
+    ).toBe(true);
+    expect(isFinConfig({ ...base, burnWeeklyCents: 90000 })).toBe(true);
+    // dollars-as-string, a descending series, a non-integer and a zero burn are
+    // each a figure the page would do arithmetic on.
+    expect(
+      isFinConfig({
+        ...base,
+        income: [{ date: "2026-08-05", amountCents: "1" }],
+      }),
+    ).toBe(false);
+    expect(
+      isFinConfig({
+        ...base,
+        income: [
+          { date: "2026-08-19", amountCents: 2 },
+          { date: "2026-08-05", amountCents: 1 },
+        ],
+      }),
+    ).toBe(false);
+    expect(isFinConfig({ ...base, burnWeeklyCents: 1.5 })).toBe(false);
+    expect(isFinConfig({ ...base, burnWeeklyCents: 0 })).toBe(false);
+  });
+
+  it("passes both through normalize verbatim", () => {
+    const full = {
+      ...base,
+      income: [{ date: "2026-08-05", amountCents: 119300 }],
+      burnWeeklyCents: 90000,
+    };
+    expect(normalizeFinConfig(full)).toEqual(full);
+  });
+
+  it("normalizes a v1 envelope with neither field", () => {
+    const v1 = { v: 1, entries: [] };
+    expect(normalizeFinConfig(v1)).toEqual(cfg2());
   });
 });
 

@@ -18,8 +18,10 @@ import {
   normalizeFinConfig,
   sydneyToday,
   upsertEntry,
+  upsertIncome,
   type FinConfig,
   type FinEntry,
+  type IncomeEntry,
   type NetWorthPoint,
 } from "@/lib/fin";
 import { arrow, aud, tone } from "@/lib/money";
@@ -49,6 +51,20 @@ function importStamp(now: Date = new Date()): string {
   });
 }
 
+// A logged pay-in is a bare Sydney calendar day, so it formats over UTC — the day
+// written is the day shown, whatever timezone the browser sits in (`hardenLabel`).
+const INCOME_DAY = new Intl.DateTimeFormat("en-AU", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+/** A pay-in's date in the panel's register: "wed 6 aug". */
+function incomeDay(date: string): string {
+  return INCOME_DAY.format(new Date(`${date}T00:00:00Z`)).toLowerCase();
+}
+
 /**
  * The E2EE finance panel: net worth + holdings + cash, all sealed inside ONE fin
  * envelope behind the same master key the files vault owns (ADR 0061). The server
@@ -67,6 +83,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
   const [seqAlarm, setSeqAlarm] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editingIncome, setEditingIncome] = useState(false);
 
   // Render-phase adjustment (not an effect): reset the per-unlock state on the
   // lock/unlock edge, per the lint-blessed reset pattern.
@@ -76,6 +93,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
     setDataErr(null);
     setCfg(null);
     setEditing(false);
+    setEditingIncome(false);
   }
 
   // Load + decrypt once per unlock. A cancelled flag drops a late resolve after
@@ -205,6 +223,27 @@ export function FinPanel({ offline }: { offline: boolean }) {
     return ok;
   }
 
+  // Upsert today's pay-in, and the weekly burn denominator alongside it.
+  async function saveIncome(fields: {
+    amountCents: number;
+    burnWeeklyCents: number | null;
+  }): Promise<boolean> {
+    const entry: IncomeEntry = {
+      date: sydneyToday(),
+      amountCents: fields.amountCents,
+    };
+    const ok = await saveConfig((base) => {
+      const next = upsertIncome(base, entry);
+      // An empty burn field LEAVES the denominator where it was — clearing it
+      // would silently blank the runway rather than say anything.
+      return fields.burnWeeklyCents === null
+        ? next
+        : { ...next, burnWeeklyCents: fields.burnWeeklyCents };
+    });
+    if (ok) setEditingIncome(false);
+    return ok;
+  }
+
   // Parse a dropped CSV in-browser and seal the result. Parsing happens ONCE, up
   // front — a malformed export errors here and nothing is written.
   async function importCsv(text: string): Promise<"ok" | "bad-csv" | "failed"> {
@@ -278,6 +317,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
   const cash = latest?.cash ?? 0;
   const hisa = latest?.hisa ?? 0;
   const rate = latest?.rate ?? null;
+  const latestIncome = cfg.income?.at(-1) ?? null;
   // The WHOLE history, not a window: a 30-day slice of a savings staircase is
   // mostly flat between paydays and reads as stagnation. All-time is the story.
   const series = buildFullSeries(cfg, today);
@@ -335,6 +375,54 @@ export function FinPanel({ offline }: { offline: boolean }) {
                 HISA{rate != null ? ` · ${rate}% p.a.` : ""}
               </span>
               <span className="tabular-nums text-fg/90">{aud(hisa)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* What comes IN, and what goes out per week — the two figures the inward
+          page divides by. Both live in this envelope rather than in code: a burn
+          rate is personal data and the repo is public. */}
+      <div className="border-t border-hairline px-4 py-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-muted">
+            income
+          </p>
+          {!editingIncome && (
+            <button
+              type="button"
+              onClick={() => setEditingIncome(true)}
+              className="text-xs text-muted transition-colors hover:text-amber"
+            >
+              edit
+            </button>
+          )}
+        </div>
+        {editingIncome ? (
+          <IncomeEditor
+            burnWeeklyCents={cfg.burnWeeklyCents ?? null}
+            onSave={saveIncome}
+            onCancel={() => setEditingIncome(false)}
+          />
+        ) : (
+          <div className="space-y-1.5 text-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted">last pay</span>
+              <span className="tabular-nums text-fg/90">
+                {latestIncome
+                  ? `${aud(latestIncome.amountCents / 100)} · ${incomeDay(
+                      latestIncome.date,
+                    )}`
+                  : "no log yet"}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted">burn</span>
+              <span className="tabular-nums text-fg/90">
+                {cfg.burnWeeklyCents != null
+                  ? `${aud(cfg.burnWeeklyCents / 100)} /wk`
+                  : "—"}
+              </span>
             </div>
           </div>
         )}
@@ -523,6 +611,100 @@ function UnlockBox({ vault }: { vault: Vault }) {
         </button>
       </div>
       {vault.error && <p className="mt-2 text-down">{vault.error}</p>}
+    </div>
+  );
+}
+
+/**
+ * This week's pay, plus the weekly burn it is read against. The pay field starts
+ * EMPTY every time — a new week's figure is a new number, and prefilling the last
+ * one invites saving it twice — while burn is prefilled, because it is a standing
+ * denominator that changes rarely. Leaving burn blank keeps whatever is sealed.
+ */
+function IncomeEditor({
+  burnWeeklyCents,
+  onSave,
+  onCancel,
+}: {
+  burnWeeklyCents: number | null;
+  onSave: (f: {
+    amountCents: number;
+    burnWeeklyCents: number | null;
+  }) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [payInput, setPayInput] = useState("");
+  const [burnInput, setBurnInput] = useState(
+    burnWeeklyCents != null ? String(burnWeeklyCents / 100) : "",
+  );
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const payNum = Number(payInput);
+  const burnTrim = burnInput.trim();
+  const burnNum = burnTrim === "" ? null : Number(burnTrim);
+  const valid =
+    payInput.trim() !== "" &&
+    Number.isFinite(payNum) &&
+    payNum >= 0 &&
+    (burnNum === null || (Number.isFinite(burnNum) && burnNum > 0));
+
+  async function submit() {
+    if (!valid || saving) return;
+    setSaving(true);
+    setErr(false);
+    // dollars → cents, rounded, so float drift can't leak into either figure
+    const ok = await onSave({
+      amountCents: Math.round(payNum * 100),
+      burnWeeklyCents: burnNum === null ? null : Math.round(burnNum * 100),
+    });
+    if (ok) return;
+    setErr(true);
+    setSaving(false);
+  }
+
+  const field = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    placeholder: string,
+  ) => (
+    <label className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted">{label}</span>
+      <input
+        value={value}
+        disabled={saving}
+        inputMode="decimal"
+        onChange={(e) => set(e.target.value)}
+        placeholder={placeholder}
+        className={`${input} w-32 text-right`}
+      />
+    </label>
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      {field("this week's pay", payInput, setPayInput, "0")}
+      {field("burn /wk", burnInput, setBurnInput, "—")}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={saving || !valid}
+          className={btn}
+        >
+          {saving ? "sealing…" : "save"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className={btn}
+        >
+          cancel
+        </button>
+      </div>
+      {err && <p className="text-xs text-down">save failed — try again</p>}
     </div>
   );
 }

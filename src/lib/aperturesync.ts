@@ -348,6 +348,15 @@ function walkCondition(x: unknown, at: string): Fail {
   );
 }
 
+function walkGu(x: unknown, at: string): Fail {
+  if (!isObj(x)) return `${at} must be an object (found ${show(x)})`;
+  return first(
+    needStr(x.name, `${at}.name`),
+    ifPresent(x.type, `${at}.type`, needStr),
+    ifPresent(x.bears, `${at}.bears`, needBool),
+  );
+}
+
 function walkPath(x: unknown, at: string): Fail {
   if (!isObj(x)) return `${at} must be an object (found ${show(x)})`;
   return first(
@@ -357,6 +366,8 @@ function walkPath(x: unknown, at: string): Fail {
     ifPresent(x.verified, `${at}.verified`, needBool),
     ifPresent(x.note, `${at}.note`, needStr),
     ifPresent(x.activity, `${at}.activity`, needStr),
+    ifPresent(x.next, `${at}.next`, needStr),
+    x.gu === undefined ? null : eachRow(x.gu, `${at}.gu`, walkGu),
     x.sub === undefined ? null : eachRow(x.sub, `${at}.sub`, walkPath),
   );
 }
@@ -413,10 +424,14 @@ function walkSealed(x: unknown): Fail {
             needStr(v.name, `${at}.name`),
             needFiniteNum(v.rank, `${at}.rank`),
             needFiniteNum(v.max, `${at}.max`),
+            v.candidates === undefined
+              ? null
+              : eachRow(v.candidates, `${at}.candidates`, needStr),
           ),
     ),
     eachRow(x.trials, "sealed.trials", walkTrial),
     walkBreakthrough(x.breakthrough, "sealed.breakthrough"),
+    x.rented === undefined ? null : eachRow(x.rented, "sealed.rented", needStr),
   );
 }
 

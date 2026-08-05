@@ -329,6 +329,103 @@ describe("aperture — frame rejections", () => {
   });
 });
 
+describe("aperture — the inward page's fields", () => {
+  // The four optional additions the /aperture page reads: a path's gu list and
+  // its next-rung line, the vital gu's candidates, and the rented lines. All four
+  // are OPTIONAL, so the fixture above — which carries none of them — is also the
+  // regression fixture for every document sealed before they existed.
+  const enriched = withSealed({
+    paths: [
+      {
+        name: "Smithing",
+        role: "main",
+        gu: [
+          { name: "Bellows", type: "tool", bears: true },
+          { name: "Quench trough" },
+        ],
+        next: "a commissioned blade a guild would sign for",
+        sub: [
+          {
+            name: "Etching",
+            gu: [{ name: "Acid stylus", type: "tool" }],
+            next: "one plate legible at arm's length",
+          },
+        ],
+      },
+    ],
+    vitalGu: {
+      name: "",
+      rank: 0,
+      max: 5,
+      candidates: ["Lodestone", "Ember flask"],
+    },
+    rented: ["a borrowed forge — paid by the day"],
+  });
+
+  it("accepts all four, sub-paths included", () => {
+    expect(normalizeAperture(enriched)).toEqual(enriched);
+  });
+
+  it("normalizes a document carrying none of them exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("rented");
+    expect(out?.sealed.paths[0]).not.toHaveProperty("gu");
+    expect(out?.sealed.paths[0]).not.toHaveProperty("next");
+    expect(out?.sealed.vitalGu).not.toHaveProperty("candidates");
+  });
+
+  it("carries the UNNAMED vital gu — an open slot is a state, not a fault", () => {
+    // `name: ""` and `rank: 0` are what "the aperture is open and nothing has
+    // been named into it" looks like; rejecting it would blank the whole panel.
+    const out = normalizeAperture(
+      withSealed({ vitalGu: { name: "", rank: 0, max: 5 } }),
+    );
+    expect(out?.sealed.vitalGu).toEqual({ name: "", rank: 0, max: 5 });
+  });
+
+  it("drops an unknown key nested inside a gu row", () => {
+    const out = normalizeAperture(
+      withSealed({
+        paths: [{ name: "Smithing", gu: [{ name: "Bellows", smuggled: 1 }] }],
+      }),
+    );
+    expect(out?.sealed.paths).toEqual([
+      { name: "Smithing", gu: [{ name: "Bellows" }] },
+    ]);
+  });
+
+  it("hard-rejects each one present-but-malformed", () => {
+    const path = (patch: Record<string, unknown>) =>
+      withSealed({ paths: [{ name: "Smithing", ...patch }] });
+    expect(normalizeAperture(path({ gu: {} }))).toBeNull();
+    expect(normalizeAperture(path({ gu: [{ name: 3 }] }))).toBeNull();
+    expect(
+      normalizeAperture(path({ gu: [{ name: "Bellows", bears: "yes" }] })),
+    ).toBeNull();
+    expect(
+      normalizeAperture(path({ gu: [{ name: "Bellows", type: 1 }] })),
+    ).toBeNull();
+    expect(normalizeAperture(path({ next: 3 }))).toBeNull();
+    // …and one bad row rejects the WHOLE list, never half of it.
+    expect(
+      normalizeAperture(path({ gu: [{ name: "Bellows" }, { type: "tool" }] })),
+    ).toBeNull();
+    expect(
+      normalizeAperture(
+        withSealed({ vitalGu: { name: "", rank: 0, max: 5, candidates: "x" } }),
+      ),
+    ).toBeNull();
+    expect(
+      normalizeAperture(
+        withSealed({ vitalGu: { name: "", rank: 0, max: 5, candidates: [3] } }),
+      ),
+    ).toBeNull();
+    expect(normalizeAperture(withSealed({ rented: "a forge" }))).toBeNull();
+    expect(normalizeAperture(withSealed({ rented: [3] }))).toBeNull();
+  });
+});
+
 describe("aperture — vocabulary openness", () => {
   // Unknown vocabulary renders MUTED — it is never dropped and never rejected.
   // The day the sync script learns a new status, tier, or rung, this build has
