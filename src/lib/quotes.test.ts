@@ -78,9 +78,11 @@ describe("quotes — quoteForDay", () => {
   });
 
   it("answers null only when a tier is empty", () => {
-    // No rank-8 lines are stocked, and scripture is stocked for every rank — so an
-    // empty tier can only happen if the scripture itself were emptied.
-    expect(QUOTES.some((q) => q.rank === 8)).toBe(false);
-    expect(quoteForDay(8, "2026-08-06")).not.toBeNull();
+    // No rank-9 lines are stocked (the ten-in-three-million-years tier), and
+    // scripture is stocked for every rank — so an empty tier can only happen if
+    // the scripture itself were emptied. The wiki-excerpt curation pass stocked
+    // every mortal tier and 6–8, so rank 9 is the one honest probe left.
+    expect(QUOTES.some((q) => q.rank === 9)).toBe(false);
+    expect(quoteForDay(9, "2026-08-06")).not.toBeNull();
   });
 });
