@@ -422,6 +422,58 @@ describe("aperturesync — rejection diagnosis", () => {
     );
   });
 
+  it("names a bad gu row by its path and index", () => {
+    const bad = {
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        paths: [
+          {
+            ...raw.sealed.paths[0],
+            gu: [{ name: "Bellows" }, { name: "Quench trough", bears: "yes" }],
+          },
+          raw.sealed.paths[1],
+        ],
+      },
+    };
+    expect(explainRejected(bad)).toBe(
+      'sealed.paths[0].gu[1].bears must be true or false (found "yes")',
+    );
+  });
+
+  it("names a next-rung line sent as a number", () => {
+    const bad = {
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        paths: [{ ...raw.sealed.paths[0], next: 3 }, raw.sealed.paths[1]],
+      },
+    };
+    expect(explainRejected(bad)).toBe(
+      "sealed.paths[0].next must be a string (found 3)",
+    );
+  });
+
+  it("names a bad vital-gu candidate by its index", () => {
+    const bad = {
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        vitalGu: { name: "", rank: 0, max: 5, candidates: ["Lodestone", 3] },
+      },
+    };
+    expect(explainRejected(bad)).toBe(
+      "sealed.vitalGu.candidates[1] must be a string (found 3)",
+    );
+  });
+
+  it("names a bad rented line by its index", () => {
+    const bad = { ...raw, sealed: { ...raw.sealed, rented: [3] } };
+    expect(explainRejected(bad)).toBe(
+      "sealed.rented[0] must be a string (found 3)",
+    );
+  });
+
   it("names a present-but-malformed vital gu", () => {
     const bad = {
       ...raw,

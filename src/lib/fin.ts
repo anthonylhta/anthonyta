@@ -37,6 +37,11 @@ export interface InvestedEntry {
   date: string;
   investedCents: number;
 }
+/** One dated pay-in, logged from the panel on payday. */
+export interface IncomeEntry {
+  date: string;
+  amountCents: number;
+}
 /** The fin config — both series ascending by date, one row per day. */
 export interface FinConfig {
   v: 2;
@@ -46,6 +51,13 @@ export interface FinConfig {
   /** Sealed write counter (58b rollback detection) — absent on pre-seq blobs,
    *  bumped by every save; the panel compares it to a device high-water mark. */
   seq?: number;
+  /** Dated pay-ins — a third step function beside cash and invested. Optional:
+   *  every envelope written before the income log existed simply has none. */
+  income?: IncomeEntry[];
+  /** The weekly spending denominator, in cents. It lives IN THE ENVELOPE rather
+   *  than as a constant in this file because the repo is public and a burn rate
+   *  is personal data: the figure is the owner's, so it is sealed like the rest. */
+  burnWeeklyCents?: number;
 }
 /** One day of the (unsealed) reading index — the week-over-week baseline source. */
 export interface SnapIndexDay {
@@ -99,6 +111,10 @@ function isNonNegNum(x: unknown): x is number {
 function isNonNegInt(x: unknown): x is number {
   return typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
 }
+/** A safe integer ≥ 1 — a burn rate of zero is not a denominator. */
+function isPosInt(x: unknown): x is number {
+  return typeof x === "number" && Number.isSafeInteger(x) && x > 0;
+}
 function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null;
 }
@@ -125,6 +141,20 @@ function isInvested(x: unknown): x is InvestedEntry[] {
   for (const e of x) {
     if (!isObj(e)) return false;
     if (!isYmd(e.date) || !isNonNegInt(e.investedCents)) return false;
+    if (!(e.date > prev)) return false;
+    prev = e.date;
+  }
+  return true;
+}
+
+/** An income series: dated rows, safe-integer cents, strictly ascending — the
+ *  invested discipline, applied to what comes in. */
+function isIncome(x: unknown): x is IncomeEntry[] {
+  if (!Array.isArray(x) || x.length > 4000) return false;
+  let prev = "";
+  for (const e of x) {
+    if (!isObj(e)) return false;
+    if (!isYmd(e.date) || !isNonNegInt(e.amountCents)) return false;
     if (!(e.date > prev)) return false;
     prev = e.date;
   }
@@ -177,6 +207,10 @@ export function isFinConfig(x: unknown): x is FinConfig {
     isValidSeq(x.seq) &&
     isEntries(x.entries) &&
     isInvested(x.invested) &&
+    // Absent is fine — both fields postdate the envelope; present-but-malformed
+    // rejects, exactly as `seq` does.
+    (x.income === undefined || isIncome(x.income)) &&
+    (x.burnWeeklyCents === undefined || isPosInt(x.burnWeeklyCents)) &&
     (x.portfolio === null || isPortfolioSnapshot(x.portfolio))
   );
 }
@@ -235,6 +269,67 @@ export function upsertInvested(
   const kept = cfg.invested.filter((e) => e.date !== entry.date);
   const at = insertAt(kept, entry.date);
   return { ...cfg, invested: [...kept.slice(0, at), entry, ...kept.slice(at)] };
+}
+
+/** A new config with `entry` merged into the income series (the same
+ *  replace-or-insert discipline as the two series above; an envelope with no
+ *  income log yet gains one). Never mutates the input. */
+export function upsertIncome(cfg: FinConfig, entry: IncomeEntry): FinConfig {
+  const kept = (cfg.income ?? []).filter((e) => e.date !== entry.date);
+  const at = insertAt(kept, entry.date);
+  return { ...cfg, income: [...kept.slice(0, at), entry, ...kept.slice(at)] };
+}
+
+/** How far back "this week" reaches, `todayISO` included. */
+const WEEK_DAYS = 7;
+
+/** The trailing week's first day — the cutoff both weekly readings share. */
+function weekStart(todayISO: string): string {
+  return addDays(todayISO, -(WEEK_DAYS - 1));
+}
+
+/**
+ * What came IN over the trailing week: the newest income entry dated within it,
+ * in cents. Null when the week holds none — the panel renders a dash rather than
+ * a zero, because "nothing logged" and "nothing earned" are different facts and
+ * only one of them is knowable here. Entries dated ahead of `todayISO` are
+ * ignored: a future row is not this week's pay.
+ */
+export function recoveredThisWeek(
+  cfg: FinConfig,
+  todayISO: string,
+): number | null {
+  const cutoff = weekStart(todayISO);
+  let found: IncomeEntry | null = null;
+  for (const e of cfg.income ?? []) {
+    if (e.date < cutoff || e.date > todayISO) continue;
+    if (!found || e.date > found.date) found = e;
+  }
+  return found === null ? null : found.amountCents;
+}
+
+/**
+ * What was PUT AWAY over the trailing week: the newest invested step inside it,
+ * less the step before it (less zero when it is the first step ever — the whole
+ * figure was absorbed). Null when no import landed this week, which is the honest
+ * answer during a week with no buy rather than a manufactured 0.
+ *
+ * The figure is a step DELTA, not a market movement: both ends come from the same
+ * step function, so a week with no import reads as no step, never as a loss.
+ */
+export function absorbedThisWeek(
+  cfg: FinConfig,
+  todayISO: string,
+): number | null {
+  const cutoff = weekStart(todayISO);
+  let at = -1;
+  for (let i = 0; i < cfg.invested.length; i++) {
+    const e = cfg.invested[i];
+    if (e.date >= cutoff && e.date <= todayISO) at = i; // ascending — last wins
+  }
+  if (at < 0) return null;
+  const prev = at > 0 ? cfg.invested[at - 1].investedCents : 0;
+  return cfg.invested[at].investedCents - prev;
 }
 
 /**
