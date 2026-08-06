@@ -142,13 +142,17 @@ async function fetchRaw(p: string): Promise<Uint8Array> {
  */
 async function adjudicationPending(
   sealedAt: string,
+  today: string,
   openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
 ): Promise<boolean> {
   try {
     const { bytes } = await openItem(await fetchRaw(VAULT_INDEX_PATH));
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (!isVaultIndex(parsed)) return false;
-    const latest = latestDailyDay(parsed.notes.map((n) => n.title));
+    const latest = latestDailyDay(
+      parsed.notes.map((n) => n.title),
+      today,
+    );
     return isAdjudicationPending(sealedAt, latest);
   } catch {
     return false;
@@ -340,7 +344,11 @@ export function ApertureInner({
         // The adjudication rider — one line at the head of the reading, so it goes
         // early; like every rider here it can only ADD, never hold the page back
         // and never fail it.
-        const behind = await adjudicationPending(next.sealedAt, openItem);
+        const behind = await adjudicationPending(
+          next.sealedAt,
+          today,
+          openItem,
+        );
         if (behind && !cancelled) setPending(true);
 
         // The sealed strip, only when a path actually asks for it — it costs a
