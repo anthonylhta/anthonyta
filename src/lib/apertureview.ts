@@ -681,16 +681,23 @@ export function mortalSegments(s: MortalSignals): MortalSegment[] {
 const DAILY_TITLE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * The newest daily-note day among a set of vault note titles, or null when none of
- * them is a day. Lexical comparison is the whole trick — `YYYY-MM-DD` sorts as it
- * counts — and titles that aren't days (every other note in the vault) are simply
- * not days, not errors. Feeds `isAdjudicationPending`: this is the raw journal edge
- * the seal is measured against.
+ * The newest daily-note day among a set of vault note titles that has actually
+ * HAPPENED, or null when none of them is a day. `today` (the Sydney calendar day)
+ * caps the scan: day-planner notes are pre-created for rostered shifts, and a
+ * shift next Saturday is a plan, not journal activity the seal could be behind.
+ * Lexical comparison is the whole trick — `YYYY-MM-DD` sorts as it counts — and
+ * titles that aren't days (every other note in the vault) are simply not days,
+ * not errors. Feeds `isAdjudicationPending`: this is the raw journal edge the
+ * seal is measured against.
  */
-export function latestDailyDay(titles: string[]): string | null {
+export function latestDailyDay(titles: string[], today: string): string | null {
   let latest: string | null = null;
   for (const title of titles)
-    if (DAILY_TITLE.test(title) && (latest === null || title > latest))
+    if (
+      DAILY_TITLE.test(title) &&
+      title <= today &&
+      (latest === null || title > latest)
+    )
       latest = title;
   return latest;
 }
