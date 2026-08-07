@@ -746,19 +746,30 @@ describe("apertureview — mortalSegments", () => {
 describe("apertureview — latestDailyDay", () => {
   it("finds the newest day-titled note and ignores every other title", () => {
     expect(
-      latestDailyDay([
-        "2026-03-01",
-        "Harbour survey notes",
-        "2026-03-04",
-        "2026-02-28",
-      ]),
+      latestDailyDay(
+        ["2026-03-01", "Harbour survey notes", "2026-03-04", "2026-02-28"],
+        "2026-03-05",
+      ),
     ).toBe("2026-03-04");
   });
 
   it("returns null when no title is a day", () => {
-    expect(latestDailyDay([])).toBeNull();
+    expect(latestDailyDay([], "2026-03-05")).toBeNull();
     expect(
-      latestDailyDay(["Harbour survey notes", "2026-3-4", "20260304"]),
+      latestDailyDay(
+        ["Harbour survey notes", "2026-3-4", "20260304"],
+        "2026-03-05",
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores pre-created day-planner notes for days that haven't happened", () => {
+    expect(
+      latestDailyDay(["2026-03-01", "2026-03-10", "2026-03-19"], "2026-03-05"),
+    ).toBe("2026-03-01");
+    expect(latestDailyDay(["2026-03-05"], "2026-03-05")).toBe("2026-03-05");
+    expect(
+      latestDailyDay(["2026-03-10", "2026-03-19"], "2026-03-05"),
     ).toBeNull();
   });
 });
@@ -1042,7 +1053,7 @@ describe("apertureview — the sheet, a loud week", () => {
     expect(
       isAdjudicationPending(
         loud.sealedAt,
-        latestDailyDay(["2026-03-04", "Harbour survey notes"]),
+        latestDailyDay(["2026-03-04", "Harbour survey notes"], "2026-03-05"),
       ),
     ).toBe(true);
   });
