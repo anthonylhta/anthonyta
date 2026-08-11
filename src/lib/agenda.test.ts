@@ -541,6 +541,14 @@ describe("parseTimeInput", () => {
     expect(parseTimeInput("23:59")).toBe("23:59");
   });
 
+  it("accepts bare digits — the numeric phone keypad has no colon", () => {
+    expect(parseTimeInput("1500")).toBe("15:00");
+    expect(parseTimeInput("900")).toBe("09:00");
+    expect(parseTimeInput("130")).toBe("01:30");
+    expect(parseTimeInput("0000")).toBe("00:00");
+    expect(parseTimeInput("2359")).toBe("23:59");
+  });
+
   it("is null on an empty field — the caller reads that as no time", () => {
     expect(parseTimeInput("")).toBeNull();
   });
@@ -548,7 +556,9 @@ describe("parseTimeInput", () => {
   it("rejects a half-typed or malformed field", () => {
     expect(parseTimeInput("7:5")).toBeNull();
     expect(parseTimeInput("15:")).toBeNull();
-    expect(parseTimeInput("1500")).toBeNull();
+    expect(parseTimeInput("15:0")).toBeNull();
+    expect(parseTimeInput("15")).toBeNull();
+    expect(parseTimeInput("15000")).toBeNull();
     expect(parseTimeInput("15.00")).toBeNull();
     expect(parseTimeInput("3pm")).toBeNull();
     expect(parseTimeInput(" 15:00")).toBeNull();
@@ -557,6 +567,9 @@ describe("parseTimeInput", () => {
   it("rejects an out-of-range hour or minute", () => {
     expect(parseTimeInput("24:00")).toBeNull();
     expect(parseTimeInput("15:60")).toBeNull();
+    expect(parseTimeInput("2400")).toBeNull();
+    expect(parseTimeInput("1560")).toBeNull();
+    expect(parseTimeInput("999")).toBeNull();
     expect(parseTimeInput("99:99")).toBeNull();
   });
 });

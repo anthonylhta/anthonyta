@@ -115,7 +115,8 @@ export function AgendaComposer({
       {/* Text fields, not type="time": the native picker fights the
           terminal look, and a controlled one snaps a cleared field back
           under the cursor. The strings are the state; parseTimeInput
-          decides whether they're usable. */}
+          decides whether they're usable. The placeholders show the
+          colonless form — it's the one the numeric keypad can type. */}
       <input
         type="text"
         inputMode="numeric"
@@ -123,9 +124,9 @@ export function AgendaComposer({
         value={startText}
         disabled={busy}
         onChange={(e) => setStartText(e.target.value)}
-        placeholder="15:00"
+        placeholder="1500"
         className={`w-16 shrink-0 tabular-nums ${input}`}
-        aria-label="start time (24h hh:mm)"
+        aria-label="start time (24h)"
       />
       <input
         type="text"
@@ -134,9 +135,9 @@ export function AgendaComposer({
         value={endText}
         disabled={busy}
         onChange={(e) => setEndText(e.target.value)}
-        placeholder="23:00"
+        placeholder="2300"
         className={`w-16 shrink-0 tabular-nums ${input}`}
-        aria-label="end time (24h hh:mm)"
+        aria-label="end time (24h)"
       />
       <input
         type="text"

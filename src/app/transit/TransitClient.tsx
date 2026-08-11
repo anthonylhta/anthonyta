@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseTimeInput } from "@/lib/agenda";
 import { randomId } from "@/lib/crypto";
 import {
   EMPTY_TRANSIT_CONFIG,
@@ -10,7 +11,6 @@ import {
   endpointParam,
   fmtSydneyTime,
   groupNames,
-  isValidHm,
   modeName,
   nextDays,
   normalizeTransitConfig,
@@ -206,10 +206,11 @@ export function TransitClient({ offline }: { offline: boolean }) {
     suffix: string;
   } {
     if (timing === "now") return { when: null, suffix: "" };
-    const at = anchorFromParts(dayYmd, timeText);
+    const hm = parseTimeInput(timeText);
+    const at = hm !== null ? anchorFromParts(dayYmd, hm) : null;
     if (!at) return { when: null, suffix: "" };
     const day = dayOptions.find((d) => d.ymd === dayYmd)?.label ?? dayYmd;
-    const wall = `${day} ${timeText}`;
+    const wall = `${day} ${hm}`;
     return {
       when: { depArr: timing, at },
       suffix: timing === "arr" ? ` · arrive by ${wall}` : ` · leave ${wall}`,
@@ -419,11 +420,13 @@ export function TransitClient({ offline }: { offline: boolean }) {
                 maxLength={5}
                 value={timeText}
                 onChange={(e) => setTimeText(e.target.value)}
-                placeholder="hh:mm"
+                placeholder="hhmm"
                 className={`w-20 ${input} ${
-                  timeText && !isValidHm(timeText) ? "text-down" : ""
+                  timeText && parseTimeInput(timeText) === null
+                    ? "text-down"
+                    : ""
                 }`}
-                aria-label="time (24h hh:mm)"
+                aria-label="time (24h)"
               />
             </>
           )}
