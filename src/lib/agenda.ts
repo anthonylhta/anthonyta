@@ -342,17 +342,18 @@ export function monthGrid(ym: string): MonthCell[][] {
 
 /**
  * Interpret a time field: `null` rejects it, otherwise the zero-padded `HH:MM` to
- * store. An empty field is `null` too — the caller reads that as "no time" (an
- * all-day event) rather than as a rejection, which is why a half-typed `"7:"`
- * being null is harmless: the add button greys until the field is either blank or
- * whole.
+ * store. The colon is optional — `1530` and `900` read as `15:30` and `09:00` —
+ * because the field asks for the numeric phone keypad, which has no `:` key. An
+ * empty field is `null` too — the caller reads that as "no time" (an all-day
+ * event) rather than as a rejection, which is why a half-typed `"7:"` being null
+ * is harmless: the add button greys until the field is either blank or whole.
  *
  * A text field rather than `type="time"`, on purpose: the native picker fights the
  * terminal look (the /transit hh:mm field carries the same scar), and a controlled
  * one snaps a cleared field back under the cursor.
  */
 export function parseTimeInput(text: string): string | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(text);
+  const m = /^(\d{1,2}):?(\d{2})$/.exec(text);
   if (!m) return null;
   const hour = Number(m[1]);
   const minute = Number(m[2]);
