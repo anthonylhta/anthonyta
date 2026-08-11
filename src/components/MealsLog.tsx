@@ -696,7 +696,7 @@ function MacroFields({
         <input
           key={k}
           type="text"
-          inputMode="numeric"
+          inputMode="decimal"
           value={text[k]}
           disabled={busy}
           onChange={(e) => onChange({ ...text, [k]: e.target.value })}
