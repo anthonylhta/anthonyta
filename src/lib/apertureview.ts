@@ -284,11 +284,11 @@ export interface ActivitySeries {
  * reading, riichi and tft each already have a per-day series on the sheet, so
  * widening this is one line per series the day a path names one.
  *
- * `gym` is the first SEALED series here, and the reason `source` no longer means
- * "connector": its days live in the E2EE gym envelope, so the server that renders
- * the other three cannot produce this one. The island decrypts it and merges it in
- * (ApertureInner) — the entry is still needed here, because being in this map is
- * what makes a path's `activity: "gym"` drawable at all.
+ * `gym` and `meals` are the SEALED series here, and the reason `source` no longer
+ * means "connector": their days live in E2EE envelopes, so the server that renders
+ * the other three cannot produce them. The island decrypts each and merges it in
+ * (ApertureInner) — the entries are still needed here, because being in this map
+ * is what makes a path's `activity: "gym"` (or `"meals"`) drawable at all.
  *
  * Typed with `undefined` in the value so a lookup can't be mistaken for a hit —
  * `noUncheckedIndexedAccess` is off in this project, and the whole contract here
@@ -315,6 +315,9 @@ export const ACTIVITY_SERIES: Readonly<
     },
     steps: { source: "steps", label: "steps", mode: "count", unit: "steps" },
     gym: { source: "gym", label: "sessions", mode: "delta", unit: "sessions" },
+    // Protein, not kcal: it is the macro the meal log accents everywhere else,
+    // and the day's count reads against a target the way a step count does.
+    meals: { source: "meals", label: "protein", mode: "count", unit: "g" },
   }),
 );
 
