@@ -423,17 +423,27 @@ describe("parseQtyInput", () => {
 });
 
 describe("parseMacroInput", () => {
-  it("parses whole numbers, holding an empty field as 0", () => {
+  it("parses plain numbers, holding an empty field as 0", () => {
     expect(parseMacroInput("220")).toBe(220);
     expect(parseMacroInput("0")).toBe(0);
     expect(parseMacroInput("")).toBe(0);
     expect(parseMacroInput("007")).toBe(7);
   });
 
-  it("rejects decimals, signs and anything past the cap", () => {
-    expect(parseMacroInput("2.5")).toBeNull();
+  it("accepts decimals, rounded to one place — labels carry .5s", () => {
+    expect(parseMacroInput("2.5")).toBe(2.5);
+    expect(parseMacroInput("24.55")).toBe(24.6);
+    expect(parseMacroInput("5.925")).toBe(5.9);
+    expect(parseMacroInput("1.")).toBe(1);
+    expect(parseMacroInput(".5")).toBe(0.5);
+  });
+
+  it("rejects signs, junk and anything past the cap", () => {
+    expect(parseMacroInput(".")).toBeNull();
     expect(parseMacroInput("-5")).toBeNull();
     expect(parseMacroInput("abc")).toBeNull();
+    expect(parseMacroInput("1e3")).toBeNull();
+    expect(parseMacroInput("2.5.5")).toBeNull();
     expect(parseMacroInput("10001")).toBeNull();
   });
 });
