@@ -391,14 +391,15 @@ export function parseQtyInput(text: string): number | null {
 }
 
 /**
- * Interpret a macro/kcal field: whole non-negative numbers only (a gram of
- * precision food labels don't have), `null` on anything else or past the cap.
- * An empty or mid-retype field is 0 — a food with no carbs is left blank, not
- * typed as a zero.
+ * Interpret a macro/kcal field: non-negative numbers, decimals allowed to one
+ * place (labels carry `.5`s, and per-unit math on a fraction of a pack produces
+ * them constantly) — anything finer rounds, so the envelope never accumulates
+ * float dust. `null` on anything else or past the cap. An empty or mid-retype
+ * field is 0 — a food with no carbs is left blank, not typed as a zero.
  */
 export function parseMacroInput(text: string): number | null {
-  if (!/^\d*$/.test(text)) return null;
+  if (!/^\d*\.?\d*$/.test(text)) return null;
   const n = Number(text);
   if (!Number.isFinite(n) || n > MAX_MACRO) return null;
-  return n;
+  return Math.round(n * 10) / 10;
 }
