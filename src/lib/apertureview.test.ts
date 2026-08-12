@@ -341,6 +341,18 @@ describe("apertureview — ACTIVITY_SERIES + pathEvidence", () => {
     });
   });
 
+  it("draws the sealed meals series as the day's protein count", () => {
+    // The second sealed series, on gym's terms — protein grams per day, read
+    // like a step count rather than a week's movement.
+    expect(ACTIVITY_SERIES["meals"]?.mode).toBe("count");
+    expect(ACTIVITY_SERIES["meals"]?.unit).toBe("g");
+    expect(pathEvidence({ name: "Meals", activity: "meals" })).toEqual({
+      kind: "strip",
+      key: "meals",
+      series: ACTIVITY_SERIES["meals"],
+    });
+  });
+
   it("misses on a series this build has never heard of — no strip, no crash", () => {
     // The other half of lib/aperture's open-vocabulary bargain: a newer emitter
     // can attach any series it likes and the path still renders, bare.
