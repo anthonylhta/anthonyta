@@ -496,6 +496,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
               meals/
             </Link>
             <Link
+              href="/portfolio"
+              className="text-muted transition-colors hover:text-amber"
+            >
+              portfolio/
+            </Link>
+            <Link
               href="/aperture"
               className="text-muted transition-colors hover:text-amber"
             >
