@@ -12,6 +12,7 @@ import {
   apertureHistPath,
   FIN_CONTEXT,
   GYM_CONTEXT,
+  MEALS_CONTEXT,
 } from "@/lib/aevcontext";
 import {
   isAdjudicationPending,
@@ -58,6 +59,7 @@ import {
   type FinConfig,
 } from "@/lib/fin";
 import { normalizeGymConfig, sessionCounts, sessionsThisWeek } from "@/lib/gym";
+import { dayTotals, normalizeMealsConfig, trailingProtein } from "@/lib/meals";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
 import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
@@ -244,6 +246,36 @@ async function gymSeries(
   }
 }
 
+/**
+ * The meals path's evidence — the second sealed series, on gym's exact terms:
+ * derived in the browser from the E2EE `meta/meals` envelope, best-effort by
+ * construction, never able to delay or fail the page. Protein per day (the
+ * macro the meal log accents), with today's count as the number beside the
+ * strip — rounded, since decimal macros can put fractions in the sum.
+ */
+async function mealsSeries(
+  today: string,
+  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
+): Promise<EvidenceSeries | null> {
+  try {
+    const res = await fetch("/api/meals");
+    if (res.status !== 200) return null;
+    const { bytes } = await openItem(
+      new Uint8Array(await res.arrayBuffer()),
+      MEALS_CONTEXT,
+    );
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    const cfg = normalizeMealsConfig(parsed);
+    if (!cfg) return null;
+    return {
+      levels: toLevels(trailingProtein(cfg, today, ACTIVITY_DAYS)),
+      value: Math.round(dayTotals(cfg, today).p),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function ApertureInner({
   offline,
   series,
@@ -260,8 +292,9 @@ export function ApertureInner({
   const [doc, setDoc] = useState<ApertureDoc | null>(null);
   const [fin, setFin] = useState<FinConfig | null>(null);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
-  /** The one sealed strip, once it lands — see `gymSeries`. */
+  /** The sealed strips, once they land — see `gymSeries` / `mealsSeries`. */
   const [gym, setGym] = useState<EvidenceSeries | null>(null);
+  const [meals, setMeals] = useState<EvidenceSeries | null>(null);
   /** The archived seal history, once it lands — see `recordSeries`. */
   const [record, setRecord] = useState<RecordState | null>(null);
   /** Raw journal days have run ≥2 days past the seal — flag, never resolve. */
@@ -279,6 +312,7 @@ export function ApertureInner({
       setFin(null);
       setDataErr(null);
       setGym(null);
+      setMeals(null);
       setRecord(null);
       setPending(false);
       setShowResolved(false);
@@ -351,11 +385,16 @@ export function ApertureInner({
         );
         if (behind && !cancelled) setPending(true);
 
-        // The sealed strip, only when a path actually asks for it — it costs a
-        // request and a decrypt, and most documents won't name it.
-        if (declaredSeriesKeys(next.sealed.paths).has("gym")) {
+        // The sealed strips, only when a path actually asks for them — each
+        // costs a request and a decrypt, and a document may name neither.
+        const declared = declaredSeriesKeys(next.sealed.paths);
+        if (declared.has("gym")) {
           const gymEv = await gymSeries(today, openItem);
           if (gymEv && !cancelled) setGym(gymEv);
+        }
+        if (declared.has("meals")) {
+          const mealsEv = await mealsSeries(today, openItem);
+          if (mealsEv && !cancelled) setMeals(mealsEv);
         }
 
         // The seal history — a listing plus up to a dozen fetches and decrypts.
@@ -414,10 +453,14 @@ export function ApertureInner({
     breakthrough.routes.length > 0 ||
     strikes.length > 0;
 
-  // The server's evidence, plus the one series only this browser can produce. The
+  // The server's evidence, plus the series only this browser can produce. The
   // band consumes them identically — a sealed strip is not a special kind of row,
   // it just arrives later (and, on any miss, not at all).
-  const allSeries: PathSeries = gym ? { ...series, gym } : series;
+  const allSeries: PathSeries = {
+    ...series,
+    ...(gym ? { gym } : {}),
+    ...(meals ? { meals } : {}),
+  };
 
   const recovered = fin ? recoveredThisWeek(fin, today) : null;
   const absorbed = fin ? absorbedThisWeek(fin, today) : null;
