@@ -8,6 +8,7 @@ import { MealsGlance } from "@/components/MealsGlance";
 import { MeSealed } from "@/components/MeSealed";
 import { NeedsDoing } from "@/components/NeedsDoing";
 import { CommandK } from "@/components/terminal/CommandPalette";
+import { LabelDoor } from "@/components/terminal/LabelDoor";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { TransitGlance } from "@/components/TransitGlance";
@@ -192,8 +193,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
 
     "transit-next": !hidden.has("transit-next") ? (
       <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          transit
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em]">
+          <LabelDoor href="/transit" label="transit" />
         </span>
         <span className="min-w-0 flex-1">
           <TransitGlance offline={!r2Enabled()} />
@@ -211,8 +212,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
          columns per event can't share a narrow screen with it, so the label
          moves above (the needs-doing treatment) and the rows get full width. */
       <div className="border-b border-hairline px-4 py-2.5 text-sm sm:flex sm:items-baseline sm:gap-3">
-        <span className="mb-1.5 block text-[11px] uppercase tracking-[0.2em] text-muted sm:mb-0 sm:w-20 sm:shrink-0 sm:tracking-[0.12em]">
-          agenda
+        <span className="mb-1.5 block text-[11px] uppercase tracking-[0.2em] sm:mb-0 sm:w-20 sm:shrink-0 sm:tracking-[0.12em]">
+          <LabelDoor href="/agenda" label="agenda" />
         </span>
         <div className="min-w-0 sm:flex-1">
           <AgendaRow offline={!r2Enabled()} today={today} />
@@ -265,8 +266,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
        have to see in order to log against is the 0109 exception. */
     meals: !hidden.has("meals") ? (
       <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          meals
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em]">
+          <LabelDoor href="/meals" label="meals" />
         </span>
         <span className="min-w-0 flex-1">
           <MealsGlance offline={!r2Enabled()} today={today} />
@@ -278,18 +279,12 @@ export async function CommandCenter({ userName }: { userName: string }) {
        annotation and the rest of the read live on /briefing. */
     briefing: !hidden.has("briefing") ? (
       <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          briefing
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em]">
+          <LabelDoor href="/briefing" label="briefing" />
         </span>
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-fg/90">
           {b.driver}
         </span>
-        <Link
-          href="/briefing"
-          className="shrink-0 text-xs text-amber hover:underline"
-        >
-          [full]
-        </Link>
       </div>
     ) : null,
 
@@ -297,8 +292,8 @@ export async function CommandCenter({ userName }: { userName: string }) {
        riichi app; nothing here needs more than the state. */
     hand: !hidden.has("hand") ? (
       <div className="flex items-baseline gap-3 border-b border-hairline px-4 py-2.5 text-sm">
-        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
-          riichi
+        <span className="w-20 shrink-0 text-[11px] uppercase tracking-[0.12em]">
+          <LabelDoor href="/riichi" label="riichi" />
         </span>
         <span className="min-w-0 flex-1 text-fg/90">
           <span lang="ja" className="font-[family-name:var(--font-jp)]">
@@ -444,21 +439,11 @@ export async function CommandCenter({ userName }: { userName: string }) {
           );
         })}
 
-        {/* quick jumps */}
+        {/* quick jumps — only the pages with no section of their own. Everything
+            else is reached through its row's label door (aperture through the
+            me-block), so the list stays short enough to scan. */}
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3 text-sm">
           <nav className="flex flex-wrap gap-x-4 gap-y-1">
-            <Link
-              href="/briefing"
-              className="text-muted transition-colors hover:text-amber"
-            >
-              briefing/
-            </Link>
-            <Link
-              href="/riichi"
-              className="text-muted transition-colors hover:text-amber"
-            >
-              riichi/
-            </Link>
             <Link
               href="/ishin"
               className="text-muted transition-colors hover:text-amber"
@@ -472,40 +457,16 @@ export async function CommandCenter({ userName }: { userName: string }) {
               reader/
             </Link>
             <Link
-              href="/transit"
-              className="text-muted transition-colors hover:text-amber"
-            >
-              transit/
-            </Link>
-            <Link
-              href="/agenda"
-              className="text-muted transition-colors hover:text-amber"
-            >
-              agenda/
-            </Link>
-            <Link
               href="/gym"
               className="text-muted transition-colors hover:text-amber"
             >
               gym/
             </Link>
             <Link
-              href="/meals"
-              className="text-muted transition-colors hover:text-amber"
-            >
-              meals/
-            </Link>
-            <Link
               href="/portfolio"
               className="text-muted transition-colors hover:text-amber"
             >
               portfolio/
-            </Link>
-            <Link
-              href="/aperture"
-              className="text-muted transition-colors hover:text-amber"
-            >
-              aperture/
             </Link>
             <Link
               href="/vault"

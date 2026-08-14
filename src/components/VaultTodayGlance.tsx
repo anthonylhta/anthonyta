@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { LabelDoor } from "@/components/terminal/LabelDoor";
 import { Module } from "@/components/terminal/Module";
 import { useVault } from "@/app/files/useVault";
 import { isVaultIndex, noteBlob, VAULT_INDEX_PATH } from "@/lib/vaultblob";
@@ -82,7 +83,7 @@ export function VaultTodayGlance({
 
   return (
     <Module
-      label="daily note"
+      label={<LabelDoor href="/vault" label="daily note" />}
       className="border-0 border-b border-hairline"
       action={
         found ? (
@@ -92,11 +93,7 @@ export function VaultTodayGlance({
           >
             read full day →
           </Link>
-        ) : (
-          <Link href="/vault" className="text-xs text-amber hover:underline">
-            vault →
-          </Link>
-        )
+        ) : undefined
       }
     >
       {found ? (
