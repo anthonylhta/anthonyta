@@ -7,7 +7,7 @@ export function Module({
   children,
   className = "",
 }: {
-  label: string;
+  label: ReactNode;
   action?: ReactNode;
   children: ReactNode;
   className?: string;

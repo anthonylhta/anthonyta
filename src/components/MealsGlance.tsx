@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import { MEALS_CONTEXT } from "@/lib/aevcontext";
 import {
@@ -23,7 +22,8 @@ const MINI: { key: keyof MealsTargets; label: string }[] = [
 
 /**
  * The day's macros as one command-center row — four short tracks and the protein
- * figure, jumping to /meals. A SECOND reader of the `meta/meals` envelope: it
+ * figure; the row's label door jumps to /meals. A SECOND reader of the
+ * `meta/meals` envelope: it
  * never writes, so there is no seq check here (the full page owns that, along
  * with the honest error states). Any miss — locked, unreachable, a shape this
  * build doesn't know — renders the sealed dots; a glance never puts an error on
@@ -82,17 +82,12 @@ export function MealsGlance({
   const targets = cfg.targets ?? null;
 
   return (
-    <Link
-      href="/meals"
-      className="group flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
-    >
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
       {targets ? (
         <>
           {MINI.map((m) => (
             <span key={m.key} className="flex items-center gap-1">
-              <span className="text-muted/70 group-hover:text-amber">
-                {m.label}
-              </span>
+              <span className="text-muted/70">{m.label}</span>
               <span className="h-1 w-16 bg-surface">
                 <span
                   className={`block h-full ${
@@ -110,11 +105,11 @@ export function MealsGlance({
           </span>
         </>
       ) : (
-        <span className="tabular-nums text-muted group-hover:text-amber">
+        <span className="tabular-nums text-muted">
           p {Math.round(totals.p)}g · {commas(Math.round(totals.kcal))} kcal
         </span>
       )}
-    </Link>
+    </span>
   );
 }
 
