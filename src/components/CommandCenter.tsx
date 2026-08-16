@@ -38,7 +38,7 @@ import {
   type Zone as CenterZone,
 } from "@/lib/layout";
 import { quoteForDay } from "@/lib/quotes";
-import { uvLabel, weatherCodeText } from "@/lib/weather";
+import { rainLabel, uvLabel, weatherCodeText } from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { r2Enabled } from "@/lib/r2";
@@ -152,6 +152,10 @@ export async function CommandCenter({ userName }: { userName: string }) {
       ? readingChapters - readingBaseline.readingChapters
       : null;
 
+  // The weather row's rain flag — exception-weighted, so it's null on a
+  // day the sky isn't worth mentioning.
+  const rain = rainLabel(wx.rainChance);
+
   // Each command-center module keyed by its layout UNIT key so the zones can
   // render in the owner's configured order (roadmap 59). The values are the
   // exact blocks that used to sit inline, a ternary yielding the JSX when
@@ -182,6 +186,16 @@ export async function CommandCenter({ userName }: { userName: string }) {
                 {Math.round(wx.uv)}
               </span>{" "}
               {uvLabel(wx.uv)}
+            </>
+          )}
+          {rain && (
+            <>
+              {" · "}
+              <span
+                className={rain.tone === "amber" ? "text-amber" : "text-muted"}
+              >
+                {rain.text}
+              </span>
             </>
           )}
           {wx.todayMinC !== null &&

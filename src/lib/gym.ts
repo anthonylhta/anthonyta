@@ -8,7 +8,7 @@
  * Ordering is structural, not sorted: `addSession` PREPENDS, so `sessions` is
  * newest-first by construction and eviction takes from the TAIL. Nothing ever
  * re-sorts by date — `date` is what the session says about itself, not a key —
- * which is what lets `lastSetsFor` and `topSetSeries` read the log by walking it.
+ * which is what lets `lastSetsFor` and `e1rmSeries` read the log by walking it.
  *
  * Every transform is re-runnable against a fresh base, because that is what the
  * 409 dance does: on a conflict the island refetches, re-applies the SAME pure
@@ -394,6 +394,48 @@ export function isPr(set: GymSet, cfg: GymConfig, exerciseId: string): boolean {
   return set.w > best.w || (set.w === best.w && set.r > best.r);
 }
 
+/**
+ * Epley's estimated one-rep max, `w × (1 + r/30)` — the gym-floor formula, with a
+ * single returned untouched: one rep IS a measured one-rep max, and running it
+ * through the formula would inflate it by 3% over a number the log actually saw.
+ * Zero (or fewer) reps is no lift at all, so it estimates nothing: 0.
+ *
+ * It is a MODEL, unlike everything else in this file — 100kg×5 reads as ~117kg,
+ * which nobody has lifted. It earns its place anyway, because reps vary set to
+ * set and comparing raw weights across sessions compares different efforts; one
+ * estimate puts them on one scale. The `~` is worn everywhere it renders.
+ */
+export function epley(w: number, r: number): number {
+  if (r <= 0) return 0;
+  return r === 1 ? w : w * (1 + r / 30);
+}
+
+/**
+ * The set of an exercise with the highest Epley estimate, with the day it was
+ * done. Ties keep the MOST RECENT: sessions are newest-first, so a strict `>`
+ * never lets an older equal set displace the newer one. Null only when the
+ * exercise has no sets at all — `bestFor`'s "nothing to beat yet" state.
+ *
+ * This can name a set `bestFor` passes over, which is the whole point: 90×8
+ * (~114) outranks 100×1 here, because it is the harder thing to have done.
+ */
+export function bestE1rm(
+  cfg: GymConfig,
+  exerciseId: string,
+): { e1rm: number; set: GymSet; date: string } | null {
+  let best: { e1rm: number; set: GymSet; date: string } | null = null;
+  for (const s of cfg.sessions)
+    for (const e of s.entries) {
+      if (e.exerciseId !== exerciseId) continue;
+      for (const set of e.sets) {
+        const e1rm = epley(set.w, set.r);
+        if (best === null || e1rm > best.e1rm)
+          best = { e1rm, set, date: s.date };
+      }
+    }
+  return best;
+}
+
 // --- the in-progress draft -----------------------------------------------------
 
 /**
@@ -563,16 +605,53 @@ export function sessionsThisWeek(cfg: GymConfig, todayISO: string): number {
 }
 
 /**
- * The top-set weight of every session containing this exercise, oldest → newest
- * — the progression the /gym exercises view sparklines. Sessions with the
- * exercise but no sets contribute nothing (there is no weight to plot).
+ * The best Epley estimate of every session containing this exercise, oldest →
+ * newest — the progression the /gym exercises view sparklines, on the scale
+ * that answers "am I getting stronger". Sessions with the exercise but no sets
+ * contribute nothing: there is no lift to plot.
+ *
+ * It is the honest progression line where the top-set weight isn't. A week of
+ * 60×12 after a week of 65×5 is progress, and drawn by weight alone it falls.
  */
-export function topSetSeries(cfg: GymConfig, exerciseId: string): number[] {
+export function e1rmSeries(cfg: GymConfig, exerciseId: string): number[] {
   const out: number[] = [];
   for (const s of cfg.sessions) {
     const entry = s.entries.find((e) => e.exerciseId === exerciseId);
     if (!entry || entry.sets.length === 0) continue;
-    out.push(Math.max(...entry.sets.map((set) => set.w)));
+    out.push(Math.max(...entry.sets.map((set) => epley(set.w, set.r))));
+  }
+  return out.reverse();
+}
+
+/**
+ * Total kilograms moved per trailing 7-day window, oldest → newest, the newest
+ * window ending at `today` INCLUSIVE: window k back from the end covers
+ * `today-7k-6 … today-7k`. Exactly `weeks` long — a week with no training is a
+ * real zero, not a gap in the line.
+ *
+ * Buckets by day STRING, and walks the calendar with `prevDay`, for
+ * `sessionCounts`'s reason: a session's `date` is already the Sydney day it was
+ * logged on, so no clock here can improve on it. Trailing windows rather than
+ * Mon–Sun ones, so the newest bar is the week actually being trained and the one
+ * before it is a fair comparison the moment a session lands.
+ */
+export function weeklyVolume(
+  cfg: GymConfig,
+  weeks: number,
+  today: string,
+): number[] {
+  const perDay = new Map<string, number>();
+  for (const s of cfg.sessions)
+    perDay.set(s.date, (perDay.get(s.date) ?? 0) + sessionVolume(s));
+  const out: number[] = [];
+  let cursor = today;
+  for (let w = 0; w < weeks; w++) {
+    let total = 0;
+    for (let d = 0; d < 7; d++) {
+      total += perDay.get(cursor) ?? 0;
+      cursor = prevDay(cursor);
+    }
+    out.push(total);
   }
   return out.reverse();
 }
