@@ -26,6 +26,7 @@ import {
   removeEntry,
   removeFood,
   setTargets,
+  trailingAverage,
   trailingProtein,
   updateFood,
   type MealsConfig,
@@ -412,6 +413,45 @@ describe("trailingProtein", () => {
     expect(series).toHaveLength(14);
     expect(series[13]).toBe(52);
     expect(series[0]).toBe(0);
+  });
+});
+
+describe("trailingAverage", () => {
+  const cfg = base({
+    entries: [
+      entry({ id: "e3", date: "2026-07-02", foodId: "chicken", qty: 2 }),
+      entry({ id: "e2", date: "2026-06-30", foodId: "chicken", qty: 1 }),
+      entry({ id: "e1", date: "2026-06-20", foodId: "rice", qty: 1 }),
+    ],
+  });
+
+  it("averages only the logged days, skipping the unwritten ones", () => {
+    // 07-01 and 06-29 hold nothing: counted as zeroes the kcal mean would halve.
+    expect(trailingAverage(cfg, "2026-07-02", 4)).toEqual({
+      logged: 2,
+      avg: { kcal: (440 + 220) / 2, p: (52 + 26) / 2, c: 0, f: (26 + 13) / 2 },
+    });
+  });
+
+  it("counts the logged days it averaged", () => {
+    expect(trailingAverage(cfg, "2026-07-02", 20)?.logged).toBe(3);
+  });
+
+  it("is null when nothing in the window was logged", () => {
+    expect(trailingAverage(cfg, "2026-06-25", 3)).toBeNull();
+    expect(trailingAverage(EMPTY_MEALS_CONFIG, "2026-07-02", 7)).toBeNull();
+  });
+
+  it("excludes a logged day that falls just outside the window", () => {
+    expect(trailingAverage(cfg, "2026-07-02", 3)?.logged).toBe(2);
+    expect(trailingAverage(cfg, "2026-07-02", 2)?.logged).toBe(1);
+  });
+
+  it("is that day's totals over a single day", () => {
+    expect(trailingAverage(cfg, "2026-06-30", 1)).toEqual({
+      logged: 1,
+      avg: dayTotals(cfg, "2026-06-30"),
+    });
   });
 });
 
