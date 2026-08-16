@@ -5,6 +5,7 @@ import {
   planRecordFetch,
   RECORD_FETCH_CAP,
   recordRows,
+  recordTrends,
 } from "./aperturerecord";
 
 // Wholly invented seals — this repo is public, so the fixtures are fiction by
@@ -146,5 +147,108 @@ describe("recordRows", () => {
 
   it("an empty history makes no rows", () => {
     expect(recordRows([])).toEqual([]);
+  });
+});
+
+// A seal carrying a WHOLE streak record — trends are about which names each seal
+// carried, which the `doc` helper's single fixed streak can't say. Invented like
+// everything else here: the names are a cartographer's, not an owner's.
+function streakSeal(
+  streaks: Record<string, { count: number; target?: number }>,
+): ApertureDoc {
+  const base = doc({});
+  return {
+    ...base,
+    sealed: {
+      ...base.sealed,
+      streaks: Object.fromEntries(
+        Object.entries(streaks).map(([name, s]) => [
+          name,
+          { count: s.count, target: s.target ?? 60, state: "active" },
+        ]),
+      ),
+    },
+  };
+}
+
+describe("recordTrends", () => {
+  it("reads oldest → newest whatever order the fetches resolved in", () => {
+    const trends = recordTrends([
+      { day: "2026-07-26", doc: streakSeal({ logbook: { count: 19 } }) },
+      { day: "2026-07-05", doc: streakSeal({ logbook: { count: 5 } }) },
+      { day: "2026-07-12", doc: streakSeal({ logbook: { count: 12 } }) },
+    ]);
+    expect(trends).toEqual([
+      { name: "logbook", values: [5, 12, 19], first: 5, last: 19, target: 60 },
+    ]);
+  });
+
+  it("skips a seal from before a streak existed rather than zeroing it", () => {
+    const trends = recordTrends([
+      { day: "2026-07-05", doc: streakSeal({ logbook: { count: 5 } }) },
+      {
+        day: "2026-07-12",
+        doc: streakSeal({ logbook: { count: 12 }, portage: { count: 1 } }),
+      },
+      {
+        day: "2026-07-26",
+        doc: streakSeal({ logbook: { count: 19 }, portage: { count: 3 } }),
+      },
+    ]);
+    // First-seen order walking oldest → newest, so logbook leads the newcomer.
+    expect(trends.map((t) => t.name)).toEqual(["logbook", "portage"]);
+    expect(trends[1]).toMatchObject({ values: [1, 3], first: 1, last: 3 });
+  });
+
+  it("drops a streak seen once — one reading is not a trend", () => {
+    const trends = recordTrends([
+      { day: "2026-07-12", doc: streakSeal({ logbook: { count: 12 } }) },
+      {
+        day: "2026-07-26",
+        doc: streakSeal({ logbook: { count: 19 }, portage: { count: 3 } }),
+      },
+    ]);
+    expect(trends.map((t) => t.name)).toEqual(["logbook"]);
+  });
+
+  it("takes the target from the newest seal, and null once it drops the streak", () => {
+    const trends = recordTrends([
+      {
+        day: "2026-07-12",
+        doc: streakSeal({
+          logbook: { count: 12, target: 60 },
+          portage: { count: 3, target: 10 },
+        }),
+      },
+      {
+        day: "2026-07-19",
+        doc: streakSeal({
+          logbook: { count: 19, target: 90 },
+          portage: { count: 4, target: 10 },
+        }),
+      },
+      { day: "2026-07-26", doc: streakSeal({ logbook: { count: 26 } }) },
+    ]);
+    expect(trends.find((t) => t.name === "logbook")?.target).toBe(60);
+    expect(trends.find((t) => t.name === "portage")?.target).toBeNull();
+  });
+
+  it("treats a streak named like an Object member as data, not a method", () => {
+    const trends = recordTrends([
+      { day: "2026-07-12", doc: streakSeal({ toString: { count: 2 } }) },
+      { day: "2026-07-26", doc: streakSeal({ toString: { count: 9 } }) },
+    ]);
+    expect(trends).toEqual([
+      { name: "toString", values: [2, 9], first: 2, last: 9, target: 60 },
+    ]);
+  });
+
+  it("makes no trends from an empty or single-seal history", () => {
+    expect(recordTrends([])).toEqual([]);
+    expect(
+      recordTrends([
+        { day: "2026-07-26", doc: streakSeal({ logbook: { count: 19 } }) },
+      ]),
+    ).toEqual([]);
   });
 });

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { ExceptionLine } from "@/components/terminal/ExceptionLine";
+import { Sparkline } from "@/components/terminal/Sparkline";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import {
@@ -26,7 +27,9 @@ import {
 import {
   planRecordFetch,
   recordRows,
+  recordTrends,
   type RecordRow,
+  type RecordTrend,
 } from "@/lib/aperturerecord";
 import {
   conditionChipClass,
@@ -123,6 +126,9 @@ interface Wealth {
  *  drawing — capped-out days as a count, failed opens as an honest tally. */
 interface RecordState {
   rows: RecordRow[];
+  /** One strip per streak the fetched seals carried — the same entries read
+   *  down the columns instead of across the rows. */
+  trends: RecordTrend[];
   /** Well-formed archived days beyond the fetch cap — counted, never fetched. */
   older: number;
   /** Fetched days that would not serve, decrypt or normalize. */
@@ -205,6 +211,7 @@ async function recordSeries(
     );
     return {
       rows: recordRows(entries),
+      trends: recordTrends(entries),
       older: plan.older,
       unreadable: plan.fetch.length - entries.length,
     };
@@ -737,6 +744,41 @@ export function ApertureInner({
                 {record.unreadable > 0 &&
                   `${record.unreadable} unreadable — reload to retry`}
               </p>
+            )}
+            {/* The rows read a week at a time; these read the whole fetched
+                history at once — left to right in time, the opposite direction
+                to the list above. */}
+            {record.trends.length > 0 && (
+              <>
+                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                  streaks · seal by seal
+                </p>
+                {record.trends.map(
+                  (t) =>
+                    t.values.length >= 2 && (
+                      <div
+                        key={t.name}
+                        className="flex items-center gap-3 text-xs"
+                      >
+                        <span className="w-20 shrink-0 truncate text-muted">
+                          {t.name}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <Sparkline
+                            values={t.values}
+                            delta={t.last - t.first}
+                            height={22}
+                            label={`${t.name} streak across seals`}
+                          />
+                        </span>
+                        <span className="w-24 shrink-0 text-right tabular-nums text-muted/60">
+                          {t.first} → {t.last}
+                          {t.target !== null ? ` / ${t.target}` : ""}
+                        </span>
+                      </div>
+                    ),
+                )}
+              </>
             )}
           </div>
         </>
