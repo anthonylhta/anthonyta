@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
+import { ReaderList } from "@/components/ReaderList";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { getReaderItems } from "@/lib/connectors/reader";
-import { FEEDS, timeAgo } from "@/lib/reader";
+import { FEEDS } from "@/lib/reader";
 
 export const metadata = { title: "reader" };
 
@@ -51,27 +52,7 @@ export default async function ReaderPage() {
           <span className="ml-auto">refreshes every 30 min</span>
         </div>
 
-        <div className="flex flex-col">
-          {items.map((item) => (
-            <a
-              key={item.link}
-              href={item.link}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-baseline gap-3 border-t border-hairline/60 px-4 py-2 transition-colors first:border-t-0 hover:bg-surface/30"
-            >
-              <span className="w-10 shrink-0 tabular-nums text-xs text-muted">
-                {timeAgo(item.ts, now)}
-              </span>
-              <span className="w-24 shrink-0 truncate text-[10px] uppercase tracking-[0.12em] text-muted">
-                {item.source}
-              </span>
-              <span className="min-w-0 flex-1 text-sm text-fg/90">
-                {item.title}
-              </span>
-            </a>
-          ))}
-        </div>
+        <ReaderList items={items} now={now} />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>

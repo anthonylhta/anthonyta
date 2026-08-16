@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeEntities,
+  isNew,
   mergeItems,
   parseFeed,
+  parseVisit,
+  rollVisit,
   timeAgo,
+  VISIT_SESSION_MS,
   type FeedItem,
+  type ReaderVisit,
 } from "./reader";
 
 const RSS = `<?xml version="1.0"?>
@@ -121,5 +126,88 @@ describe("timeAgo", () => {
     expect(timeAgo(now - 3 * 3_600_000, now)).toBe("3h");
     expect(timeAgo(now - 2 * 86_400_000, now)).toBe("2d");
     expect(timeAgo(null, now)).toBe("—");
+  });
+});
+
+describe("rollVisit", () => {
+  const now = Date.parse("2026-08-16T09:00:00Z");
+
+  it("baselines a first visit at now — nothing is new yet", () => {
+    expect(rollVisit(null, now)).toEqual({ last: now, current: now });
+  });
+
+  it("keeps the baseline for a reload inside the session window", () => {
+    const stored: ReaderVisit = {
+      last: now - 86_400_000,
+      current: now - 60_000,
+    };
+    expect(rollVisit(stored, now)).toEqual(stored);
+    expect(rollVisit(stored, stored.current + VISIT_SESSION_MS - 1)).toEqual(
+      stored,
+    );
+  });
+
+  it("rolls the old session start into the baseline on a new visit", () => {
+    const stored: ReaderVisit = {
+      last: now - 86_400_000,
+      current: now - 3_600_000,
+    };
+    expect(rollVisit(stored, now)).toEqual({
+      last: stored.current,
+      current: now,
+    });
+    expect(rollVisit(stored, stored.current + VISIT_SESSION_MS)).toEqual({
+      last: stored.current,
+      current: stored.current + VISIT_SESSION_MS,
+    });
+  });
+});
+
+describe("parseVisit", () => {
+  it("accepts a well-formed record", () => {
+    expect(parseVisit('{"last":100,"current":200}')).toEqual({
+      last: 100,
+      current: 200,
+    });
+  });
+
+  it("rejects junk, wrong shapes, negatives and inverted pairs", () => {
+    expect(parseVisit(null)).toBeNull();
+    expect(parseVisit("not json")).toBeNull();
+    expect(parseVisit("null")).toBeNull();
+    expect(parseVisit('"200"')).toBeNull();
+    expect(parseVisit("{}")).toBeNull();
+    expect(parseVisit('{"last":"100","current":200}')).toBeNull();
+    expect(parseVisit('{"last":100}')).toBeNull();
+    expect(parseVisit('{"last":null,"current":200}')).toBeNull();
+    expect(parseVisit('{"last":-1,"current":200}')).toBeNull();
+    expect(parseVisit('{"last":300,"current":200}')).toBeNull();
+  });
+});
+
+describe("isNew", () => {
+  const item = (ts: number | null): FeedItem => ({
+    source: "a",
+    title: "t",
+    link: "https://x.com",
+    ts,
+  });
+  const visit: ReaderVisit = { last: 100, current: 200 };
+
+  it("marks only items published after the baseline", () => {
+    expect(isNew(item(101), visit)).toBe(true);
+    expect(isNew(item(100), visit)).toBe(false);
+    expect(isNew(item(99), visit)).toBe(false);
+  });
+
+  it("never marks an undated item", () => {
+    expect(isNew(item(null), visit)).toBe(false);
+  });
+
+  it("marks nothing on a first visit, where the baseline is now", () => {
+    const now = Date.parse("2026-08-16T09:00:00Z");
+    const first = rollVisit(null, now);
+    expect(isNew(item(now - 1000), first)).toBe(false);
+    expect(isNew(item(now), first)).toBe(false);
   });
 });
