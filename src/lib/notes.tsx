@@ -1128,6 +1128,96 @@ export const notes: Note[] = [
       </>
     ),
   },
+  {
+    slug: "test-the-habit-before-you-build-the-tool",
+    title: "test the habit before you build the tool",
+    oneLiner:
+      "The storage was a solved pattern; the risk was whether I’d type six entries a day for a month. So I tried the typing first, with no tool at all.",
+    updated: "2026-08-16",
+    tag: "engineering",
+    related: ["a-library-nothing-leaves"],
+    body: (
+      <>
+        <p>
+          I wanted a meal tracker on this site — daily macros against targets,
+          with the visual “am I on track” read. The engineering half was nearly
+          free: an encrypted store I had already built five times, a page, four
+          bars. That is exactly why it was dangerous to start there. Building
+          the easy half first would have produced a finished tracker and no
+          evidence that I would use it.
+        </p>
+        <p>
+          The real risk was data entry. Steps cost me zero entries — a phone
+          pushes them. The gym log costs about ten entries three times a week,
+          all numbers I already know. Food is three to six entries every day,
+          each needing a figure I don’t hold in my head. That gap is what kills
+          food trackers by week two; the incumbents’ moat is their food
+          database, not their interface. And this site never calls a model, so a
+          lookup was not going to be how I closed the gap.
+        </p>
+        <p>
+          So I ran the habit for a week with no tool: meals written into a
+          journal by hand, deliberately without chasing the numbers, because
+          hunting for macros would have tested the wrong thing and given a false
+          negative on the habit itself. The week held. It also turned out to be
+          the design input — the foods that appeared over and over became the
+          seed of a personal food library, so a meal is a food times a quantity
+          rather than four numbers typed. The tool that got built afterwards was
+          the smallest one the week justified, and it has been used every day
+          since — which the week predicted and the code could not have.
+        </p>
+      </>
+    ),
+  },
+  {
+    slug: "a-library-nothing-leaves",
+    title: "a library nothing leaves",
+    oneLiner:
+      "If I ate it once I’ll eat it again — so nothing gets deleted, and the order has to come from somewhere other than me.",
+    updated: "2026-08-17",
+    tag: "engineering",
+    related: ["test-the-habit-before-you-build-the-tool"],
+    body: (
+      <>
+        <p>
+          The food library on my meal tracker only grows. Everything I have
+          logged once stays, because I will probably log it again, and two weeks
+          in it was already a long scroll on the phone every time I ate. The
+          obvious fix — categories, tags, an archive flag — is a decision per
+          food that I have to make and keep current, which is precisely the kind
+          of upkeep that had already killed every food tracker I’d tried. The
+          order had to come from somewhere other than me.
+        </p>
+        <p>
+          It comes from the log itself: what I ate most recently first, then
+          what I have eaten most often, then the name. The week’s rotation
+          floats to the top on its own, and a one-off sinks without ever
+          leaving. A text filter handles the tail. Nothing to maintain, and the
+          same rule the rest of the site already lives by — derived state beats
+          self-reported state.
+        </p>
+        <p>
+          The one design fork was time. The log keeps a rolling window of about
+          three months, so a ranking read straight off it forgets everything
+          older — and a food eaten forty times over two years but not since May
+          is a staple, not tail. For a site I intend to use for years that is
+          the wrong shelf. So each food carries two small counters, all-time
+          uses and last-used, bumped as I log and outliving the window; a food
+          without them (everything that existed before the change) is answered
+          from the window until its first bump fills them in. No migration, and
+          the answer is honest on day one and truer every week after.
+        </p>
+        <p>
+          The last piece was the numbers themselves. New foods still come from
+          the label — no database, no lookup — but the label can be pasted: a
+          small parser reads a supermarket page or a transcribed panel, prefers
+          the printed calories, converts kilojoules when it must, and leaves
+          empty anything it can’t find rather than guessing. The label stays the
+          source; only the transcription went away.
+        </p>
+      </>
+    ),
+  },
 ];
 
 export function getNote(slug: string): Note | undefined {
