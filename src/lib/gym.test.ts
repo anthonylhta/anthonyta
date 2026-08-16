@@ -6,9 +6,12 @@ import {
   MAX_SESSIONS,
   addExercise,
   addSession,
+  bestE1rm,
   bestFor,
   draftHasSets,
   draftToSession,
+  e1rmSeries,
+  epley,
   exerciseName,
   findExerciseByName,
   fitsGymCap,
@@ -29,8 +32,8 @@ import {
   sessionVolume,
   sessionsThisWeek,
   templateName,
-  topSetSeries,
   upsertTemplate,
+  weeklyVolume,
   type GymConfig,
   type GymSession,
 } from "./gym";
@@ -481,37 +484,6 @@ describe("sessionCounts / sessionsThisWeek / sessionDays", () => {
   });
 });
 
-describe("topSetSeries", () => {
-  it("is the heaviest set per session, oldest → newest", () => {
-    const cfg = base({
-      sessions: [
-        session({
-          id: "s3",
-          entries: [{ exerciseId: "bench", sets: [{ w: 70, r: 5 }] }],
-        }),
-        session({
-          id: "s2",
-          entries: [{ exerciseId: "row", sets: [{ w: 40, r: 10 }] }],
-        }),
-        session({
-          id: "s1",
-          entries: [
-            {
-              exerciseId: "bench",
-              sets: [
-                { w: 60, r: 8 },
-                { w: 65, r: 6 },
-              ],
-            },
-          ],
-        }),
-      ],
-    });
-    expect(topSetSeries(cfg, "bench")).toEqual([65, 70]);
-    expect(topSetSeries(cfg, "squat")).toEqual([]);
-  });
-});
-
 describe("parseDraft", () => {
   it("round-trips a draft", () => {
     const draft = {
@@ -661,5 +633,186 @@ describe("gymPayloadBytes / fitsGymCap", () => {
       sessions: [session({ note: "x".repeat(GYM_MAX_BYTES) })],
     });
     expect(fitsGymCap(huge)).toBe(false);
+  });
+});
+
+describe("epley / bestE1rm", () => {
+  const cfg = base({
+    sessions: [
+      session({
+        id: "s2",
+        date: "2026-07-26",
+        entries: [{ exerciseId: "bench", sets: [{ w: 100, r: 1 }] }],
+      }),
+      session({
+        id: "s1",
+        date: "2026-07-20",
+        entries: [{ exerciseId: "bench", sets: [{ w: 90, r: 8 }] }],
+      }),
+    ],
+  });
+
+  it("returns a single untouched and estimates the rest", () => {
+    expect(epley(100, 1)).toBe(100);
+    expect(epley(100, 5)).toBeCloseTo(116.67, 2);
+    expect(epley(65, 6)).toBe(78);
+  });
+
+  it("estimates nothing from no reps", () => {
+    expect(epley(100, 0)).toBe(0);
+    expect(epley(100, -1)).toBe(0);
+  });
+
+  it("picks the highest estimate, not the heaviest set", () => {
+    // 90×8 (~114) is the harder lift; `bestFor` still names the 100 single.
+    expect(bestE1rm(cfg, "bench")).toEqual({
+      e1rm: 114,
+      set: { w: 90, r: 8 },
+      date: "2026-07-20",
+    });
+    expect(bestFor(cfg, "bench")).toEqual({ w: 100, r: 1 });
+  });
+
+  it("keeps the most recent of equal estimates", () => {
+    const tied = base({
+      sessions: [
+        session({
+          id: "s2",
+          date: "2026-07-26",
+          entries: [{ exerciseId: "bench", sets: [{ w: 60, r: 10 }] }],
+        }),
+        session({
+          id: "s1",
+          date: "2026-07-20",
+          entries: [{ exerciseId: "bench", sets: [{ w: 60, r: 10 }] }],
+        }),
+      ],
+    });
+    expect(bestE1rm(tied, "bench")?.date).toBe("2026-07-26");
+  });
+
+  it("is null for an exercise with no sets", () => {
+    expect(bestE1rm(cfg, "row")).toBeNull();
+    expect(bestE1rm(EMPTY_GYM_CONFIG, "bench")).toBeNull();
+  });
+});
+
+describe("e1rmSeries", () => {
+  it("is the best estimate per session, oldest → newest", () => {
+    const cfg = base({
+      sessions: [
+        session({
+          id: "s4",
+          entries: [{ exerciseId: "bench", sets: [] }],
+        }),
+        session({
+          id: "s3",
+          entries: [{ exerciseId: "bench", sets: [{ w: 70, r: 6 }] }],
+        }),
+        session({
+          id: "s2",
+          entries: [{ exerciseId: "row", sets: [{ w: 40, r: 10 }] }],
+        }),
+        session({
+          id: "s1",
+          entries: [
+            {
+              exerciseId: "bench",
+              sets: [
+                { w: 60, r: 8 },
+                { w: 65, r: 6 },
+              ],
+            },
+          ],
+        }),
+      ],
+    });
+    // 65×6 (78) beats 60×8 (76) within the session, and a setless session
+    // contributes nothing at all.
+    expect(e1rmSeries(cfg, "bench")).toEqual([78, 84]);
+    expect(e1rmSeries(cfg, "squat")).toEqual([]);
+  });
+});
+
+describe("weeklyVolume", () => {
+  const cfg = base({
+    sessions: [
+      session({
+        id: "s4",
+        date: "2026-07-26",
+        entries: [{ exerciseId: "bench", sets: [{ w: 100, r: 5 }] }],
+      }),
+      session({
+        id: "s3",
+        date: "2026-07-20",
+        entries: [{ exerciseId: "bench", sets: [{ w: 100, r: 2 }] }],
+      }),
+      session({
+        id: "s2",
+        date: "2026-07-19",
+        entries: [{ exerciseId: "bench", sets: [{ w: 10, r: 3 }] }],
+      }),
+      session({
+        id: "s1",
+        date: "2026-07-06",
+        entries: [{ exerciseId: "bench", sets: [{ w: 1, r: 7 }] }],
+      }),
+    ],
+  });
+
+  it("windows seven days at a time, oldest → newest, ending at today", () => {
+    // 07-20 and 07-26 are the edges of the newest window; the 19th falls the
+    // other side of that boundary, and the 6th is the far edge of the third.
+    expect(weeklyVolume(cfg, 3, "2026-07-26")).toEqual([7, 30, 700]);
+  });
+
+  it("is exactly `weeks` long, with real zeros for untrained weeks", () => {
+    expect(weeklyVolume(cfg, 5, "2026-07-26")).toEqual([0, 0, 7, 30, 700]);
+    expect(weeklyVolume(EMPTY_GYM_CONFIG, 3, "2026-07-26")).toEqual([0, 0, 0]);
+  });
+
+  it("draws a hole where a week was skipped", () => {
+    const gap = base({
+      sessions: [
+        session({
+          id: "b",
+          date: "2026-07-26",
+          entries: [{ exerciseId: "bench", sets: [{ w: 100, r: 5 }] }],
+        }),
+        session({
+          id: "a",
+          date: "2026-07-06",
+          entries: [{ exerciseId: "bench", sets: [{ w: 1, r: 7 }] }],
+        }),
+      ],
+    });
+    expect(weeklyVolume(gap, 3, "2026-07-26")).toEqual([7, 0, 500]);
+  });
+
+  it("drops sessions older than the oldest window", () => {
+    const old = base({
+      sessions: [
+        session({
+          id: "a",
+          date: "2026-07-05",
+          entries: [{ exerciseId: "bench", sets: [{ w: 100, r: 5 }] }],
+        }),
+      ],
+    });
+    expect(weeklyVolume(old, 3, "2026-07-26")).toEqual([0, 0, 0]);
+    expect(weeklyVolume(old, 4, "2026-07-26")).toEqual([500, 0, 0, 0]);
+  });
+
+  it("crosses a month boundary correctly", () => {
+    const cross = base({
+      sessions: [
+        session({
+          id: "a",
+          date: "2026-06-30",
+          entries: [{ exerciseId: "bench", sets: [{ w: 20, r: 5 }] }],
+        }),
+      ],
+    });
+    expect(weeklyVolume(cross, 2, "2026-07-02")).toEqual([0, 100]);
   });
 });
