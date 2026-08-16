@@ -10,6 +10,7 @@ import {
 } from "@/components/SeqAlarm";
 import { nextSeq } from "@/lib/seqrule";
 import { Sparkline } from "@/components/terminal/Sparkline";
+import { scrubIndex } from "@/lib/spark";
 import {
   buildFullSeries,
   importPortfolioCsv,
@@ -557,16 +558,76 @@ function TrendChart({ series }: { series: NetWorthPoint[] }) {
   // Bookends: MM-DD within one year; once the chart spans years, keep them.
   const label = (d: string) =>
     first.slice(0, 4) === last.slice(0, 4) ? d.slice(5) : d;
+
+  // The scrubber: drag (or hover) across the plot and the dot follows the
+  // nearest day; the header swaps to that day's date + value + its distance
+  // from now. It PARKS where the finger lifts — the value has to be readable
+  // after the drag, not only during it — and a tap on the readout sends it home.
+  const [at, setAt] = useState<number | null>(null);
+  const plot = useRef<HTMLDivElement>(null);
+  function scrubTo(clientX: number) {
+    const box = plot.current?.getBoundingClientRect();
+    if (!box) return;
+    setAt(scrubIndex(clientX - box.left, box.width, series.length));
+  }
+  const point = at !== null ? series[at] : null;
+  const scrubbed =
+    point !== null && point !== undefined && at !== series.length - 1
+      ? { date: point.date, value: point.totalCents / 100 }
+      : null;
+  const sinceThen = scrubbed ? values[values.length - 1] - scrubbed.value : 0;
+
   return (
     <div className="mt-4">
       <div className="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-[0.2em] text-muted">
-        <span>trend · all time</span>
-        <span className={`tabular-nums ${tone(delta)}`}>
-          {arrow(delta)} {delta >= 0 ? "+" : ""}
-          {aud(delta)}
-        </span>
+        {scrubbed ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setAt(null)}
+              className="tabular-nums normal-case tracking-normal transition-colors hover:text-amber"
+              aria-label="back to today"
+            >
+              {scrubbed.date} <span className="text-muted/60">· today →</span>
+            </button>
+            <span className="tabular-nums normal-case tracking-normal">
+              <span className="text-fg">{aud(scrubbed.value)}</span>{" "}
+              <span className={tone(sinceThen)}>
+                {arrow(sinceThen)} {sinceThen >= 0 ? "+" : ""}
+                {aud(sinceThen)} since
+              </span>
+            </span>
+          </>
+        ) : (
+          <>
+            <span>trend · all time</span>
+            <span className={`tabular-nums ${tone(delta)}`}>
+              {arrow(delta)} {delta >= 0 ? "+" : ""}
+              {aud(delta)}
+            </span>
+          </>
+        )}
       </div>
-      <Sparkline values={values} delta={delta} />
+      {/* pan-y keeps the page scrollable through the plot; only horizontal
+          movement is ours. Pointer events cover mouse and touch alike. */}
+      <div
+        ref={plot}
+        className="cursor-crosshair touch-pan-y select-none"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          scrubTo(e.clientX);
+        }}
+        onPointerMove={(e) => {
+          // Mouse hovers scrub without a press; a touch scrubs only while down.
+          if (e.pointerType === "mouse" || e.buttons > 0) scrubTo(e.clientX);
+        }}
+        onPointerLeave={(e) => {
+          // A mouse wandering off returns the dot home; a lifted finger parks.
+          if (e.pointerType === "mouse" && e.buttons === 0) setAt(null);
+        }}
+      >
+        <Sparkline values={values} delta={delta} marker={at ?? undefined} />
+      </div>
       <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted/60">
         <span>{label(first)}</span>
         <span>{label(last)}</span>

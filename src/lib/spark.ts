@@ -50,3 +50,16 @@ export function sparkGeometry(
 
   return { line, area, points };
 }
+
+/**
+ * Which point a pointer at `x` (px from the plot's left edge, over a plot `width`
+ * px wide) is nearest to, for a series of `n` evenly spaced points — the scrubber's
+ * one piece of arithmetic. Clamped, so a drag past either edge parks on the end
+ * point rather than off the series; -1 only for an empty series.
+ */
+export function scrubIndex(x: number, width: number, n: number): number {
+  if (n <= 0) return -1;
+  if (n === 1 || width <= 0) return 0;
+  const f = Math.min(1, Math.max(0, x / width));
+  return Math.round(f * (n - 1));
+}

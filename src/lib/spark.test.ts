@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sparkGeometry } from "./spark";
+import { scrubIndex, sparkGeometry } from "./spark";
 
 describe("sparkGeometry", () => {
   it("returns empty geometry for no values", () => {
@@ -44,5 +44,30 @@ describe("sparkGeometry", () => {
     expect(area.startsWith("M ")).toBe(true);
     expect(area.endsWith("Z")).toBe(true);
     expect(area).toContain("L 100,20"); // drop to the baseline at full height
+  });
+});
+
+describe("scrubIndex", () => {
+  it("maps a pointer across the plot onto the nearest evenly spaced point", () => {
+    // 5 points over 100px sit at 0, 25, 50, 75, 100.
+    expect(scrubIndex(0, 100, 5)).toBe(0);
+    expect(scrubIndex(12, 100, 5)).toBe(0);
+    expect(scrubIndex(13, 100, 5)).toBe(1);
+    expect(scrubIndex(50, 100, 5)).toBe(2);
+    expect(scrubIndex(88, 100, 5)).toBe(4);
+    expect(scrubIndex(100, 100, 5)).toBe(4);
+  });
+
+  it("clamps a drag past either edge to the end points", () => {
+    expect(scrubIndex(-40, 100, 5)).toBe(0);
+    expect(scrubIndex(999, 100, 5)).toBe(4);
+  });
+
+  it("is 0 for a single point and -1 for none", () => {
+    expect(scrubIndex(70, 100, 1)).toBe(0);
+    expect(scrubIndex(70, 100, 0)).toBe(-1);
+    // A zero-width plot (not laid out yet) parks on the first point rather
+    // than dividing by zero.
+    expect(scrubIndex(10, 0, 5)).toBe(0);
   });
 });

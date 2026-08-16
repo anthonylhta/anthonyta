@@ -14,6 +14,7 @@ export function Sparkline({
   width = 320,
   height = 48,
   label = "net worth trend",
+  marker,
 }: {
   values: number[];
   /** Sign decides the line color; usually `last - first`. */
@@ -22,9 +23,16 @@ export function Sparkline({
   height?: number;
   /** aria-label for the plot; defaults to the net-worth call sites' wording. */
   label?: string;
+  /** Index of the point to mark instead of the end — a scrubber's cursor. The
+   *  dot moves there and a hairline drops through it; out of range = the end. */
+  marker?: number;
 }) {
   const { line, area, points } = sparkGeometry(values, width, height, 3);
-  const end = points[points.length - 1];
+  const at =
+    marker !== undefined && marker >= 0 && marker < points.length
+      ? points[marker]
+      : points[points.length - 1];
+  const scrubbing = at !== undefined && at !== points[points.length - 1];
 
   return (
     <svg
@@ -44,7 +52,19 @@ export function Sparkline({
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
-      {end && <circle cx={end.x} cy={end.y} r={2.5} fill="currentColor" />}
+      {scrubbing && (
+        <line
+          x1={at.x}
+          y1={0}
+          x2={at.x}
+          y2={height}
+          stroke="currentColor"
+          strokeOpacity={0.35}
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+      {at && <circle cx={at.x} cy={at.y} r={2.5} fill="currentColor" />}
     </svg>
   );
 }
