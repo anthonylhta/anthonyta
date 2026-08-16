@@ -24,7 +24,10 @@ export const BACKUP_STAMP_PATH = "meta/chores/backup";
 export const CHORE_CADENCE_DAYS = {
   gym: 3,
   csv: 7,
-  vaultSync: 3,
+  /** The sync runs twice a week (Sunday + the midweek finance slot), so the
+   *  longest gap kept on schedule is four days — "due" means a slot was missed,
+   *  not that tomorrow's slot is coming. */
+  vaultSync: 4,
   aperture: 7,
   backup: 30,
 } as const;
