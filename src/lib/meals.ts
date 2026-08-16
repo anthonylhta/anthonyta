@@ -491,6 +491,52 @@ export function trailingProtein(
   return out.reverse();
 }
 
+/**
+ * The average day over the trailing `days` ending at `day`, inclusive — the
+ * reading the day's own bars cannot give, because one big dinner or one skipped
+ * lunch says nothing on its own.
+ *
+ * Only days with SOMETHING logged are averaged, and `logged` says how many that
+ * was: a day with no entries is a day that went unwritten, not a day of fasting,
+ * and folding it in as a zero would drag the average down toward meals that were
+ * eaten and never typed. Null when the whole window is unwritten — there is no
+ * average of no days to state, and a first week should say nothing rather than
+ * something wrong.
+ *
+ * Plain means, unrounded: how many figures a reading shows is the surface's
+ * call, not this one's.
+ */
+export function trailingAverage(
+  cfg: MealsConfig,
+  day: string,
+  days: number,
+): { logged: number; avg: MealsTargets } | null {
+  const sum: MealsTargets = { kcal: 0, p: 0, c: 0, f: 0 };
+  let logged = 0;
+  let cursor = day;
+  for (let i = 0; i < days; i++) {
+    if (entriesFor(cfg, cursor).length > 0) {
+      const totals = dayTotals(cfg, cursor);
+      sum.kcal += totals.kcal;
+      sum.p += totals.p;
+      sum.c += totals.c;
+      sum.f += totals.f;
+      logged += 1;
+    }
+    cursor = prevDay(cursor);
+  }
+  if (logged === 0) return null;
+  return {
+    logged,
+    avg: {
+      kcal: sum.kcal / logged,
+      p: sum.p / logged,
+      c: sum.c / logged,
+      f: sum.f / logged,
+    },
+  };
+}
+
 // --- the library's order -------------------------------------------------------
 
 /** Bucket edges, in days since the food was last eaten. */
