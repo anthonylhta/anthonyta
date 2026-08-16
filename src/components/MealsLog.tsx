@@ -40,6 +40,11 @@ import {
   type MealsFood,
   type MealsTargets,
 } from "@/lib/meals";
+import {
+  labelFieldText,
+  parseNutritionLabel,
+  type LabelFigures,
+} from "@/lib/nutrition";
 import { nextSeq } from "@/lib/seqrule";
 import { commas } from "@/lib/steps";
 
@@ -911,6 +916,11 @@ function FoodForm({
     food ? macroText(food) : EMPTY_MACRO_TEXT,
   );
   const macros = parseMacros(text);
+  // Add mode only: a pasted nutrition panel fills the four boxes. The label
+  // stays the source — this saves the transcription, not the reading.
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [paste, setPaste] = useState("");
+  const parsed = pasteOpen && paste.trim() ? parseNutritionLabel(paste) : null;
 
   async function submit() {
     if (!name.trim() || macros === null) return;
@@ -921,35 +931,140 @@ function FoodForm({
     }
   }
 
+  function useFigures(fig: LabelFigures) {
+    setText(labelFieldText(fig));
+    setPasteOpen(false);
+    setPaste("");
+  }
+
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs">
-      <input
-        type="text"
-        value={name}
-        disabled={busy}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && void submit()}
-        placeholder="food (unit)"
-        className={`min-w-32 flex-1 ${input}`}
-        aria-label="food name"
-      />
-      <MacroFields text={text} busy={busy} onChange={setText} />
-      <button
-        type="button"
-        className={btn}
-        disabled={busy || !name.trim() || macros === null}
-        onClick={() => void submit()}
-      >
-        {busy ? "…" : label}
-      </button>
-      {onCancel && (
+    <div className="flex flex-col gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={name}
+          disabled={busy}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void submit()}
+          placeholder="food (unit)"
+          className={`min-w-32 flex-1 ${input}`}
+          aria-label="food name"
+        />
+        <MacroFields text={text} busy={busy} onChange={setText} />
         <button
           type="button"
-          className="text-muted transition-colors hover:text-amber"
-          onClick={onCancel}
+          className={btn}
+          disabled={busy || !name.trim() || macros === null}
+          onClick={() => void submit()}
         >
-          cancel
+          {busy ? "…" : label}
         </button>
+        {onCancel && (
+          <button
+            type="button"
+            className="text-muted transition-colors hover:text-amber"
+            onClick={onCancel}
+          >
+            cancel
+          </button>
+        )}
+        {!food && (
+          <button
+            type="button"
+            className={`text-[11px] transition-colors hover:text-amber ${
+              pasteOpen ? "text-amber" : "text-muted/60"
+            }`}
+            onClick={() => setPasteOpen((o) => !o)}
+          >
+            paste label
+          </button>
+        )}
+      </div>
+      {pasteOpen && (
+        <div className="flex flex-col gap-1.5">
+          <textarea
+            value={paste}
+            disabled={busy}
+            onChange={(e) => setPaste(e.target.value)}
+            rows={3}
+            placeholder="paste the nutrition panel — energy / protein / fat / carbohydrate, per serve and per 100g"
+            className={`w-full resize-y ${input}`}
+            aria-label="nutrition label text"
+          />
+          {paste.trim() && parsed === null && (
+            <p className="text-[11px] text-muted">
+              couldn&apos;t read a label in that — type the numbers instead
+            </p>
+          )}
+          {parsed && (
+            <div className="flex flex-col gap-1">
+              <LabelRow
+                heading={`per serve${
+                  parsed.servingSize ? ` (${parsed.servingSize})` : ""
+                }`}
+                fig={parsed.perServe}
+                busy={busy}
+                onUse={useFigures}
+              />
+              <LabelRow
+                heading="per 100 g"
+                fig={parsed.per100}
+                busy={busy}
+                onUse={useFigures}
+              />
+              {parsed.servingsPerPack !== null && (
+                <p className="text-[11px] text-muted/60">
+                  {parsed.servingsPerPack} serves per pack — name the unit after
+                  what you eat
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One column of a parsed label, with the tap that copies it into the form.
+ *  A column the paste didn't carry is said so, not hidden. */
+function LabelRow({
+  heading,
+  fig,
+  busy,
+  onUse,
+}: {
+  heading: string;
+  fig: LabelFigures | null;
+  busy: boolean;
+  onUse: (fig: LabelFigures) => void;
+}) {
+  const show = (v: number | null, unit = "") =>
+    v === null ? "—" : `${Math.round(v * 10) / 10}${unit}`;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+      {/* Full-width on the phone (the figures + `use` need the row), one
+          column beside them from sm up. */}
+      <span className="w-full text-[11px] text-muted sm:w-32 sm:shrink-0">
+        {heading}
+      </span>
+      {fig === null ? (
+        <span className="text-[11px] text-muted/60">not on this paste</span>
+      ) : (
+        <>
+          <span className="tabular-nums text-fg/90">
+            {fig.kcal === null ? "—" : commas(Math.round(fig.kcal))} · p
+            {show(fig.p)} c{show(fig.c)} f{show(fig.f)}
+          </span>
+          <button
+            type="button"
+            className={btn}
+            disabled={busy}
+            onClick={() => onUse(fig)}
+          >
+            use
+          </button>
+        </>
       )}
     </div>
   );
