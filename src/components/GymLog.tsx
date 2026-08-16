@@ -14,9 +14,11 @@ import { randomId } from "@/lib/crypto";
 import {
   addExercise,
   addSession,
+  bestE1rm,
   bestFor,
   draftHasSets,
   draftToSession,
+  e1rmSeries,
   EMPTY_GYM_CONFIG,
   EMPTY_GYM_DRAFT,
   exerciseName,
@@ -37,8 +39,8 @@ import {
   renameExercise,
   sessionVolume,
   templateName,
-  topSetSeries,
   upsertTemplate,
+  weeklyVolume,
   type GymConfig,
   type GymDraft,
   type GymSet,
@@ -774,6 +776,16 @@ function HistoryView({
   const [openId, setOpenId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const used = gymPayloadBytes(cfg);
+  // Trailing 7-day windows, so the newest bar is the week being trained and the
+  // one before it is the fair comparison. Reading the clock in render is safe
+  // here for the draft initializer's reason: this view only exists behind an
+  // unlocked vault, which the first paint never is.
+  const series = weeklyVolume(cfg, 10, sydneyToday());
+  const thisWeek = series[9];
+  const lastWeek = series[8];
+  // Two trained weeks is the minimum a line can mean anything with — until then
+  // the numbers alone are the honest reading.
+  const plottable = series.filter((v) => v > 0).length >= 2;
 
   async function remove(id: string) {
     const ok = await saveConfig((b) => removeSession(b, id));
@@ -785,6 +797,28 @@ function HistoryView({
 
   return (
     <div className="flex flex-col">
+      {/* Total kilograms moved per week — the one number that answers "am I
+          doing more than I was", where a single session's volume can't. */}
+      {cfg.sessions.length > 0 && (
+        <div className="border-b border-hairline px-4 py-3">
+          <p className="mb-1 flex items-baseline gap-3 text-[11px] uppercase tracking-[0.12em] text-muted">
+            <span>volume · 10 wk</span>
+            <span className="ml-auto normal-case tracking-normal tabular-nums">
+              this week {commas(Math.round(thisWeek))}kg · last{" "}
+              {commas(Math.round(lastWeek))}kg
+            </span>
+          </p>
+          {plottable && (
+            <Sparkline
+              values={series}
+              delta={thisWeek - lastWeek}
+              height={28}
+              label="weekly training volume"
+            />
+          )}
+        </div>
+      )}
+
       {cfg.sessions.length === 0 ? (
         <p className="px-4 py-4 text-xs text-muted">
           nothing logged yet — start a session in log
@@ -886,7 +920,8 @@ function ExercisesView({
     <div className="flex flex-col">
       {cfg.exercises.map((e) => {
         const best = bestFor(cfg, e.id);
-        const series = topSetSeries(cfg, e.id);
+        const top = bestE1rm(cfg, e.id);
+        const series = e1rmSeries(cfg, e.id);
         const done = lastDoneFor(cfg, e.id);
         return (
           <div key={e.id} className="border-b border-hairline px-4 py-2.5">
@@ -924,6 +959,9 @@ function ExercisesView({
                   <span className="text-sm text-fg/90">{e.name}</span>
                   <span className="text-xs tabular-nums text-muted">
                     {best ? `best ${best.w}×${best.r}` : "no sets yet"}
+                    {top &&
+                      top.e1rm > 0 &&
+                      ` · e1rm ~${Math.round(top.e1rm)}kg`}
                     {done && ` · last ${done}`}
                   </span>
                   <button
@@ -939,15 +977,17 @@ function ExercisesView({
                 </>
               )}
             </div>
-            {/* Top-set weight over every session that included it. Two points is
-                the minimum a line can mean anything with. */}
+            {/* The estimated 1RM over every session that included it — the
+                honest progression when the reps move around under the weight
+                (see `epley`). Two points is the minimum a line can mean
+                anything with. */}
             {series.length >= 2 && (
               <div className="mt-1">
                 <Sparkline
                   values={series}
                   delta={series[series.length - 1] - series[0]}
                   height={28}
-                  label={`${e.name} top set progression`}
+                  label={`${e.name} estimated 1RM progression`}
                 />
               </div>
             )}
