@@ -14,6 +14,8 @@ export interface Weather {
   /** WMO weather interpretation code. */
   code: number;
   uv: number | null;
+  /** Today's max chance of precipitation, percent. */
+  rainChance: number | null;
   todayMinC: number | null;
   todayMaxC: number | null;
 }
@@ -26,7 +28,10 @@ export function openMeteoParams(): URLSearchParams {
     ["latitude", String(SYDNEY.lat)],
     ["longitude", String(SYDNEY.lon)],
     ["current", "temperature_2m,apparent_temperature,weather_code,uv_index"],
-    ["daily", "temperature_2m_max,temperature_2m_min,uv_index_max"],
+    [
+      "daily",
+      "temperature_2m_max,temperature_2m_min,uv_index_max,precipitation_probability_max",
+    ],
     ["timezone", "Australia/Sydney"],
     ["forecast_days", "1"],
   ]);
@@ -58,6 +63,7 @@ export function normalizeOpenMeteo(json: unknown): Weather | null {
     feelsC: num(current.apparent_temperature),
     code,
     uv: num(current.uv_index) ?? firstNum(daily.uv_index_max),
+    rainChance: firstNum(daily.precipitation_probability_max),
     todayMinC: firstNum(daily.temperature_2m_min),
     todayMaxC: firstNum(daily.temperature_2m_max),
   };
@@ -88,12 +94,27 @@ export function uvLabel(uv: number): string {
   return "extreme";
 }
 
+/** Rain chance, said only when it's worth saying: under 30% the row stays
+ *  quiet (this is a glance, not a forecast), 60% and over earns the amber. */
+export function rainLabel(
+  chance: number | null,
+): { text: string; tone: "amber" | "muted" } | null {
+  // `== null` on purpose: a Weather cached by the previous deploy predates
+  // this field and arrives undefined, not null — that must read as quiet too.
+  if (chance == null || chance < 30) return null;
+  return {
+    text: `rain ${Math.round(chance)}%`,
+    tone: chance >= 60 ? "amber" : "muted",
+  };
+}
+
 /** What renders when Open-Meteo is unreachable. */
 export const sampleWeather: Weather = {
   tempC: 18,
   feelsC: 16,
   code: 2,
   uv: 2,
+  rainChance: 10,
   todayMinC: 12,
   todayMaxC: 19,
 };
