@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import {
@@ -13,12 +13,17 @@ import { randomId } from "@/lib/crypto";
 import {
   addEntry,
   addFood,
+  ageLabel,
+  bucketFoods,
   dayHeading,
   dayTotals,
   EMPTY_MEALS_CONFIG,
   entriesFor,
   fitsMealsCap,
   foodName,
+  foodUsage,
+  matchFoods,
+  matchIndex,
   MEALS_MAX_BYTES,
   mealsPayloadBytes,
   nextDay,
@@ -46,6 +51,10 @@ const btn =
 type Tab = "today" | "foods";
 
 const TABS: Tab[] = ["today", "foods"];
+
+/** How many rows the picker shows at once — enough that the week's rotation is
+ *  all there, without the list burying the day's log under it. */
+const PICKER_ROWS = 8;
 
 type MacroKey = keyof MealsTargets;
 
@@ -346,6 +355,9 @@ function TodayView({
   const [foodId, setFoodId] = useState("");
   const [qtyText, setQtyText] = useState("1");
   const qty = parseQtyInput(qtyText);
+  // Picking a food hands focus straight to the quantity — the only field left to
+  // touch before the add.
+  const qtyRef = useRef<HTMLInputElement>(null);
 
   async function add() {
     if (!foodId || qty === null) return;
@@ -420,50 +432,44 @@ function TodayView({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-hairline px-4 py-3 text-xs">
-        {cfg.foods.length === 0 ? (
+      {cfg.foods.length === 0 ? (
+        <div className="flex items-center gap-2 border-b border-hairline px-4 py-3 text-xs">
           <p className="text-muted">add foods in the foods tab →</p>
-        ) : (
-          <>
-            <select
-              value={foodId}
-              disabled={busy}
-              onChange={(e) => setFoodId(e.target.value)}
-              className={`min-w-0 flex-1 ${input}`}
-              aria-label="food"
-            >
-              <option value="">food…</option>
-              {cfg.foods.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-            <span className="text-muted">×</span>
-            {/* A text field, not type="number": a controlled number input snaps a
-                cleared field back to 0, so typing lands beside the prefill. The
-                string is the state here; `parseQtyInput` decides if it's usable. */}
-            <input
-              type="text"
-              inputMode="decimal"
-              value={qtyText}
-              disabled={busy}
-              onChange={(e) => setQtyText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void add()}
-              className={`w-14 shrink-0 text-right tabular-nums ${input}`}
-              aria-label="quantity"
-            />
-            <button
-              type="button"
-              className={btn}
-              disabled={busy || !foodId || qty === null}
-              onClick={() => void add()}
-            >
-              {busy ? "…" : "add"}
-            </button>
-          </>
-        )}
-      </div>
+        </div>
+      ) : (
+        <FoodPicker
+          cfg={cfg}
+          today={today}
+          busy={busy}
+          foodId={foodId}
+          onPick={setFoodId}
+          onPicked={() => qtyRef.current?.focus()}
+        >
+          <span className="text-muted">×</span>
+          {/* A text field, not type="number": a controlled number input snaps a
+              cleared field back to 0, so typing lands beside the prefill. The
+              string is the state here; `parseQtyInput` decides if it's usable. */}
+          <input
+            ref={qtyRef}
+            type="text"
+            inputMode="decimal"
+            value={qtyText}
+            disabled={busy}
+            onChange={(e) => setQtyText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && void add()}
+            className={`w-14 shrink-0 text-right tabular-nums ${input}`}
+            aria-label="quantity"
+          />
+          <button
+            type="button"
+            className={btn}
+            disabled={busy || !foodId || qty === null}
+            onClick={() => void add()}
+          >
+            {busy ? "…" : "add"}
+          </button>
+        </FoodPicker>
+      )}
 
       {entries.length === 0 ? (
         <p className="px-4 py-3 text-xs text-muted">
@@ -504,6 +510,147 @@ function TodayView({
         })
       )}
     </div>
+  );
+}
+
+/**
+ * The composer's food field — a filter over the library rather than a `<select>`.
+ * The library only ever grows (nothing is deleted from it), so a native picker
+ * becomes a scroll through years of one-offs; here the last eight eaten are one
+ * tap away and everything older is three letters away.
+ *
+ * The list renders INLINE under the composer, pushing the day's log down, rather
+ * than floating over it: a positioned dropdown on a phone is a scroll trap. Rows
+ * swallow the mousedown so the field keeps focus — the pick lands on the click
+ * that follows, and a real blur can still close the list. The trailing controls
+ * ride in as children, which is what keeps the row and the list siblings.
+ */
+function FoodPicker({
+  cfg,
+  today,
+  busy,
+  foodId,
+  onPick,
+  onPicked,
+  children,
+}: {
+  cfg: MealsConfig;
+  today: string;
+  busy: boolean;
+  foodId: string;
+  onPick: (id: string) => void;
+  onPicked: () => void;
+  children: ReactNode;
+}) {
+  const [text, setText] = useState("");
+  const [open, setOpen] = useState(false);
+  const pickedName = cfg.foods.find((f) => f.id === foodId)?.name ?? "";
+  // A field still showing the picked name is not a query — re-opening it offers
+  // the recent list again (the name is select-all'd, so typing replaces it).
+  const query = text === pickedName ? "" : text.trim();
+  const { foods, more } = matchFoods(cfg, query, PICKER_ROWS);
+
+  function pick(food: MealsFood) {
+    onPick(food.id);
+    setText(food.name);
+    setOpen(false);
+    onPicked();
+  }
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-hairline px-4 py-3 text-xs">
+        <input
+          type="text"
+          inputMode="search"
+          autoComplete="off"
+          value={text}
+          disabled={busy}
+          onFocus={(e) => {
+            setOpen(true);
+            // With a food already picked the name select-alls, so typing
+            // replaces it instead of landing in the middle of it.
+            if (foodId) e.currentTarget.select();
+          }}
+          onBlur={() => setOpen(false)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setOpen(true);
+            // Edited away from the picked name, the pick is stale — drop it
+            // rather than let the add log a food the field no longer shows.
+            if (e.target.value !== pickedName) onPick("");
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+            if (e.key !== "Enter") return;
+            // A standing pick is kept — Enter just moves on to the quantity;
+            // otherwise it takes the top match.
+            if (foodId) {
+              setOpen(false);
+              onPicked();
+            } else if (foods[0]) pick(foods[0]);
+          }}
+          placeholder="food…"
+          className={`min-w-0 flex-1 ${input}`}
+          aria-label="food"
+        />
+        {children}
+      </div>
+      {open && (
+        <div className="border-b border-hairline pb-1.5 pt-1">
+          {!query && (
+            <p className="px-4 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+              recent
+            </p>
+          )}
+          {foods.length === 0 ? (
+            <p className="px-4 py-1 text-[13px] text-muted">
+              no match — add it in the foods tab
+            </p>
+          ) : (
+            foods.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                // Swallowing the mousedown keeps the field focused, so the blur
+                // that closes the list can't fire ahead of the click.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(f)}
+                className="group flex w-full items-baseline gap-2.5 px-4 py-1 text-left text-[13px]"
+              >
+                <span className="min-w-0 flex-1 truncate text-fg/90 transition-colors group-hover:text-amber">
+                  <Highlight name={f.name} query={query} />
+                </span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted">
+                  {commas(f.kcal)} · p{f.p}
+                </span>
+                <span className="w-14 shrink-0 text-right text-[11px] tabular-nums text-muted/60">
+                  {ageLabel(foodUsage(cfg, f).lastUsed, today)}
+                </span>
+              </button>
+            ))
+          )}
+          {more > 0 && (
+            <p className="px-4 py-1 text-[11px] text-muted/60">
+              + {more} more · {query ? "keep typing" : "type to filter"}
+            </p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** The typed run in amber — the reason this row is on screen at all. */
+function Highlight({ name, query }: { name: string; query: string }) {
+  const at = matchIndex(name, query);
+  if (at < 0) return <>{name}</>;
+  return (
+    <>
+      {name.slice(0, at)}
+      <span className="text-amber">{name.slice(at, at + query.length)}</span>
+      {name.slice(at + query.length)}
+    </>
   );
 }
 
@@ -592,6 +739,10 @@ function FoodsView({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const used = mealsPayloadBytes(cfg);
+  // The library is grouped by how recently each food was eaten, so the rotation
+  // sits at the top and the one-offs sink — the ages read against TODAY, not
+  // against whichever day the other tab is browsing.
+  const today = sydneyToday();
 
   /** A food that has been eaten can't leave — removing it would rewrite the
    *  totals of every day that contained it (see `removeFood`). */
@@ -614,48 +765,78 @@ function FoodsView({
           no foods yet — one line each, and every meal after is a quantity
         </p>
       ) : (
-        cfg.foods.map((f) => (
-          <div key={f.id} className="border-b border-hairline px-4 py-2.5">
-            {editing === f.id ? (
-              <FoodForm
-                food={f}
-                busy={busy}
-                label="save"
-                onCancel={() => setEditing(null)}
-                onSubmit={async (name, macros) => {
-                  const ok = await saveConfig((b) =>
-                    updateFood(b, f.id, { name, ...macros }),
-                  );
-                  if (ok) setEditing(null);
-                  return ok;
-                }}
-              />
-            ) : (
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="text-sm text-fg/90">{f.name}</span>
-                <span className="text-xs tabular-nums text-muted">
-                  {commas(f.kcal)} · p{f.p} c{f.c} f{f.f} /unit
-                </span>
-                <button
-                  type="button"
-                  className="ml-auto text-[11px] text-muted/60 transition-colors hover:text-amber"
-                  onClick={() => setEditing(f.id)}
-                >
-                  edit
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || inUse(f.id)}
-                  title={inUse(f.id) ? "eaten — rename it instead" : undefined}
-                  className="text-[11px] text-muted/60 transition-colors hover:text-down disabled:opacity-30"
-                  onClick={() => void saveConfig((b) => removeFood(b, f.id))}
-                >
-                  {inUse(f.id) ? "in use" : "delete"}
-                </button>
-              </div>
-            )}
-          </div>
-        ))
+        bucketFoods(cfg, today)
+          .filter((bucket) => bucket.foods.length > 0)
+          .map((bucket) => (
+            <div key={bucket.key} className="flex flex-col">
+              <p className="flex justify-between border-b border-hairline px-4 pt-2 pb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                <span>{bucket.label}</span>
+                <span className="tabular-nums">{bucket.foods.length}</span>
+              </p>
+              {bucket.foods.map((f) => {
+                const usage = foodUsage(cfg, f);
+                return (
+                  <div
+                    key={f.id}
+                    className="border-b border-hairline px-4 py-2.5"
+                  >
+                    {editing === f.id ? (
+                      <FoodForm
+                        food={f}
+                        busy={busy}
+                        label="save"
+                        onCancel={() => setEditing(null)}
+                        onSubmit={async (name, macros) => {
+                          const ok = await saveConfig((b) =>
+                            updateFood(b, f.id, { name, ...macros }),
+                          );
+                          if (ok) setEditing(null);
+                          return ok;
+                        }}
+                      />
+                    ) : (
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <span className="text-sm text-fg/90">{f.name}</span>
+                        <span className="text-xs tabular-nums text-muted">
+                          {commas(f.kcal)} · p{f.p} c{f.c} f{f.f} /unit
+                        </span>
+                        {/* The chip carries the right edge (its auto margin), so
+                            a never-logged food renders it EMPTY rather than
+                            dropping it and un-anchoring the buttons. */}
+                        <span className="ml-auto text-[11px] tabular-nums text-muted/60">
+                          {usage.uses > 0 && `${usage.uses}×`}
+                          {usage.lastUsed !== null &&
+                            ` · ${ageLabel(usage.lastUsed, today)}`}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[11px] text-muted/60 transition-colors hover:text-amber"
+                          onClick={() => setEditing(f.id)}
+                        >
+                          edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || inUse(f.id)}
+                          title={
+                            inUse(f.id)
+                              ? "eaten — rename it instead"
+                              : undefined
+                          }
+                          className="text-[11px] text-muted/60 transition-colors hover:text-down disabled:opacity-30"
+                          onClick={() =>
+                            void saveConfig((b) => removeFood(b, f.id))
+                          }
+                        >
+                          {inUse(f.id) ? "in use" : "delete"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))
       )}
 
       <div className="border-b border-hairline px-4 py-3">

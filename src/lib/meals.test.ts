@@ -5,14 +5,21 @@ import {
   MEALS_MAX_BYTES,
   addEntry,
   addFood,
+  ageLabel,
+  bucketFoods,
   dayHeading,
   dayTotals,
+  daysSinceYmd,
   entriesFor,
   nextDay,
   prevDay,
   fitsMealsCap,
   foodName,
+  foodUsage,
+  matchFoods,
+  matchIndex,
   mealsPayloadBytes,
+  rankFoods,
   normalizeMealsConfig,
   parseMacroInput,
   parseQtyInput,
@@ -135,6 +142,29 @@ describe("normalizeMealsConfig", () => {
     ).toBeNull();
   });
 
+  it("accepts a food's usage counters, present or absent", () => {
+    const counted = base({
+      foods: [food({ uses: 12, lastUsed: "2026-07-20" })],
+    });
+    expect(normalizeMealsConfig(JSON.parse(JSON.stringify(counted)))).toEqual(
+      counted,
+    );
+    // Absent is the shape every food had before the counters existed.
+    expect("uses" in normalizeMealsConfig(base())!.foods[0]).toBe(false);
+  });
+
+  it("rejects a broken counter rather than dropping it", () => {
+    expect(
+      normalizeMealsConfig(base({ foods: [food({ uses: -1 })] })),
+    ).toBeNull();
+    expect(
+      normalizeMealsConfig(base({ foods: [food({ uses: 1.5 })] })),
+    ).toBeNull();
+    expect(
+      normalizeMealsConfig(base({ foods: [food({ lastUsed: "20/07/2026" })] })),
+    ).toBeNull();
+  });
+
   it("rejects a config over the entry cap", () => {
     const entries = Array.from({ length: MAX_ENTRIES + 1 }, (_, i) =>
       entry({ id: `e${i}` }),
@@ -196,6 +226,15 @@ describe("updateFood", () => {
     const cfg = base();
     expect(updateFood(cfg, "nope", { kcal: 1 })).toBe(cfg);
     expect(updateFood(cfg, "rice", { name: "   " })).toBe(cfg);
+  });
+
+  it("leaves the usage counters alone — a macro fix is not a meal", () => {
+    const cfg = base({
+      foods: [food({ uses: 9, lastUsed: "2026-07-20" })],
+    });
+    const patched = updateFood(cfg, "rice", { kcal: 210, name: "rice (cup)" });
+    expect(patched.foods[0].uses).toBe(9);
+    expect(patched.foods[0].lastUsed).toBe("2026-07-20");
   });
 
   it("re-running the same patch changes nothing further", () => {
@@ -459,5 +498,309 @@ describe("mealsPayloadBytes / fitsMealsCap", () => {
     expect(fitsMealsCap(base())).toBe(true);
     const huge = base({ foods: [food({ name: "x".repeat(MEALS_MAX_BYTES) })] });
     expect(fitsMealsCap(huge)).toBe(false);
+  });
+});
+
+describe("foodUsage", () => {
+  it("reads the counters when the food carries them", () => {
+    const cfg = base({
+      foods: [food({ uses: 41, lastUsed: "2026-08-01" })],
+      entries: [entry({ date: "2026-07-20" })],
+    });
+    expect(foodUsage(cfg, cfg.foods[0])).toEqual({
+      uses: 41,
+      lastUsed: "2026-08-01",
+    });
+  });
+
+  it("derives from the entries in view when they are absent", () => {
+    const cfg = base({
+      entries: [
+        entry({ id: "e3", date: "2026-07-24" }),
+        entry({ id: "e2", date: "2026-07-22", foodId: "chicken" }),
+        entry({ id: "e1", date: "2026-07-20" }),
+      ],
+    });
+    expect(foodUsage(cfg, cfg.foods[0])).toEqual({
+      uses: 2,
+      lastUsed: "2026-07-24",
+    });
+    expect(foodUsage(cfg, cfg.foods[1])).toEqual({
+      uses: 1,
+      lastUsed: "2026-07-22",
+    });
+  });
+
+  it("is zero and null for a food nothing in view was eaten of", () => {
+    expect(foodUsage(base({ entries: [] }), food())).toEqual({
+      uses: 0,
+      lastUsed: null,
+    });
+  });
+
+  it("a counter of zero still wins over the window — un-logged, not unknown", () => {
+    const cfg = base({ foods: [food({ uses: 0 })] });
+    expect(foodUsage(cfg, cfg.foods[0])).toEqual({ uses: 0, lastUsed: null });
+  });
+});
+
+describe("addEntry counters", () => {
+  it("materialises on the first bump, backfilling from the window", () => {
+    const cfg = base({
+      entries: [
+        entry({ id: "e2", date: "2026-07-21" }),
+        entry({ id: "e1", date: "2026-07-20" }),
+      ],
+    });
+    const next = addEntry(cfg, entry({ id: "e3", date: "2026-07-25" }));
+    expect(next.foods[0].uses).toBe(3);
+    expect(next.foods[0].lastUsed).toBe("2026-07-25");
+  });
+
+  it("counts on from the counter once it exists — past the entry window", () => {
+    const cfg = base({
+      foods: [food({ uses: 40, lastUsed: "2026-08-01" })],
+      entries: [],
+    });
+    const next = addEntry(cfg, entry({ id: "e9", date: "2026-08-02" }));
+    expect(next.foods[0]).toMatchObject({ uses: 41, lastUsed: "2026-08-02" });
+  });
+
+  it("re-running the same entry id counts nothing further (the 409 dance)", () => {
+    const once = addEntry(base({ entries: [] }), entry({ id: "e1" }));
+    expect(once.foods[0].uses).toBe(1);
+    expect(addEntry(once, entry({ id: "e1" }))).toBe(once);
+  });
+
+  it("never lets a back-filled past day pull lastUsed backwards", () => {
+    const cfg = base({
+      foods: [food({ uses: 5, lastUsed: "2026-08-10" })],
+      entries: [],
+    });
+    const next = addEntry(cfg, entry({ id: "old", date: "2026-08-01" }));
+    expect(next.foods[0]).toMatchObject({ uses: 6, lastUsed: "2026-08-10" });
+  });
+
+  it("leaves the library alone for a food it doesn't know", () => {
+    const cfg = base();
+    const next = addEntry(cfg, entry({ id: "e2", foodId: "nope" }));
+    expect(next.foods).toBe(cfg.foods);
+    expect(next.entries[0].id).toBe("e2");
+  });
+});
+
+describe("removeEntry counters", () => {
+  it("steps the count back, leaving a date the removal didn't touch", () => {
+    const cfg = base({
+      foods: [food({ uses: 5, lastUsed: "2026-08-10" })],
+      entries: [entry({ id: "e1", date: "2026-08-01" })],
+    });
+    expect(removeEntry(cfg, "e1").foods[0]).toMatchObject({
+      uses: 4,
+      lastUsed: "2026-08-10",
+    });
+  });
+
+  it("recomputes the date from what remains when the last use goes", () => {
+    const cfg = base({
+      foods: [food({ uses: 3, lastUsed: "2026-08-10" })],
+      entries: [
+        entry({ id: "e2", date: "2026-08-10" }),
+        entry({ id: "e1", date: "2026-08-04" }),
+      ],
+    });
+    expect(removeEntry(cfg, "e2").foods[0]).toMatchObject({
+      uses: 2,
+      lastUsed: "2026-08-04",
+    });
+  });
+
+  it("drops the date when the window has nothing left to offer", () => {
+    const cfg = base({
+      foods: [food({ uses: 3, lastUsed: "2026-08-10" })],
+      entries: [entry({ id: "e2", date: "2026-08-10" })],
+    });
+    const food0 = removeEntry(cfg, "e2").foods[0];
+    expect(food0.uses).toBe(2);
+    expect("lastUsed" in food0).toBe(false);
+  });
+
+  it("drops the date at zero — never logged again", () => {
+    const cfg = base({
+      foods: [food({ uses: 1, lastUsed: "2026-08-10" })],
+      entries: [entry({ id: "e2", date: "2026-08-10" })],
+    });
+    const food0 = removeEntry(cfg, "e2").foods[0];
+    expect(food0.uses).toBe(0);
+    expect("lastUsed" in food0).toBe(false);
+  });
+
+  it("leaves an uncounted food alone — its derivation already follows", () => {
+    const cfg = base({
+      entries: [
+        entry({ id: "e2", date: "2026-07-22" }),
+        entry({ id: "e1", date: "2026-07-20" }),
+      ],
+    });
+    const next = removeEntry(cfg, "e2");
+    expect(next.foods).toBe(cfg.foods);
+    expect(foodUsage(next, next.foods[0])).toEqual({
+      uses: 1,
+      lastUsed: "2026-07-20",
+    });
+  });
+});
+
+/** A library exercising every ordering rule: three foods on the same day (two of
+ *  them tied on count, so the name breaks it — case-insensitively), an older one,
+ *  one older still, and one never logged. */
+const library = (): MealsConfig => ({
+  v: 1,
+  foods: [
+    food({ id: "rice", name: "rice (bowl)", uses: 22, lastUsed: "2026-08-09" }),
+    food({
+      id: "whey",
+      name: "whey (scoop)",
+      uses: 33,
+      lastUsed: "2026-08-16",
+    }),
+    food({
+      id: "tuna",
+      name: "tuna (¼ can)",
+      uses: 41,
+      lastUsed: "2026-08-16",
+    }),
+    food({ id: "roll", name: "party sausage roll" }),
+    food({
+      id: "aioli",
+      name: "Aioli (tbsp)",
+      uses: 41,
+      lastUsed: "2026-08-16",
+    }),
+    food({ id: "pho", name: "pho (bowl)", uses: 2, lastUsed: "2026-07-16" }),
+  ],
+  entries: [],
+});
+
+const TODAY = "2026-08-16";
+
+describe("rankFoods", () => {
+  it("orders by last eaten, then most eaten, then name", () => {
+    expect(rankFoods(library()).map((f) => f.id)).toEqual([
+      "aioli",
+      "tuna",
+      "whey",
+      "rice",
+      "pho",
+      "roll",
+    ]);
+  });
+
+  it("ranks a library from before the counters off the entries in view", () => {
+    const cfg = base({
+      entries: [
+        entry({ id: "e2", date: "2026-08-02", foodId: "chicken" }),
+        entry({ id: "e1", date: "2026-08-01" }),
+      ],
+    });
+    expect(rankFoods(cfg).map((f) => f.id)).toEqual(["chicken", "rice"]);
+  });
+
+  it("leaves the stored library in its own order", () => {
+    const cfg = library();
+    const before = cfg.foods.map((f) => f.id);
+    rankFoods(cfg);
+    expect(cfg.foods.map((f) => f.id)).toEqual(before);
+  });
+});
+
+describe("bucketFoods", () => {
+  it("groups the library, keeping the ranked order inside a bucket", () => {
+    expect(
+      bucketFoods(library(), TODAY).map((b) => [
+        b.key,
+        b.label,
+        b.foods.map((f) => f.id),
+      ]),
+    ).toEqual([
+      ["week", "this week", ["aioli", "tuna", "whey"]],
+      ["month", "this month", ["rice"]],
+      ["earlier", "earlier", ["pho"]],
+      ["never", "never logged", ["roll"]],
+    ]);
+  });
+
+  it("always returns the four buckets, even empty ones", () => {
+    expect(bucketFoods(EMPTY_MEALS_CONFIG, TODAY).map((b) => b.key)).toEqual([
+      "week",
+      "month",
+      "earlier",
+      "never",
+    ]);
+  });
+
+  it("splits at the 7- and 31-day edges", () => {
+    const at = (lastUsed: string) =>
+      bucketFoods(
+        { v: 1, foods: [food({ uses: 1, lastUsed })], entries: [] },
+        TODAY,
+      ).find((b) => b.foods.length > 0)!.key;
+    expect(at("2026-08-10")).toBe("week"); // 6 days
+    expect(at("2026-08-09")).toBe("month"); // 7
+    expect(at("2026-07-17")).toBe("month"); // 30
+    expect(at("2026-07-16")).toBe("earlier"); // 31
+  });
+});
+
+describe("matchFoods / matchIndex", () => {
+  it("filters on a case-insensitive substring, keeping the ranked order", () => {
+    expect(matchFoods(library(), "BOWL", 8).foods.map((f) => f.id)).toEqual([
+      "rice",
+      "pho",
+    ]);
+  });
+
+  it("takes an empty query as the whole ranked library", () => {
+    expect(matchFoods(library(), "  ", 10).foods.map((f) => f.id)).toEqual(
+      rankFoods(library()).map((f) => f.id),
+    );
+  });
+
+  it("caps at the limit and reports what it cut", () => {
+    const { foods, more } = matchFoods(library(), "", 2);
+    expect(foods.map((f) => f.id)).toEqual(["aioli", "tuna"]);
+    expect(more).toBe(4);
+  });
+
+  it("says nothing matched rather than falling back to everything", () => {
+    expect(matchFoods(library(), "zzz", 8)).toEqual({ foods: [], more: 0 });
+  });
+
+  it("finds the run to paint, and nothing to paint on a miss", () => {
+    expect(matchIndex("chicken parmi", "PAR")).toBe(8);
+    expect(matchIndex("party pie", "par")).toBe(0);
+    expect(matchIndex("party pie", "zz")).toBe(-1);
+    expect(matchIndex("party pie", "")).toBe(-1);
+  });
+});
+
+describe("daysSinceYmd / ageLabel", () => {
+  it("counts whole days across month and year boundaries", () => {
+    expect(daysSinceYmd(TODAY, TODAY)).toBe(0);
+    expect(daysSinceYmd("2026-07-31", TODAY)).toBe(16);
+    expect(daysSinceYmd("2025-12-31", "2026-01-01")).toBe(1);
+    expect(daysSinceYmd(TODAY, "2026-08-14")).toBe(-2);
+  });
+
+  it("crosses a clock change without losing a day", () => {
+    // Sydney's clocks move in early October; the math is UTC, so it can't notice.
+    expect(daysSinceYmd("2026-10-01", "2026-10-08")).toBe(7);
+  });
+
+  it("labels the age, and says nothing for a food never logged", () => {
+    expect(ageLabel(null, TODAY)).toBe("");
+    expect(ageLabel(TODAY, TODAY)).toBe("today");
+    expect(ageLabel("2026-08-15", TODAY)).toBe("1d");
+    expect(ageLabel("2026-07-16", TODAY)).toBe("31d");
   });
 });

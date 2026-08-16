@@ -15,6 +15,12 @@
  * newest-first by construction and eviction takes from the TAIL. Nothing ever
  * re-sorts by date — `date` is what the entry says about itself, not a key.
  *
+ * The LIBRARY is the other way round: it is stored in the order foods were typed
+ * in and never pruned, so every surface reads it through `rankFoods` (last eaten,
+ * then most eaten) off counters `addEntry` keeps on the food itself. Counting on
+ * the food rather than scanning the entries is what survives the rolling window —
+ * a food's history outlives the entries that made it.
+ *
  * Every transform is re-runnable against a fresh base, because that is what the
  * 409 dance does: on a conflict the island refetches, re-applies the SAME pure
  * function, and PUTs again. So each one is idempotent on its own id — applying
@@ -41,6 +47,9 @@ const MAX_ID = 64;
 /** One portion, not a shopping trip; and kilocalories, not kilojoules. */
 const MAX_QTY = 100;
 const MAX_MACRO = 10_000;
+/** Ceiling on the all-time use counter — far past reach at a handful of meals a
+ *  day, but a number that rides in the envelope gets a bound like every other. */
+const MAX_USES = 1_000_000;
 
 /** One library food, with its macros per ONE unit — the unit is whatever the
  *  name says it is ("rice (bowl)", "chicken thigh"). */
@@ -51,6 +60,12 @@ export interface MealsFood {
   p: number;
   c: number;
   f: number;
+  /** Times logged, all-time, and the last day it was eaten — what the library is
+   *  ordered and filtered by. `addEntry` keeps them, so they outlive the rolling
+   *  entry window. ABSENT on a food that predates the counters and on one never
+   *  logged since; `foodUsage` is what derives around that. */
+  uses?: number;
+  lastUsed?: string;
 }
 
 /** One thing eaten: a library food, on a day, some number of units of it. */
@@ -111,6 +126,12 @@ function isTargets(x: unknown): x is MealsTargets {
   );
 }
 
+function isUses(x: unknown): x is number {
+  return (
+    typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= MAX_USES
+  );
+}
+
 function isFood(x: unknown): x is MealsFood {
   return (
     isObj(x) &&
@@ -119,7 +140,12 @@ function isFood(x: unknown): x is MealsFood {
     isMacro(x.kcal) &&
     isMacro(x.p) &&
     isMacro(x.c) &&
-    isMacro(x.f)
+    isMacro(x.f) &&
+    // The counters are optional, never lax: a food carrying a broken one reads as
+    // a tampered payload like any other bad field, rather than as a fresh food.
+    (x.uses === undefined || isUses(x.uses)) &&
+    (x.lastUsed === undefined ||
+      (typeof x.lastUsed === "string" && DATE_RE.test(x.lastUsed)))
   );
 }
 
@@ -169,6 +195,78 @@ export function mealsPayloadBytes(cfg: MealsConfig): number {
  *  refuses a save that wouldn't, rather than sending bytes the route will 404. */
 export function fitsMealsCap(cfg: MealsConfig): boolean {
   return mealsPayloadBytes(cfg) + MEALS_ENVELOPE_OVERHEAD <= MEALS_MAX_BYTES;
+}
+
+// --- usage counters ------------------------------------------------------------
+
+/**
+ * How often a food has been eaten and when it last was — the ONE reader of the
+ * counters, so the derive-on-absent rule lives in exactly one place.
+ *
+ * A food carrying `uses` answers from the counter: an all-time figure, kept past
+ * the rolling entry window. A food without one is answered from the entries
+ * still in view — an honest ~3-month reading for a library that predates the
+ * counters, replaced by the real one the first time it is logged again.
+ */
+export function foodUsage(
+  cfg: MealsConfig,
+  food: MealsFood,
+): { uses: number; lastUsed: string | null } {
+  if (food.uses !== undefined)
+    return { uses: food.uses, lastUsed: food.lastUsed ?? null };
+  let uses = 0;
+  for (const e of cfg.entries) if (e.foodId === food.id) uses += 1;
+  return { uses, lastUsed: lastEatenIn(cfg.entries, food.id) };
+}
+
+/** The newest day a food appears on in these entries, or null — string compare,
+ *  because `YYYY-MM-DD` sorts as a date already. */
+function lastEatenIn(entries: MealsEntry[], foodId: string): string | null {
+  let last: string | null = null;
+  for (const e of entries)
+    if (e.foodId === foodId && (last === null || e.date > last)) last = e.date;
+  return last;
+}
+
+/** The library with this entry's food counted once more. The first bump reads
+ *  `foodUsage`, so a food from before the counters materialises with the window's
+ *  count rather than restarting at one; `lastUsed` only ever moves FORWARD, so
+ *  back-filling a forgotten dinner onto a past day can't age the food. */
+function bumpUsage(cfg: MealsConfig, entry: MealsEntry): MealsFood[] {
+  const food = cfg.foods.find((f) => f.id === entry.foodId);
+  if (!food) return cfg.foods;
+  const { uses, lastUsed } = foodUsage(cfg, food);
+  const bumped: MealsFood = {
+    ...food,
+    uses: Math.min(MAX_USES, uses + 1),
+    lastUsed:
+      lastUsed !== null && lastUsed > entry.date ? lastUsed : entry.date,
+  };
+  return cfg.foods.map((f) => (f.id === food.id ? bumped : f));
+}
+
+/** The library with a removed entry uncounted. A food with no counters needs
+ *  nothing — its derivation already reads the entries the removal left behind. */
+function unbumpUsage(
+  cfg: MealsConfig,
+  gone: MealsEntry,
+  remaining: MealsEntry[],
+): MealsFood[] {
+  const food = cfg.foods.find((f) => f.id === gone.foodId);
+  if (!food || food.uses === undefined) return cfg.foods;
+  const uses = Math.max(0, food.uses - 1);
+  const next: MealsFood = { ...food, uses };
+  if (uses === 0) {
+    // Back to never-logged: a food with no uses has no last day either.
+    delete next.lastUsed;
+  } else if (food.lastUsed === gone.date) {
+    // The removal invalidated the date, and the window is all there is left to
+    // ask — an older use that has since been evicted is unrecoverable.
+    const last = lastEatenIn(remaining, food.id);
+    if (last === null) delete next.lastUsed;
+    else next.lastUsed = last;
+  }
+  return cfg.foods.map((f) => (f.id === food.id ? next : f));
 }
 
 // --- transforms ----------------------------------------------------------------
@@ -233,20 +331,25 @@ export function removeFood(cfg: MealsConfig, id: string): MealsConfig {
  * tail) is evicted: the trailing strip looks back a fortnight, so a log losing
  * its hundredth day back is the honest trade for a fixed envelope.
  *
- * Idempotent on `id`, so the 409 dance can re-run it against a fresh base that
- * may already contain it.
+ * Also counts the food (see `bumpUsage`). Idempotent on `id`, so the 409 dance
+ * can re-run it against a fresh base that may already contain it — and the same
+ * id landing twice must not count twice, which is exactly what that guard buys.
  */
 export function addEntry(cfg: MealsConfig, entry: MealsEntry): MealsConfig {
   if (cfg.entries.some((e) => e.id === entry.id)) return cfg;
   return rebuild(cfg, {
+    foods: bumpUsage(cfg, entry),
     entries: [entry, ...cfg.entries].slice(0, MAX_ENTRIES),
   });
 }
 
-/** Remove one entry by id. An unknown id is a no-op (re-runnable). */
+/** Remove one entry by id, uncounting its food. An unknown id is a no-op
+ *  (re-runnable). */
 export function removeEntry(cfg: MealsConfig, id: string): MealsConfig {
-  if (!cfg.entries.some((e) => e.id === id)) return cfg;
-  return rebuild(cfg, { entries: cfg.entries.filter((e) => e.id !== id) });
+  const gone = cfg.entries.find((e) => e.id === id);
+  if (!gone) return cfg;
+  const entries = cfg.entries.filter((e) => e.id !== id);
+  return rebuild(cfg, { foods: unbumpUsage(cfg, gone, entries), entries });
 }
 
 /**
@@ -321,6 +424,23 @@ export function nextDay(ymd: string): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Whole calendar days from one day-string to the other, in the walkers' own
+ *  UTC-midnight math (so a DST weekend can't round one off). Negative when `to`
+ *  precedes `from` — the callers here only ever look backwards. */
+export function daysSinceYmd(from: string, to: string): number {
+  const a = new Date(`${from}T00:00:00Z`).getTime();
+  const b = new Date(`${to}T00:00:00Z`).getTime();
+  return Math.round((b - a) / 86_400_000);
+}
+
+/** `today` · `3d` · nothing — how a food's last use reads beside its name. Never
+ *  logged says nothing at all rather than inventing a zero. */
+export function ageLabel(lastUsed: string | null, today: string): string {
+  if (lastUsed === null) return "";
+  const days = daysSinceYmd(lastUsed, today);
+  return days === 0 ? "today" : `${days}d`;
+}
+
 const HEADING_WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const HEADING_MONTHS = [
   "jan",
@@ -369,6 +489,106 @@ export function trailingProtein(
     cursor = prevDay(cursor);
   }
   return out.reverse();
+}
+
+// --- the library's order -------------------------------------------------------
+
+/** Bucket edges, in days since the food was last eaten. */
+export const BUCKET_WEEK_DAYS = 7;
+export const BUCKET_MONTH_DAYS = 31;
+
+export type MealsBucketKey = "week" | "month" | "earlier" | "never";
+
+export interface MealsBucket {
+  key: MealsBucketKey;
+  label: string;
+  foods: MealsFood[];
+}
+
+const BUCKET_LABELS: { key: MealsBucketKey; label: string }[] = [
+  { key: "week", label: "this week" },
+  { key: "month", label: "this month" },
+  { key: "earlier", label: "earlier" },
+  { key: "never", label: "never logged" },
+];
+
+/**
+ * The whole library in the order every surface shows it: last eaten first, then
+ * most eaten, then alphabetical. Nothing is ever deleted from this library — if
+ * it was eaten once it will be eaten again — so recency is what keeps the
+ * picker's first rows the food of this week, and a one-off from a year ago sinks
+ * instead of squatting wherever it happened to be typed in.
+ */
+export function rankFoods(cfg: MealsConfig): MealsFood[] {
+  return cfg.foods
+    .map((food) => ({ food, ...foodUsage(cfg, food) }))
+    .sort((a, b) => {
+      if (a.lastUsed !== b.lastUsed) {
+        // A food never logged has no place on the recency scale — it goes last.
+        if (a.lastUsed === null) return 1;
+        if (b.lastUsed === null) return -1;
+        return a.lastUsed < b.lastUsed ? 1 : -1;
+      }
+      if (a.uses !== b.uses) return b.uses - a.uses;
+      return a.food.name.localeCompare(b.food.name, undefined, {
+        sensitivity: "base",
+      });
+    })
+    .map((r) => r.food);
+}
+
+/** The library grouped by how recently it was eaten — always all four buckets,
+ *  in order, so the caller decides what an empty one looks like (it skips it).
+ *  Within a bucket the ranked order carries. */
+export function bucketFoods(cfg: MealsConfig, today: string): MealsBucket[] {
+  const groups: Record<MealsBucketKey, MealsFood[]> = {
+    week: [],
+    month: [],
+    earlier: [],
+    never: [],
+  };
+  for (const food of rankFoods(cfg))
+    groups[bucketOf(foodUsage(cfg, food).lastUsed, today)].push(food);
+  return BUCKET_LABELS.map(({ key, label }) => ({
+    key,
+    label,
+    foods: groups[key],
+  }));
+}
+
+function bucketOf(lastUsed: string | null, today: string): MealsBucketKey {
+  if (lastUsed === null) return "never";
+  const days = daysSinceYmd(lastUsed, today);
+  if (days < BUCKET_WEEK_DAYS) return "week";
+  return days < BUCKET_MONTH_DAYS ? "month" : "earlier";
+}
+
+/** Where a query matches a name, case-insensitively — the index the picker paints
+ *  amber from. -1 for no match, and for an empty query (there is nothing to
+ *  highlight, not a match at position zero). */
+export function matchIndex(name: string, query: string): number {
+  if (!query) return -1;
+  return name.toLowerCase().indexOf(query.toLowerCase());
+}
+
+/**
+ * The library filtered to what was typed, in ranked order, capped — an empty
+ * query is "everything", which is what makes the freshly-opened picker a recent
+ * list. `more` is what the cap cut, so the UI can say so rather than pretend the
+ * library ends there.
+ */
+export function matchFoods(
+  cfg: MealsConfig,
+  query: string,
+  limit: number,
+): { foods: MealsFood[]; more: number } {
+  const q = query.trim();
+  const ranked = rankFoods(cfg);
+  const hits = q ? ranked.filter((f) => matchIndex(f.name, q) >= 0) : ranked;
+  return {
+    foods: hits.slice(0, limit),
+    more: Math.max(0, hits.length - limit),
+  };
 }
 
 // --- input parsing -------------------------------------------------------------
