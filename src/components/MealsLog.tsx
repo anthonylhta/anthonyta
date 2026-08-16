@@ -34,6 +34,7 @@ import {
   removeEntry,
   removeFood,
   setTargets,
+  trailingAverage,
   trailingProtein,
   updateFood,
   type MealsConfig,
@@ -357,6 +358,13 @@ function TodayView({
   const totals = dayTotals(cfg, day);
   const targets = cfg.targets ?? null;
   const entries = entriesFor(cfg, day);
+  // The trend behind the day — trailing from the VIEWED day, so stepping back
+  // reads that day's week rather than this one's.
+  const week = trailingAverage(cfg, day, 7);
+  // Behind on the macro that gates the training is the one figure here worth a
+  // colour; kcal over or under is not a verdict.
+  const proteinBehind =
+    week !== null && targets !== null && week.avg.p < targets.p * 0.9;
   const [foodId, setFoodId] = useState("");
   const [qtyText, setQtyText] = useState("1");
   const qty = parseQtyInput(qtyText);
@@ -435,6 +443,17 @@ function TodayView({
             target={targets?.p ?? null}
           />
         </div>
+
+        {week && (
+          <p className="mt-2 text-[11px] tabular-nums text-muted">
+            7-day avg · {week.logged} logged ·{" "}
+            {commas(Math.round(week.avg.kcal))} kcal ·{" "}
+            <span className={proteinBehind ? "text-amber" : undefined}>
+              p{Math.round(week.avg.p)}
+            </span>{" "}
+            c{Math.round(week.avg.c)} f{Math.round(week.avg.f)}
+          </p>
+        )}
       </div>
 
       {cfg.foods.length === 0 ? (

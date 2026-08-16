@@ -156,3 +156,74 @@ export const SAMPLE_ITEMS: FeedItem[] = [
     ts: null,
   },
 ];
+
+/* --- "new since your last visit" (roadmap 54's per-device read-state) -------
+ *
+ * Read-state that never leaves the device: no store, no sync, no server memory
+ * of what the owner has read. All the page needs is WHEN the last visit was, so
+ * a single localStorage record carries two timestamps and every marker is
+ * derived from them.
+ */
+
+/** Where a device remembers its visits. Plain localStorage, like the
+ *  breakthrough memory: a display fact about this browser, nothing worth
+ *  sealing — a cleared browser just loses one session's highlights. */
+export const READER_VISIT_KEY = "reader-visit-v1";
+
+/** How long one visit stays "the same visit". Reloading, or coming back from a
+ *  tab you opened off the timeline, must not re-baseline and wipe the markers
+ *  you were still working through. */
+export const VISIT_SESSION_MS = 30 * 60_000;
+
+export interface ReaderVisit {
+  /** Start of the PREVIOUS session — the baseline "new" is judged against. */
+  last: number;
+  /** Start of this session. */
+  current: number;
+}
+
+/**
+ * The stored record + now → the record this visit runs on. Three cases, and the
+ * first is the one worth stating: on a device with no memory there is no
+ * previous visit to be new AGAINST, so the baseline is now — nothing already
+ * published is marked, rather than the whole timeline lighting up as "new".
+ */
+export function rollVisit(
+  stored: ReaderVisit | null,
+  now: number,
+): ReaderVisit {
+  if (stored === null) return { last: now, current: now };
+  // Still inside the same session — keep the baseline, so a reload within the
+  // half hour shows the same highlights it did a minute ago.
+  if (now - stored.current < VISIT_SESSION_MS) return stored;
+  return { last: stored.current, current: now };
+}
+
+/**
+ * The stored JSON → a record, or null for "no usable memory". Junk reads as
+ * null and never throws: the record is whatever some previous build (or another
+ * page on the origin) left behind, so it is untrusted input like any other.
+ */
+export function parseVisit(json: string | null): ReaderVisit | null {
+  if (json === null) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== "object" || raw === null) return null;
+  const { last, current } = raw as { last?: unknown; current?: unknown };
+  if (typeof last !== "number" || typeof current !== "number") return null;
+  if (!Number.isFinite(last) || !Number.isFinite(current)) return null;
+  if (last < 0 || current < 0) return null;
+  // A baseline after the session it precedes is a record no roll could produce.
+  if (last > current) return null;
+  return { last, current };
+}
+
+/** Published since the baseline. An undated item is never new — the marker
+ *  would be a guess, and the age column already says "—". */
+export function isNew(item: FeedItem, visit: ReaderVisit): boolean {
+  return item.ts !== null && item.ts > visit.last;
+}

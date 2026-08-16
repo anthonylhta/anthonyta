@@ -92,3 +92,59 @@ export function recordRows(
     };
   });
 }
+
+/** One streak read across the seals it appears in — the week-over-week strip the
+ *  record was kept for. */
+export interface RecordTrend {
+  name: string;
+  /** Counts oldest → newest, one per seal that CARRIED this streak. A seal from
+   *  before the streak existed contributes nothing rather than a zero: padding
+   *  would draw a climb out of thin air. */
+  values: number[];
+  first: number;
+  last: number;
+  /** The NEWEST seal's target, or null when the newest seal no longer tracks the
+   *  streak — a target retired weeks ago is not the one to read a strip against. */
+  target: number | null;
+}
+
+/**
+ * Decrypted entries → one trend per streak, OLDEST first inside each strip: a
+ * sparkline reads left to right in time, the opposite of the rows above it.
+ *
+ * The names are data (an open record, the same bargain as `streakChanges`), so
+ * the vocabulary is whatever the seals carry — union across every fetched seal,
+ * in first-seen order walking oldest → newest, and `Object.hasOwn` throughout so
+ * a streak named `toString` diffs against the seals rather than Object.prototype.
+ * A streak seen only once is dropped: one point is a reading, not a trend.
+ */
+export function recordTrends(
+  entries: { day: string; doc: ApertureDoc }[],
+): RecordTrend[] {
+  const sorted = [...entries].sort((a, b) => a.day.localeCompare(b.day));
+  const newest = sorted[sorted.length - 1];
+
+  const names: string[] = [];
+  for (const e of sorted)
+    for (const name of Object.keys(e.doc.sealed.streaks))
+      if (!names.includes(name)) names.push(name);
+
+  const trends: RecordTrend[] = [];
+  for (const name of names) {
+    const values: number[] = [];
+    for (const e of sorted)
+      if (Object.hasOwn(e.doc.sealed.streaks, name))
+        values.push(e.doc.sealed.streaks[name].count);
+    if (values.length < 2) continue;
+    trends.push({
+      name,
+      values,
+      first: values[0],
+      last: values[values.length - 1],
+      target: Object.hasOwn(newest.doc.sealed.streaks, name)
+        ? newest.doc.sealed.streaks[name].target
+        : null,
+    });
+  }
+  return trends;
+}
