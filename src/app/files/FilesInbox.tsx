@@ -27,6 +27,7 @@ import { SHARE_TTL_DAYS } from "@/lib/shares";
 import { RecoverWithShares } from "@/components/RecoveryShares";
 import { usePrfCeremonySupported } from "./prfCeremony";
 import { useVault, type Vault } from "./useVault";
+import { PdfPages } from "./PdfPages";
 
 // Short type tags for the non-image thumbnail slot.
 const KIND_TAG: Record<FileKind, string> = {
@@ -784,6 +785,9 @@ function EncryptedRow({
     meta: EnvelopeMeta;
     text?: string;
     url?: string;
+    /** Kept alongside the object URL for PDFs only — the in-page renderer
+     *  takes bytes (a blob: URL can't be fetched under connect-src 'self'). */
+    bytes?: Uint8Array;
   } | null>(null);
   const [copyLabel, setCopyLabel] = useState("copy");
   const [shareLabel, setShareLabel] = useState("share");
@@ -824,7 +828,9 @@ function EncryptedRow({
           }),
         );
         urlRef.current = url;
-        setItem({ meta, url });
+        setItem(
+          viewKind(meta.t) === "pdf" ? { meta, url, bytes } : { meta, url },
+        );
       }
     } catch {
       setDecErr(true);
@@ -1028,10 +1034,8 @@ function EncryptedRow({
         viewKind(item.meta.t) === "pdf" &&
         (/Android/i.test(navigator.userAgent) ? (
           // Android Chrome has no inline PDF viewer — a blob: iframe would render
-          // a dead grey box, so the save link stays the honest door there.
-          <p className="mt-2 text-xs text-muted">
-            no inline pdf viewer on this device — save to view
-          </p>
+          // a dead grey box — so the pages are drawn here with self-hosted pdf.js.
+          item.bytes && <PdfPages bytes={item.bytes} name={item.meta.n} />
         ) : (
           <iframe
             src={item.url}
