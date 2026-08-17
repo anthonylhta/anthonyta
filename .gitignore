@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# pdf.js runtime assets — copied from node_modules on postinstall (scripts/pdfjs-assets.mjs)
+/public/pdfjs/
+
 # production
 /build
 

@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Node CommonJS tooling scripts — intentionally use require(); not app code.
     "**/*.cjs",
+    // pdf.js runtime assets copied from node_modules on postinstall — vendor code.
+    "public/pdfjs/**",
   ]),
 ]);
 
