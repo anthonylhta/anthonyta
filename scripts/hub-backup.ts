@@ -12,7 +12,7 @@
  *
  *   backup (default): refuse unless the store is on, list `meta/`, `inbox/`,
  *     `vault/` (all pages; `share/` is skipped by never listing it — ephemeral),
- *     download each object, write it under `notes/misc/backups/<YYYY-MM-DD>/<key>`,
+ *     download each object, write it under `notes/backups/<YYYY-MM-DD>/<key>`,
  *     sha256 it, then write `manifest.json`. Any download failure aborts non-zero
  *     naming the key and does NOT write the manifest, so a partial folder can never
  *     look complete.
@@ -106,7 +106,7 @@ async function backup(): Promise<void> {
 
   const backupDir = path.resolve(
     process.cwd(),
-    "notes/misc/backups",
+    "notes/backups",
     localDateStamp(new Date()),
   );
   if (await exists(backupDir))
