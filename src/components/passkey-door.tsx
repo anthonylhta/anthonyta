@@ -40,8 +40,9 @@ export function PasskeyDoor() {
         redirect: false,
       });
       if (!result || result.error) throw new Error("denied");
-      // Full navigation so the server re-renders the command center with the
-      // fresh session cookie.
+      // Full navigation, deliberately (not router.push): the server must
+      // re-render the command center with the fresh session cookie.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       location.assign("/");
     } catch {
       // Hidden door: a failed or cancelled ceremony leaves no trace.
