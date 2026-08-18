@@ -12,14 +12,14 @@ export const me = {
   intro: "sydney · building things in typescript · open to work",
 } as const;
 
-/** TODO(connector: webnovel) — current read + progress from webnovelist (Supabase) */
+/** Sample reading — the lobby's fallback when the webnovel connector is off. */
 export const reading = {
   title: "Lord of the Mysteries",
   chapter: 221,
   total: 300,
 };
 
-/** TODO(connector: riichi) — today's hand id + your streak from riichi (Neon) */
+/** Sample hand — the lobby's fallback when the riichi connector is off. */
 export const riichi = {
   handNo: 412,
   solved: false,
