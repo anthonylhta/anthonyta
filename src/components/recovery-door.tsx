@@ -26,6 +26,9 @@ export function RecoveryDoor() {
       setDenied(true);
       return;
     }
+    // Full navigation, deliberately (not router.push): the server must
+    // re-render the command center with the fresh session cookie.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     location.assign("/");
   }
 
