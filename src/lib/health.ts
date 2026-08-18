@@ -14,7 +14,14 @@ export interface HealthTarget {
 
 export const HEALTH_TARGETS: HealthTarget[] = [
   { key: "riichi", label: "riichi", url: "https://riichi.anthonyta.dev" },
-  { key: "novel", label: "webnovel", url: "https://novel.anthonyta.dev" },
+  // webnovelist's home page is fully dynamic (Clerk + a query on every hit), so
+  // a 5-minutely probe always paid a cold start; its /api/health is auth-free,
+  // renders nothing, runs one bounded SELECT 1 and answers 200/503 honestly.
+  {
+    key: "novel",
+    label: "webnovel",
+    url: "https://novel.anthonyta.dev/api/health",
+  },
   { key: "ishin", label: "ishin", url: "https://ishin.io" },
 ];
 
