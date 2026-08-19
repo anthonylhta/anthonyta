@@ -15,6 +15,10 @@
  * newest-first by construction and eviction takes from the TAIL. Nothing ever
  * re-sorts by date — `date` is what the entry says about itself, not a key.
  *
+ * The WEIGHTS are the exception, and the only collection here kept sorted: one
+ * weigh-in per day, oldest → newest, because every reading of them is a trailing
+ * WINDOW and a cap that evicts the oldest is then just a slice off the front.
+ *
  * The LIBRARY is the other way round: it is stored in the order foods were typed
  * in and never pruned, so every surface reads it through `rankFoods` (last eaten,
  * then most eaten) off counters `addEntry` keeps on the food itself. Counting on
@@ -27,6 +31,7 @@
  * it twice (or against a base that already has it) changes nothing.
  */
 
+import { tone } from "./money";
 import { isValidSeq } from "./seqrule";
 
 /** Envelope frame cap for the PUT — the same ceiling the gym log gets; a year of
@@ -42,11 +47,18 @@ export const MEALS_ENVELOPE_OVERHEAD = 128;
 export const MAX_FOODS = 200;
 /** At ~6 entries a day that is ~100 days — far past the 14-day strip's reach. */
 export const MAX_ENTRIES = 600;
+/** ~13 months of daily weigh-ins; past it the OLDEST morning drops off. At ~30
+ *  bytes a row the whole log is ~12KB — the weight of a fortnight of entries,
+ *  and the strip never looks further back than ten weeks. */
+export const MAX_WEIGHTS = 400;
 const MAX_NAME = 60;
 const MAX_ID = 64;
 /** One portion, not a shopping trip; and kilocalories, not kilojoules. */
 const MAX_QTY = 100;
 const MAX_MACRO = 10_000;
+/** A person, not a barbell — outside these a figure is a typo, not a weigh-in. */
+const MIN_KG = 20;
+const MAX_KG = 300;
 /** Ceiling on the all-time use counter — far past reach at a handful of meals a
  *  day, but a number that rides in the envelope gets a bound like every other. */
 const MAX_USES = 1_000_000;
@@ -78,6 +90,15 @@ export interface MealsEntry {
   qty: number;
 }
 
+/** One morning's weigh-in. Daily by design and read weekly by design: the number
+ *  moves a kilo on water alone, so the day it was taken matters only as the key
+ *  the averages window over. */
+export interface MealsWeight {
+  /** The Sydney calendar day it was measured on, `YYYY-MM-DD`. */
+  date: string;
+  kg: number;
+}
+
 export interface MealsTargets {
   kcal: number;
   p: number;
@@ -94,6 +115,10 @@ export interface MealsConfig {
    *  intake to invent, so the day renders as totals with nothing to read
    *  against. */
   targets?: MealsTargets;
+  /** The weigh-ins, oldest → newest, at most one per date. Absent until the
+   *  first morning is logged — a log with no weights has nothing to say about a
+   *  body, which is not the same as a body that never changed. */
+  weights?: MealsWeight[];
   /** Sealed write counter (58b rollback detection) — see lib/seqrule. */
   seq?: number;
 }
@@ -149,6 +174,24 @@ function isFood(x: unknown): x is MealsFood {
   );
 }
 
+/** A weight in kilos, to at most one decimal — the precision a bathroom scale
+ *  actually has, and the one the field rounds to before it is ever stored. */
+function isKg(x: unknown): x is number {
+  return (
+    typeof x === "number" &&
+    Number.isFinite(x) &&
+    x >= MIN_KG &&
+    x <= MAX_KG &&
+    Math.round(x * 10) / 10 === x
+  );
+}
+
+function isWeight(x: unknown): x is MealsWeight {
+  return (
+    isObj(x) && typeof x.date === "string" && DATE_RE.test(x.date) && isKg(x.kg)
+  );
+}
+
 function isEntry(x: unknown): x is MealsEntry {
   return (
     isObj(x) &&
@@ -172,15 +215,25 @@ export function normalizeMealsConfig(x: unknown): MealsConfig | null {
   if (!Array.isArray(x.entries) || x.entries.length > MAX_ENTRIES) return null;
   if (!x.entries.every(isEntry)) return null;
   if (x.targets !== undefined && !isTargets(x.targets)) return null;
+  if (x.weights !== undefined) {
+    if (!Array.isArray(x.weights) || x.weights.length > MAX_WEIGHTS)
+      return null;
+    if (!x.weights.every(isWeight)) return null;
+    // A date twice is two answers to one morning — an ambiguity every window
+    // here would silently average, so it reads as a tampered payload instead.
+    const days = new Set(x.weights.map((w: MealsWeight) => w.date));
+    if (days.size !== x.weights.length) return null;
+  }
   if (!isValidSeq(x.seq)) return null;
-  // Carry `targets` and `seq` through the rebuild — dropping either would erase
-  // a field on the next write (the prf-label lesson: a rebuild that forgets a
-  // field it didn't know about silently deletes it).
+  // Carry `targets`, `weights` and `seq` through the rebuild — dropping any of
+  // them would erase a field on the next write (the prf-label lesson: a rebuild
+  // that forgets a field it didn't know about silently deletes it).
   return {
     v: 1,
     foods: x.foods,
     entries: x.entries,
     ...(x.targets !== undefined ? { targets: x.targets as MealsTargets } : {}),
+    ...(x.weights !== undefined ? { weights: x.weights as MealsWeight[] } : {}),
     ...(x.seq !== undefined ? { seq: x.seq as number } : {}),
   };
 }
@@ -277,6 +330,7 @@ function rebuild(cfg: MealsConfig, patch: Partial<MealsConfig>): MealsConfig {
     foods: cfg.foods,
     entries: cfg.entries,
     ...(cfg.targets !== undefined ? { targets: cfg.targets } : {}),
+    ...(cfg.weights !== undefined ? { weights: cfg.weights } : {}),
     ...patch,
   };
   if (cfg.seq !== undefined) next.seq = cfg.seq;
@@ -537,6 +591,152 @@ export function trailingAverage(
   };
 }
 
+// --- bodyweight ----------------------------------------------------------------
+
+/**
+ * Log (or correct) one morning's weight. Upsert by DATE — a second weigh-in on
+ * the same day replaces the first rather than joining it, because a day has one
+ * weight and two would be an average nobody asked for. The list comes back
+ * sorted, and past the cap the oldest morning is the one that goes.
+ *
+ * Out-of-range or unparseable figures are a NO-OP, not a stored zero: the field
+ * simply doesn't stick. Re-runnable on the same day+kilos, so the 409 dance can
+ * apply it twice.
+ */
+export function setWeight(
+  cfg: MealsConfig,
+  date: string,
+  kg: number,
+): MealsConfig {
+  if (!DATE_RE.test(date)) return cfg;
+  const rounded = Math.round(kg * 10) / 10;
+  if (!isKg(rounded)) return cfg;
+  const weights = [
+    ...(cfg.weights ?? []).filter((w) => w.date !== date),
+    { date, kg: rounded },
+  ]
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    .slice(-MAX_WEIGHTS);
+  return rebuild(cfg, { weights });
+}
+
+/** Unlog a day — for the morning the scale was read wrong, or the field was
+ *  cleared. A day with no weigh-in is a no-op (re-runnable); an emptied list
+ *  stays an empty list rather than vanishing, which is the honest shape for a
+ *  log that has weighed and stopped. */
+export function clearWeight(cfg: MealsConfig, date: string): MealsConfig {
+  if (!cfg.weights?.some((w) => w.date === date)) return cfg;
+  return rebuild(cfg, {
+    weights: cfg.weights.filter((w) => w.date !== date),
+  });
+}
+
+/** What the scale said on one day, or null — the figure the field shows for the
+ *  day being viewed. */
+export function weightFor(cfg: MealsConfig, date: string): number | null {
+  return cfg.weights?.find((w) => w.date === date)?.kg ?? null;
+}
+
+/** One decimal — the precision every reading here prints and stores at. */
+function oneDecimal(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+/** `ymd` shifted back `n` whole days, walked through `prevDay` so the windows
+ *  below run on the same UTC-midnight arithmetic as every other walker here. */
+function backDays(ymd: string, n: number): string {
+  let cursor = ymd;
+  for (let i = 0; i < n; i++) cursor = prevDay(cursor);
+  return cursor;
+}
+
+/** The weigh-ins in the 7 days ending at `day`, inclusive — summed and counted,
+ *  unrounded. Days without one contribute NOTHING (a morning not weighed is not
+ *  a morning at zero), which is what makes `logged` the honest denominator. */
+function weightWindow(
+  cfg: MealsConfig,
+  day: string,
+  days = 7,
+): { sum: number; logged: number } {
+  let sum = 0;
+  let logged = 0;
+  let cursor = day;
+  for (let i = 0; i < days; i++) {
+    const kg = weightFor(cfg, cursor);
+    if (kg !== null) {
+      sum += kg;
+      logged += 1;
+    }
+    cursor = prevDay(cursor);
+  }
+  return { sum, logged };
+}
+
+/**
+ * The reading the daily number cannot give: this week's average weight, and how
+ * far it moved from the week before.
+ *
+ * Water, salt and the hour of the morning swing the scale a kilo either way, so
+ * the average is the signal and the morning is noise — and the drift is only
+ * stated when BOTH weeks carry at least two weigh-ins. One point per week is
+ * two mornings compared, not a trend, and printing it as one would invite the
+ * exact over-reading this whole reading exists to prevent. Null averages and
+ * null drifts stay null: nothing is invented from an unweighed week.
+ */
+export function weightTrend(
+  cfg: MealsConfig,
+  day: string,
+): { avg: number | null; logged: number; deltaPerWeek: number | null } {
+  const now = weightWindow(cfg, day);
+  if (now.logged === 0) return { avg: null, logged: 0, deltaPerWeek: null };
+  const mean = now.sum / now.logged;
+  const prior = weightWindow(cfg, backDays(day, 7));
+  const enough = now.logged >= 2 && prior.logged >= 2;
+  return {
+    avg: oneDecimal(mean),
+    logged: now.logged,
+    deltaPerWeek: enough ? oneDecimal(mean - prior.sum / prior.logged) : null,
+  };
+}
+
+/**
+ * Weekly averages, oldest → newest — the strip on the vessel band. Each value is
+ * one 7-day window, stepping back a week at a time from `day`.
+ *
+ * A week with no weigh-in contributes NOTHING rather than a zero: padding the
+ * gap would draw a cliff to the floor and back, which is a picture of a holiday,
+ * not of a body (the record band's rule). So the series can be shorter than
+ * `weeks`, and a caller wanting a trend gates on its length.
+ */
+export function weeklyWeightAverages(
+  cfg: MealsConfig,
+  day: string,
+  weeks = 10,
+): number[] {
+  const out: number[] = [];
+  for (let k = weeks - 1; k >= 0; k--) {
+    const { sum, logged } = weightWindow(cfg, backDays(day, 7 * k));
+    if (logged > 0) out.push(oneDecimal(sum / logged));
+  }
+  return out;
+}
+
+/**
+ * A week-over-week drift as both surfaces print it: the signed figure to one
+ * decimal, and the colour its sign has earned. Shared so the /meals row and the
+ * vessel band cannot end up disagreeing about which way is green.
+ *
+ * A real minus sign, not a hyphen (these are typeset figures, not ASCII), and a
+ * flat week reads `0.0` with no sign at all — there is no direction to claim.
+ */
+export function driftLabel(delta: number): { text: string; tone: string } {
+  const abs = Math.abs(delta).toFixed(1);
+  return {
+    text: delta > 0 ? `+${abs}` : delta < 0 ? `−${abs}` : "0.0",
+    tone: tone(delta),
+  };
+}
+
 // --- the library's order -------------------------------------------------------
 
 /** Bucket edges, in days since the food was last eaten. */
@@ -668,4 +868,23 @@ export function parseMacroInput(text: string): number | null {
   const n = Number(text);
   if (!Number.isFinite(n) || n > MAX_MACRO) return null;
   return Math.round(n * 10) / 10;
+}
+
+/**
+ * Interpret the weigh-in field: the kilos, or `null` for anything that isn't a
+ * plain number in human range. A comma is read as a decimal point — the phone
+ * keypad offers whichever the locale feels like, and a scale reading 67,2 is not
+ * a typo. Finer than one decimal rounds rather than rejects: a scale that prints
+ * three figures is offering precision the body doesn't have.
+ *
+ * A text field rather than `type="number"` for `parseQtyInput`'s reason — a
+ * controlled number input snaps a cleared field straight back to 0.
+ */
+export function parseWeightInput(text: string): number | null {
+  const t = text.trim().replace(",", ".");
+  if (!/^\d*\.?\d*$/.test(t)) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  const kg = Math.round(n * 10) / 10;
+  return isKg(kg) ? kg : null;
 }

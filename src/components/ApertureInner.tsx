@@ -68,7 +68,15 @@ import {
   type FinConfig,
 } from "@/lib/fin";
 import { normalizeGymConfig, sessionCounts, sessionsThisWeek } from "@/lib/gym";
-import { dayTotals, normalizeMealsConfig, trailingProtein } from "@/lib/meals";
+import {
+  dayTotals,
+  driftLabel,
+  normalizeMealsConfig,
+  trailingProtein,
+  weeklyWeightAverages,
+  weightTrend,
+  type MealsConfig,
+} from "@/lib/meals";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
 import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
@@ -263,16 +271,16 @@ async function gymSeries(
 }
 
 /**
- * The meals path's evidence — the second sealed series, on gym's exact terms:
- * derived in the browser from the E2EE `meta/meals` envelope, best-effort by
- * construction, never able to delay or fail the page. Protein per day (the
- * macro the meal log accents), with today's count as the number beside the
- * strip — rounded, since decimal macros can put fractions in the sum.
+ * The meal log itself, opened ONCE for the two readings it feeds: the meals
+ * path's evidence strip (protein, when a path asks for it) and the vessel's
+ * weight trend (which no declaration gates — the body is read whether or not a
+ * path has been declared over it). One fetch and one decrypt for both, on gym's
+ * exact terms: best-effort by construction, so ANY miss returns null and the
+ * page carries on without either reading.
  */
-async function mealsSeries(
-  today: string,
+async function mealsConfig(
   openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
-): Promise<EvidenceSeries | null> {
+): Promise<MealsConfig | null> {
   try {
     const res = await fetch("/api/meals");
     if (res.status !== 200) return null;
@@ -281,12 +289,7 @@ async function mealsSeries(
       MEALS_CONTEXT,
     );
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    const cfg = normalizeMealsConfig(parsed);
-    if (!cfg) return null;
-    return {
-      levels: toLevels(trailingProtein(cfg, today, ACTIVITY_DAYS)),
-      value: Math.round(dayTotals(cfg, today).p),
-    };
+    return normalizeMealsConfig(parsed);
   } catch {
     return null;
   }
@@ -308,9 +311,11 @@ export function ApertureInner({
   const [doc, setDoc] = useState<ApertureDoc | null>(null);
   const [fin, setFin] = useState<FinConfig | null>(null);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
-  /** The sealed strips, once they land — see `gymSeries` / `mealsSeries`. */
+  /** The sealed gym strip, once it lands — see `gymSeries`. */
   const [gym, setGym] = useState<EvidenceSeries | null>(null);
-  const [meals, setMeals] = useState<EvidenceSeries | null>(null);
+  /** The sealed meal log, once it lands — the protein strip and the vessel are
+   *  both derived from it below. */
+  const [mealsCfg, setMealsCfg] = useState<MealsConfig | null>(null);
   /** The archived seal history, once it lands — see `recordSeries`. */
   const [record, setRecord] = useState<RecordState | null>(null);
   /** Raw journal days have run ≥2 days past the seal — flag, never resolve. */
@@ -328,7 +333,7 @@ export function ApertureInner({
       setFin(null);
       setDataErr(null);
       setGym(null);
-      setMeals(null);
+      setMealsCfg(null);
       setRecord(null);
       setPending(false);
       setShowResolved(false);
@@ -401,16 +406,19 @@ export function ApertureInner({
         );
         if (behind && !cancelled) setPending(true);
 
-        // The sealed strips, only when a path actually asks for them — each
-        // costs a request and a decrypt, and a document may name neither.
+        // The meal log — one request and one decrypt, unconditionally: the
+        // vessel band reads a body, which no path has to have been declared over.
+        // The protein strip still waits on a declaration, but it comes off these
+        // same bytes rather than a second decrypt.
+        const meals = await mealsConfig(openItem);
+        if (meals && !cancelled) setMealsCfg(meals);
+
+        // The sealed gym strip, only when a path actually asks for it — it costs
+        // a request and a decrypt, and a document may never name it.
         const declared = declaredSeriesKeys(next.sealed.paths);
         if (declared.has("gym")) {
           const gymEv = await gymSeries(today, openItem);
           if (gymEv && !cancelled) setGym(gymEv);
-        }
-        if (declared.has("meals")) {
-          const mealsEv = await mealsSeries(today, openItem);
-          if (mealsEv && !cancelled) setMeals(mealsEv);
         }
 
         // The seal history — a listing plus up to a dozen fetches and decrypts.
@@ -424,6 +432,19 @@ export function ApertureInner({
       cancelled = true;
     };
   }, [status, openItem, today]);
+
+  // The meals path's evidence, off the log already open here — protein per day
+  // (the macro the meal log accents) with today's count beside it, rounded since
+  // decimal macros put fractions in the sum. Only when a path asks for it: an
+  // undeclared series is one the band would never draw.
+  const mealsEvidence = useMemo<EvidenceSeries | null>(() => {
+    if (!doc || !mealsCfg) return null;
+    if (!declaredSeriesKeys(doc.sealed.paths).has("meals")) return null;
+    return {
+      levels: toLevels(trailingProtein(mealsCfg, today, ACTIVITY_DAYS)),
+      value: Math.round(dayTotals(mealsCfg, today).p),
+    };
+  }, [doc, mealsCfg, today]);
 
   // Ten weeks of the ledger, walked once per envelope rather than once per render:
   // it is the same two readings the stats grid prints, taken ten times over.
@@ -483,8 +504,18 @@ export function ApertureInner({
   const allSeries: PathSeries = {
     ...series,
     ...(gym ? { gym } : {}),
-    ...(meals ? { meals } : {}),
+    ...(mealsEvidence ? { meals: mealsEvidence } : {}),
   };
+
+  // The vessel — the weight log read as ten weekly averages, plus this week's.
+  // Two weeks is the least that can be drawn as a trend, so below that the band
+  // does not exist: absence is the rule, and a lone point is not a picture.
+  const weightWeeks = mealsCfg ? weeklyWeightAverages(mealsCfg, today) : [];
+  const weightNow = mealsCfg ? weightTrend(mealsCfg, today) : null;
+  const weightDrift =
+    weightNow && weightNow.deltaPerWeek !== null
+      ? driftLabel(weightNow.deltaPerWeek)
+      : null;
 
   const recovered = fin ? recoveredThisWeek(fin, today) : null;
   const absorbed = fin ? absorbedThisWeek(fin, today) : null;
@@ -914,6 +945,44 @@ export function ApertureInner({
           produces.
         </Flavor>
       </Section>
+
+      {weightWeeks.length >= 2 && (
+        <Section label="the vessel">
+          <TrendRow
+            label="weight"
+            values={weightWeeks}
+            delta={weightWeeks[weightWeeks.length - 1] - weightWeeks[0]}
+            plot="weekly average bodyweight, last ten weeks"
+            // No unit in the cell — it overflowed the phone; the line below owns it.
+            right={`${weightWeeks[0].toFixed(1)} → ${weightWeeks[
+              weightWeeks.length - 1
+            ].toFixed(1)}`}
+          />
+          <p className="mt-2 text-[11px] tabular-nums text-muted">
+            {weightNow?.avg != null && (
+              <>
+                this week{" "}
+                <span className="text-fg/90">
+                  {weightNow.avg.toFixed(1)} kg
+                </span>
+                {weightDrift && (
+                  <>
+                    {" · "}
+                    <span className={weightDrift.tone}>
+                      {weightDrift.text} kg/wk
+                    </span>
+                  </>
+                )}
+                {" · "}
+              </>
+            )}
+            weekly averages, 10 wk
+          </p>
+          <Flavor>
+            the vessel every path runs on — read the average, never the morning.
+          </Flavor>
+        </Section>
+      )}
 
       <Section label="vital gu">
         <VitalGuSlot gu={vitalGu} />

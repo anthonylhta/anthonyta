@@ -15,8 +15,10 @@ import {
   addFood,
   ageLabel,
   bucketFoods,
+  clearWeight,
   dayHeading,
   dayTotals,
+  driftLabel,
   EMPTY_MEALS_CONFIG,
   entriesFor,
   fitsMealsCap,
@@ -30,13 +32,17 @@ import {
   normalizeMealsConfig,
   parseMacroInput,
   parseQtyInput,
+  parseWeightInput,
   prevDay,
   removeEntry,
   removeFood,
   setTargets,
+  setWeight,
   trailingAverage,
   trailingProtein,
   updateFood,
+  weightFor,
+  weightTrend,
   type MealsConfig,
   type MealsFood,
   type MealsTargets,
@@ -419,6 +425,8 @@ function TodayView({
         )}
       </div>
 
+      <WeightRow cfg={cfg} day={day} busy={busy} saveConfig={saveConfig} />
+
       <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-3">
         {MACRO_ROWS.map((m) => (
           <MacroBar
@@ -532,6 +540,112 @@ function TodayView({
             </div>
           );
         })
+      )}
+    </div>
+  );
+}
+
+/**
+ * The morning's weigh-in, and the only reading of it worth having.
+ *
+ * The field follows the day browser like the entries do — stepping back and
+ * typing logs THAT morning, which is how a weigh-in remembered at lunch lands on
+ * the day it happened. What it shows is the day; what it says is the week: the
+ * scale swings a kilo on water and the hour it was read at, so the average on the
+ * right is the signal and the number in the box is noise the average eats.
+ *
+ * Saving is Enter or blur, and only when the figure actually changed — a field
+ * tabbed through is not a write. An unusable figure does NOTHING and keeps the
+ * text: there is no error to raise, it simply hasn't stuck yet.
+ */
+function WeightRow({
+  cfg,
+  day,
+  busy,
+  saveConfig,
+}: {
+  cfg: MealsConfig;
+  day: string;
+  busy: boolean;
+  saveConfig: (apply: (base: MealsConfig) => MealsConfig) => Promise<boolean>;
+}) {
+  const stored = weightFor(cfg, day);
+  const trend = weightTrend(cfg, day);
+
+  // Render-phase reset (the island's own idiom, never an effect): the draft is
+  // whatever the log says for the day being viewed, so stepping to another
+  // morning — or a save landing — refills the box rather than leaving the last
+  // thing typed sitting over a different day.
+  const [text, setText] = useState(stored === null ? "" : String(stored));
+  const [seen, setSeen] = useState({ day, stored });
+  if (seen.day !== day || seen.stored !== stored) {
+    setSeen({ day, stored });
+    setText(stored === null ? "" : String(stored));
+  }
+
+  const typed = text.trim();
+  const parsed = parseWeightInput(text);
+  const unusable = typed !== "" && parsed === null;
+
+  function commit() {
+    // A save in flight disables the field, and disabling it fires a blur — which
+    // would otherwise re-submit the same figure the PUT is already carrying.
+    if (busy) return;
+    if (typed === "") {
+      if (stored !== null) void saveConfig((base) => clearWeight(base, day));
+      return;
+    }
+    if (parsed === null || parsed === stored) return;
+    void saveConfig((base) => setWeight(base, day, parsed));
+  }
+
+  const drift =
+    trend.deltaPerWeek === null ? null : driftLabel(trend.deltaPerWeek);
+  // The glyph the drift wears here — the vessel band prints the same figure
+  // without one. A flat week gets none: there is no direction to point.
+  const glyph =
+    trend.deltaPerWeek === null || trend.deltaPerWeek === 0
+      ? ""
+      : trend.deltaPerWeek > 0
+        ? "▲ "
+        : "▼ ";
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-2 border-b border-hairline px-4 py-2 text-xs">
+      <span className="text-[11px] uppercase tracking-[0.12em] text-muted">
+        weight
+      </span>
+      <span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={text}
+          disabled={busy}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && commit()}
+          placeholder="—"
+          aria-label={`weight on ${dayHeading(day)}`}
+          className={`w-14 border-b border-hairline bg-transparent px-1 text-right tabular-nums placeholder:text-muted/60 focus:border-amber focus:outline-none disabled:opacity-50 ${
+            unusable ? "text-down" : "text-fg"
+          }`}
+        />{" "}
+        <span className="text-muted">kg</span>
+      </span>
+      {trend.avg !== null && (
+        <span className="ml-auto tabular-nums text-muted">
+          avg <span className="text-fg/90">{trend.avg.toFixed(1)}</span>
+          {drift && (
+            <>
+              {" · "}
+              <span className={drift.tone}>
+                {glyph}
+                {drift.text}
+              </span>
+              /wk
+            </>
+          )}
+        </span>
       )}
     </div>
   );
