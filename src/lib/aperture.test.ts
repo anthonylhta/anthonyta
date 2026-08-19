@@ -500,6 +500,174 @@ describe("aperture — the sealed profile", () => {
   });
 });
 
+describe("aperture — path peaks", () => {
+  // How high a path goes, printed at the head of its card. Optional, and shared
+  // with sub-paths by construction — `normPath` normalizes both.
+  const peaked = withSealed({
+    paths: [
+      {
+        name: "Smithing",
+        peak: "R4 — a forge of its own, and apprentices working in it",
+        sub: [
+          { name: "Etching", peak: "R2 — plates a guild would hang unsigned" },
+        ],
+      },
+    ],
+  });
+
+  it("accepts a peak on a path and on a sub-path", () => {
+    expect(normalizeAperture(peaked)).toEqual(peaked);
+  });
+
+  it("normalizes a document carrying none exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed.paths[0]).not.toHaveProperty("peak");
+    expect(out?.sealed.paths[1].sub?.[0]).not.toHaveProperty("peak");
+  });
+
+  it("hard-rejects a present-but-malformed peak, at either depth", () => {
+    // An empty peak is absent-in-disguise: the card would draw "peak ·" and stop.
+    const path = (patch: Record<string, unknown>) =>
+      withSealed({ paths: [{ name: "Smithing", ...patch }] });
+    expect(normalizeAperture(path({ peak: "" }))).toBeNull();
+    expect(normalizeAperture(path({ peak: 3 }))).toBeNull();
+    expect(normalizeAperture(path({ peak: null }))).toBeNull();
+    expect(
+      normalizeAperture(path({ sub: [{ name: "Etching", peak: "" }] })),
+    ).toBeNull();
+    expect(
+      normalizeAperture(path({ sub: [{ name: "Etching", peak: 3 }] })),
+    ).toBeNull();
+  });
+});
+
+describe("aperture — the harvest and the rulings", () => {
+  // The two sealed prose arrays: what the trials yielded, and the decisions the
+  // check-in made. Both optional, so the fixture above is also their regression
+  // case, and both capped — a runaway emission is a hard reject, not a slow page.
+  const entry = {
+    date: "2026-02-14",
+    title: "the night of the cold forge",
+    trial: "Winter crossing",
+    body: [
+      "**1. The bar pattern.** It held at every bar set in front of it.",
+      "It did not hold where no bar had been set.",
+    ],
+  };
+  const harvested = withSealed({
+    enlightenments: [
+      entry,
+      { date: "2026-01-02", title: "second sight", body: ["one is enough."] },
+    ],
+    rulings: [
+      {
+        date: "2026-03-01",
+        text: "the logbook streak counts the day it was written, not the day it was read.",
+      },
+    ],
+  });
+
+  it("accepts both arrays, parent trial and all", () => {
+    expect(normalizeAperture(harvested)).toEqual(harvested);
+  });
+
+  it("accepts an entry that came out of no trial at all", () => {
+    const out = normalizeAperture(
+      withSealed({
+        enlightenments: [
+          { date: "2026-01-02", title: "on its own", body: ["…"] },
+        ],
+      }),
+    );
+    expect(out?.sealed.enlightenments?.[0]).not.toHaveProperty("trial");
+  });
+
+  it("normalizes a document carrying neither exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("enlightenments");
+    expect(out?.sealed).not.toHaveProperty("rulings");
+  });
+
+  it("drops an unknown key inside an entry and inside a ruling", () => {
+    const out = normalizeAperture(
+      withSealed({
+        enlightenments: [{ ...entry, smuggled: "x" }],
+        rulings: [{ date: "2026-03-01", text: "held.", smuggled: 1 }],
+      }),
+    );
+    expect(out?.sealed.enlightenments).toEqual([entry]);
+    expect(out?.sealed.rulings).toEqual([
+      { date: "2026-03-01", text: "held." },
+    ]);
+  });
+
+  it("hard-rejects a malformed enlightenment", () => {
+    const bad = (patch: Record<string, unknown>) =>
+      expect(
+        normalizeAperture(
+          withSealed({ enlightenments: [{ ...entry, ...patch }] }),
+        ),
+      ).toBeNull();
+    bad({ date: "14 February 2026" }); // a date, but not a day
+    bad({ date: "2026-02-14T09:00:00Z" }); // an instant, not a day
+    bad({ date: undefined });
+    bad({ title: "" });
+    bad({ title: 3 });
+    bad({ title: "x".repeat(201) });
+    bad({ trial: 3 });
+    bad({ body: undefined });
+    bad({ body: [] }); // an entry with no body is not an entry
+    bad({ body: "one paragraph" }); // a string is not a list of them
+    bad({ body: ["fine", 3] });
+    bad({ body: ["fine", ""] });
+    bad({ body: ["x".repeat(4001)] });
+    expect(normalizeAperture(withSealed({ enlightenments: {} }))).toBeNull();
+  });
+
+  it("hard-rejects a malformed ruling", () => {
+    const bad = (ruling: unknown) =>
+      expect(normalizeAperture(withSealed({ rulings: [ruling] }))).toBeNull();
+    bad({ date: "2026-03-01" });
+    bad({ date: "2026-03-01", text: "" });
+    bad({ date: "2026-03-01", text: 3 });
+    bad({ date: "2026-03-01", text: "x".repeat(4001) });
+    bad({ date: "1 March 2026", text: "held." });
+    bad("2026-03-01 · held.");
+    expect(normalizeAperture(withSealed({ rulings: "held." }))).toBeNull();
+  });
+
+  it("accepts each list exactly at its ceiling and rejects one past it", () => {
+    const entries = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        date: "2026-02-14",
+        title: `entry ${i}`,
+        body: ["yield."],
+      }));
+    const rulings = (n: number) =>
+      Array.from({ length: n }, () => ({ date: "2026-03-01", text: "held." }));
+    expect(
+      normalizeAperture(withSealed({ enlightenments: entries(50) })),
+    ).not.toBeNull();
+    expect(
+      normalizeAperture(withSealed({ enlightenments: entries(51) })),
+    ).toBeNull();
+    expect(
+      normalizeAperture(withSealed({ rulings: rulings(30) })),
+    ).not.toBeNull();
+    expect(normalizeAperture(withSealed({ rulings: rulings(31) }))).toBeNull();
+
+    const paragraphs = (n: number) => ({
+      enlightenments: [
+        { ...entry, body: Array.from({ length: n }, () => "p") },
+      ],
+    });
+    expect(normalizeAperture(withSealed(paragraphs(60)))).not.toBeNull();
+    expect(normalizeAperture(withSealed(paragraphs(61)))).toBeNull();
+  });
+});
+
 describe("aperture — vocabulary openness", () => {
   // Unknown vocabulary renders MUTED — it is never dropped and never rejected.
   // The day the sync script learns a new status, tier, or rung, this build has
