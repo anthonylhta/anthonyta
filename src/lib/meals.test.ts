@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_MEALS_CONFIG,
   MAX_ENTRIES,
+  MAX_WEIGHTS,
   MEALS_MAX_BYTES,
   addEntry,
   addFood,
   ageLabel,
   bucketFoods,
+  clearWeight,
   dayHeading,
   dayTotals,
   daysSinceYmd,
+  driftLabel,
   entriesFor,
   nextDay,
   prevDay,
@@ -23,15 +26,21 @@ import {
   normalizeMealsConfig,
   parseMacroInput,
   parseQtyInput,
+  parseWeightInput,
   removeEntry,
   removeFood,
   setTargets,
+  setWeight,
   trailingAverage,
   trailingProtein,
   updateFood,
+  weeklyWeightAverages,
+  weightFor,
+  weightTrend,
   type MealsConfig,
   type MealsEntry,
   type MealsFood,
+  type MealsWeight,
 } from "./meals";
 
 const food = (over: Partial<MealsFood> = {}): MealsFood => ({
@@ -51,6 +60,16 @@ const entry = (over: Partial<MealsEntry> = {}): MealsEntry => ({
   qty: 1,
   ...over,
 });
+
+const weight = (over: Partial<MealsWeight> = {}): MealsWeight => ({
+  date: "2026-07-20",
+  kg: 67.2,
+  ...over,
+});
+
+/** A day `n` steps along from a fixed start — distinct dates, in order. */
+const dayAt = (n: number): string =>
+  new Date(Date.UTC(2025, 0, 1) + n * 86_400_000).toISOString().slice(0, 10);
 
 /** A config with a small library and one entry, the shape most tests start from. */
 const base = (over: Partial<MealsConfig> = {}): MealsConfig => ({
@@ -171,6 +190,54 @@ describe("normalizeMealsConfig", () => {
       entry({ id: `e${i}` }),
     );
     expect(normalizeMealsConfig(base({ entries }))).toBeNull();
+  });
+
+  it("carries the weigh-ins through, and leaves an absent list absent", () => {
+    const weighed = base({
+      weights: [weight(), weight({ date: "2026-07-21" })],
+    });
+    expect(normalizeMealsConfig(JSON.parse(JSON.stringify(weighed)))).toEqual(
+      weighed,
+    );
+    expect("weights" in normalizeMealsConfig(base())!).toBe(false);
+    expect(normalizeMealsConfig(base({ weights: [] }))).toEqual(
+      base({ weights: [] }),
+    );
+  });
+
+  it("rejects a weigh-in that isn't one", () => {
+    expect(
+      normalizeMealsConfig(base({ weights: [weight({ kg: 0 })] })),
+    ).toBeNull();
+    expect(
+      normalizeMealsConfig(base({ weights: [weight({ kg: 400 })] })),
+    ).toBeNull();
+    // Finer than one decimal is precision the store never wrote.
+    expect(
+      normalizeMealsConfig(base({ weights: [weight({ kg: 67.25 })] })),
+    ).toBeNull();
+    expect(
+      normalizeMealsConfig(base({ weights: [weight({ kg: "67" as never })] })),
+    ).toBeNull();
+    expect(
+      normalizeMealsConfig(base({ weights: [weight({ date: "20/07/2026" })] })),
+    ).toBeNull();
+    expect(normalizeMealsConfig(base({ weights: {} as never }))).toBeNull();
+  });
+
+  it("rejects two weigh-ins on one day", () => {
+    expect(
+      normalizeMealsConfig(
+        base({ weights: [weight({ kg: 67 }), weight({ kg: 68 })] }),
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects a config over the weigh-in cap", () => {
+    const weights = Array.from({ length: MAX_WEIGHTS + 1 }, (_, i) =>
+      weight({ date: dayAt(i) }),
+    );
+    expect(normalizeMealsConfig(base({ weights }))).toBeNull();
   });
 });
 
@@ -843,4 +910,223 @@ describe("daysSinceYmd / ageLabel", () => {
     expect(ageLabel("2026-08-15", TODAY)).toBe("1d");
     expect(ageLabel("2026-07-16", TODAY)).toBe("31d");
   });
+});
+
+// --- bodyweight ----------------------------------------------------------------
+
+/** A fortnight with two weigh-ins in each of the last two weeks — enough for a
+ *  drift, and with a hole in the week before it that must stay a hole. */
+const weighed = base({
+  weights: [
+    { date: "2026-08-08", kg: 67 },
+    { date: "2026-08-09", kg: 66.8 },
+    { date: "2026-08-15", kg: 67.4 },
+    { date: "2026-08-16", kg: 67 },
+  ],
+});
+
+describe("setWeight / clearWeight / weightFor", () => {
+  it("logs a morning onto a log that has never weighed", () => {
+    const next = setWeight(EMPTY_MEALS_CONFIG, TODAY, 67.2);
+    expect(next.weights).toEqual([{ date: TODAY, kg: 67.2 }]);
+    expect(weightFor(next, TODAY)).toBe(67.2);
+    expect(weightFor(EMPTY_MEALS_CONFIG, TODAY)).toBeNull();
+  });
+
+  it("replaces the same day rather than logging it twice", () => {
+    const next = setWeight(
+      setWeight(EMPTY_MEALS_CONFIG, TODAY, 67.2),
+      TODAY,
+      66.9,
+    );
+    expect(next.weights).toEqual([{ date: TODAY, kg: 66.9 }]);
+  });
+
+  it("keeps the list oldest → newest whatever order they arrive in", () => {
+    let cfg = setWeight(EMPTY_MEALS_CONFIG, "2026-08-16", 67);
+    cfg = setWeight(cfg, "2026-07-01", 66);
+    cfg = setWeight(cfg, "2026-08-01", 66.5);
+    expect(cfg.weights?.map((w) => w.date)).toEqual([
+      "2026-07-01",
+      "2026-08-01",
+      "2026-08-16",
+    ]);
+  });
+
+  it("rounds to the one decimal a scale can claim", () => {
+    expect(weightFor(setWeight(EMPTY_MEALS_CONFIG, TODAY, 67.249), TODAY)).toBe(
+      67.2,
+    );
+  });
+
+  it("refuses a figure that isn't a weight, and a date that isn't a day", () => {
+    expect(setWeight(EMPTY_MEALS_CONFIG, TODAY, 0)).toBe(EMPTY_MEALS_CONFIG);
+    expect(setWeight(EMPTY_MEALS_CONFIG, TODAY, 900)).toBe(EMPTY_MEALS_CONFIG);
+    expect(setWeight(EMPTY_MEALS_CONFIG, TODAY, NaN)).toBe(EMPTY_MEALS_CONFIG);
+    expect(setWeight(EMPTY_MEALS_CONFIG, "16/08/2026", 67)).toBe(
+      EMPTY_MEALS_CONFIG,
+    );
+  });
+
+  it("evicts the oldest morning past the cap", () => {
+    let cfg: MealsConfig = EMPTY_MEALS_CONFIG;
+    for (let i = 0; i < MAX_WEIGHTS; i++) cfg = setWeight(cfg, dayAt(i), 67);
+    const full = setWeight(cfg, dayAt(MAX_WEIGHTS), 68);
+    expect(full.weights).toHaveLength(MAX_WEIGHTS);
+    expect(weightFor(full, dayAt(0))).toBeNull();
+    expect(weightFor(full, dayAt(MAX_WEIGHTS))).toBe(68);
+  });
+
+  it("re-runs against a base that already has it (the 409 dance)", () => {
+    const once = setWeight(weighed, "2026-08-16", 67);
+    expect(setWeight(once, "2026-08-16", 67)).toEqual(once);
+  });
+
+  it("clears one day, leaving the rest and the empty list behind", () => {
+    const cleared = clearWeight(weighed, "2026-08-16");
+    expect(weightFor(cleared, "2026-08-16")).toBeNull();
+    expect(cleared.weights).toHaveLength(3);
+    expect(clearWeight(weighed, "2026-01-01")).toBe(weighed);
+    expect(
+      clearWeight(setWeight(EMPTY_MEALS_CONFIG, TODAY, 67), TODAY).weights,
+    ).toEqual([]);
+  });
+});
+
+describe("weightTrend", () => {
+  it("averages the week and states the drift from the week before", () => {
+    expect(weightTrend(weighed, TODAY)).toEqual({
+      avg: 67.2,
+      logged: 2,
+      deltaPerWeek: 0.3,
+    });
+  });
+
+  it("says nothing at all about an unweighed week", () => {
+    expect(weightTrend(EMPTY_MEALS_CONFIG, TODAY)).toEqual({
+      avg: null,
+      logged: 0,
+      deltaPerWeek: null,
+    });
+    expect(weightTrend(weighed, "2026-08-02")).toEqual({
+      avg: null,
+      logged: 0,
+      deltaPerWeek: null,
+    });
+  });
+
+  it("withholds the drift until BOTH weeks carry two mornings", () => {
+    // One point a week is two mornings compared, not a trend.
+    const thin = clearWeight(weighed, "2026-08-15");
+    expect(weightTrend(thin, TODAY)).toEqual({
+      avg: 67,
+      logged: 1,
+      deltaPerWeek: null,
+    });
+    const noPrior = clearWeight(weighed, "2026-08-08");
+    expect(weightTrend(noPrior, TODAY).deltaPerWeek).toBeNull();
+  });
+
+  it("reads a loss as a negative drift", () => {
+    const down = setWeight(
+      setWeight(weighed, "2026-08-15", 66),
+      "2026-08-16",
+      66,
+    );
+    expect(weightTrend(down, TODAY).deltaPerWeek).toBe(-0.9);
+  });
+
+  it("counts a morning eight days back in neither window's average", () => {
+    // 08-09 is the prior window's newest day, 08-10 the current one's oldest.
+    expect(weightTrend(weighed, "2026-08-16").avg).toBe(67.2);
+    expect(weightTrend(weighed, "2026-08-09").avg).toBe(66.9);
+  });
+});
+
+describe("weeklyWeightAverages", () => {
+  it("reads oldest → newest, one value per weighed week", () => {
+    expect(weeklyWeightAverages(weighed, TODAY, 3)).toEqual([66.9, 67.2]);
+  });
+
+  it("pads nothing for a week that was never weighed", () => {
+    // Ten weeks back holds two of them; a zero would draw a cliff to the floor.
+    expect(weeklyWeightAverages(weighed, TODAY)).toEqual([66.9, 67.2]);
+    expect(weeklyWeightAverages(EMPTY_MEALS_CONFIG, TODAY)).toEqual([]);
+  });
+
+  it("ends at the window the day sits in", () => {
+    expect(weeklyWeightAverages(weighed, "2026-08-09", 2)).toEqual([66.9]);
+  });
+});
+
+describe("parseWeightInput", () => {
+  it("takes a plain number, either decimal mark", () => {
+    expect(parseWeightInput("67")).toBe(67);
+    expect(parseWeightInput("67.2")).toBe(67.2);
+    expect(parseWeightInput("67,2")).toBe(67.2);
+    expect(parseWeightInput("  67.2  ")).toBe(67.2);
+  });
+
+  it("rounds finer readings rather than refusing them", () => {
+    expect(parseWeightInput("67.25")).toBe(67.3);
+    expect(parseWeightInput("67.249")).toBe(67.2);
+  });
+
+  it("refuses anything that isn't a weight", () => {
+    expect(parseWeightInput("")).toBeNull();
+    expect(parseWeightInput(".")).toBeNull();
+    expect(parseWeightInput("-67")).toBeNull();
+    expect(parseWeightInput("67kg")).toBeNull();
+    expect(parseWeightInput("1e2")).toBeNull();
+    expect(parseWeightInput("6.7.2")).toBeNull();
+    expect(parseWeightInput("19.9")).toBeNull();
+    expect(parseWeightInput("301")).toBeNull();
+  });
+});
+
+describe("driftLabel", () => {
+  it("signs the figure and colours it by direction", () => {
+    expect(driftLabel(0.3)).toEqual({ text: "+0.3", tone: "text-up" });
+    expect(driftLabel(-0.3)).toEqual({ text: "−0.3", tone: "text-down" });
+  });
+
+  it("claims no direction for a flat week", () => {
+    expect(driftLabel(0)).toEqual({ text: "0.0", tone: "text-muted" });
+    expect(driftLabel(-0)).toEqual({ text: "0.0", tone: "text-muted" });
+  });
+});
+
+describe("the weigh-ins survive every other transform", () => {
+  const cfg = base({
+    weights: [{ date: "2026-08-16", kg: 67.2 }],
+    targets: { kcal: 2800, p: 140, c: 390, f: 75 },
+    seq: 9,
+  });
+
+  const transforms: [string, (c: MealsConfig) => MealsConfig][] = [
+    ["addFood", (c) => addFood(c, food({ id: "egg", name: "egg" }))],
+    ["updateFood", (c) => updateFood(c, "rice", { kcal: 210 })],
+    ["removeFood", (c) => removeFood(c, "chicken")],
+    ["addEntry", (c) => addEntry(c, entry({ id: "e9", date: "2026-08-16" }))],
+    ["removeEntry", (c) => removeEntry(c, "e1")],
+    ["setTargets", (c) => setTargets(c, { kcal: 2600, p: 150, c: 300, f: 80 })],
+    ["setWeight", (c) => setWeight(c, "2026-08-15", 67.4)],
+    ["clearWeight", (c) => clearWeight(c, "2026-08-16")],
+  ];
+
+  for (const [name, apply] of transforms) {
+    it(`${name} carries the weigh-ins and the seq through the rebuild`, () => {
+      const next = apply(cfg);
+      expect(next).not.toBe(cfg);
+      expect(next.seq).toBe(9);
+      expect(next.weights).toBeDefined();
+      // Only the two weight transforms may touch the list at all.
+      if (name !== "setWeight" && name !== "clearWeight")
+        expect(next.weights).toEqual(cfg.weights);
+      // And the round trip through the store must not lose it either.
+      expect(normalizeMealsConfig(JSON.parse(JSON.stringify(next)))).toEqual(
+        next,
+      );
+    });
+  }
 });
