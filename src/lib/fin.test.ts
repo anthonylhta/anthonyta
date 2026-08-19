@@ -15,6 +15,7 @@ import {
   normalizeFinConfig,
   pickBaseline,
   recoveredThisWeek,
+  weeklyFlow,
   SNAP_INDEX_MAX_DAYS,
   sydneyDaysAgo,
   sydneyToday,
@@ -385,6 +386,88 @@ describe("recoveredThisWeek / absorbedThisWeek", () => {
   it("returns null for a week with no import at all", () => {
     expect(absorbedThisWeek(cfg, "2026-08-20")).toBeNull();
     expect(absorbedThisWeek(cfg2(), "2026-08-05")).toBeNull();
+  });
+});
+
+describe("weeklyFlow", () => {
+  // Three weekly anchors back from 2026-08-19: 08-19, 08-12, 08-05.
+  const TODAY = "2026-08-19";
+
+  it("walks the trailing weeks oldest → newest", () => {
+    const cfg = cfg2({
+      income: [
+        { date: "2026-08-05", amountCents: 100000 },
+        { date: "2026-08-12", amountCents: 110000 },
+        { date: "2026-08-19", amountCents: 120000 },
+      ],
+      invested: [
+        { date: "2026-08-05", investedCents: 400000 },
+        { date: "2026-08-12", investedCents: 480000 },
+        { date: "2026-08-19", investedCents: 570000 },
+      ],
+    });
+    expect(weeklyFlow(cfg, TODAY, 3)).toEqual({
+      recovered: [100000, 110000, 120000],
+      // 400000/100000 (the first step is wholly absorbed), 80000/110000,
+      // 90000/120000 — rounded to whole percent.
+      rate: [400, 73, 75],
+    });
+  });
+
+  it("has nothing to draw from an empty ledger", () => {
+    expect(weeklyFlow(cfg2(), TODAY)).toEqual({ recovered: [], rate: [] });
+  });
+
+  it("skips a week outright rather than padding it with a zero", () => {
+    const cfg = cfg2({
+      income: [
+        { date: "2026-08-05", amountCents: 100000 },
+        { date: "2026-08-19", amountCents: 120000 },
+      ],
+      invested: [
+        { date: "2026-08-05", investedCents: 400000 },
+        { date: "2026-08-19", investedCents: 570000 },
+      ],
+    });
+    // The middle week logged nothing at all — two points, not three with a hole.
+    expect(weeklyFlow(cfg, TODAY, 3).recovered).toEqual([100000, 120000]);
+  });
+
+  it("gives a week with pay but no import a recovered point and no rate", () => {
+    const cfg = cfg2({
+      income: [
+        { date: "2026-08-12", amountCents: 110000 },
+        { date: "2026-08-19", amountCents: 120000 },
+      ],
+      invested: [{ date: "2026-08-19", investedCents: 90000 }],
+    });
+    expect(weeklyFlow(cfg, TODAY, 3)).toEqual({
+      recovered: [110000, 120000],
+      rate: [75],
+    });
+  });
+
+  it("reads the same figures the ledger prints for each anchor", () => {
+    // The strip and the stat above it are one function — a week's point must
+    // equal what `recoveredThisWeek` says at that anchor, or they could disagree.
+    const cfg = cfg2({
+      income: [
+        { date: "2026-08-12", amountCents: 110000 },
+        { date: "2026-08-19", amountCents: 120000 },
+      ],
+    });
+    expect(weeklyFlow(cfg, TODAY, 2).recovered).toEqual([
+      recoveredThisWeek(cfg, "2026-08-12"),
+      recoveredThisWeek(cfg, TODAY),
+    ]);
+  });
+
+  it("declines to divide by a week that recovered nothing", () => {
+    const cfg = cfg2({
+      income: [{ date: "2026-08-19", amountCents: 0 }],
+      invested: [{ date: "2026-08-19", investedCents: 90000 }],
+    });
+    expect(weeklyFlow(cfg, TODAY, 1)).toEqual({ recovered: [0], rate: [] });
   });
 });
 

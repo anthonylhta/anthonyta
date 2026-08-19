@@ -237,6 +237,18 @@ export interface ApertureSealed {
   vitalGu?: ApertureVitalGu;
   trials: ApertureTrial[];
   breakthrough: ApertureBreakthrough;
+  /**
+   * What the NEXT seal is waiting on, in the check-in's own words — the one
+   * forward-facing line on a page that otherwise reads backward.
+   *
+   * Printed VERBATIM and never parsed. The site must never compute a stage: the
+   * naive reading of the stage table ("two conditions of three") and the ruling
+   * the check-in actually makes come apart regularly, and the check-in is the
+   * only authority. So this is prose the emitter wrote, carried across the seal
+   * untouched — absent on every document sealed before it existed, and absent
+   * again whenever a week has nothing to say about what comes next.
+   */
+  next?: string;
   /** Borrowed capability — what is rented rather than held, one line each. */
   rented?: string[];
   /** Who the sheet is about — absent on every document sealed before it existed. */
@@ -476,6 +488,10 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (rented === null) return null;
   const profile = x.profile === undefined ? undefined : normProfile(x.profile);
   if (profile === null) return null;
+  // An EMPTY next line is malformed rather than absent: a seal either says what
+  // it waits on or says nothing, and a blank string would render as bare chrome.
+  const { next } = x;
+  if (next !== undefined && !isNonEmptyStr(next)) return null;
   return {
     streaks,
     conditions,
@@ -483,6 +499,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(vitalGu !== undefined ? { vitalGu } : {}),
     trials,
     breakthrough,
+    ...(next !== undefined ? { next } : {}),
     ...(rented !== undefined ? { rented } : {}),
     ...(profile !== undefined ? { profile } : {}),
   };

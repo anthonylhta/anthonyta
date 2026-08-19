@@ -8,6 +8,7 @@ import {
   type AperturePath,
   type ApertureCondition,
   type ApertureDoc,
+  type ApertureStreak,
   type ApertureTrial,
 } from "./aperture";
 import {
@@ -15,17 +16,22 @@ import {
   ESSENCE_TEXT,
   ESSENCE_VAR,
   ageOn,
+  agoLabel,
+  compactDollars,
   conditionChipClass,
   conditionChipPrefix,
   conditionStatusWord,
   conditionsSummary,
   dayGap,
+  daysOpen,
   declaredSeriesKeys,
   detailStatus,
   essenceTextClass,
   essenceVarClass,
   familyOf,
   gutterPhrase,
+  hardenLabel,
+  hardenLines,
   imminentMajorTrial,
   isImminent,
   latestDailyDay,
@@ -831,6 +837,130 @@ describe("apertureview — ageOn", () => {
     expect(ageOn("2001-8-19", "2026-08-19")).toBeNull();
     expect(ageOn("2001-02-31", "2026-08-19")).toBeNull(); // shaped like a day
     expect(ageOn(BORN, "whenever")).toBeNull();
+  });
+});
+
+describe("apertureview — daysOpen", () => {
+  const TODAY = "2026-08-20";
+
+  it("counts whole days since a trial was opened", () => {
+    expect(daysOpen("2026-08-20", TODAY)).toBe("0d");
+    expect(daysOpen("2026-08-19", TODAY)).toBe("1d");
+    expect(daysOpen("2026-07-26", TODAY)).toBe("25d");
+  });
+
+  it("says nothing at all when there is no honest number to say", () => {
+    expect(daysOpen(undefined, TODAY)).toBeNull();
+    expect(daysOpen("last winter", TODAY)).toBeNull();
+    // Opened tomorrow — a typo, not a trial that has been open for -1 days.
+    expect(daysOpen("2026-08-21", TODAY)).toBeNull();
+  });
+});
+
+describe("apertureview — agoLabel", () => {
+  const TODAY = "2026-08-20";
+
+  it("reads in days inside a fortnight and in weeks past it", () => {
+    expect(agoLabel("2026-08-20", TODAY)).toBe("0d ago");
+    expect(agoLabel("2026-08-07", TODAY)).toBe("13d ago");
+    // The fortnight edge: the day it stops being a run of days.
+    expect(agoLabel("2026-08-06", TODAY)).toBe("2w ago");
+    expect(agoLabel("2026-07-17", TODAY)).toBe("4w ago");
+    expect(agoLabel("2026-05-06", TODAY)).toBe("15w ago");
+  });
+
+  it("floors the weeks rather than rounding a week it hasn't finished", () => {
+    expect(agoLabel("2026-08-02", TODAY)).toBe("2w ago"); // 18 days
+    expect(agoLabel("2026-07-30", TODAY)).toBe("3w ago"); // 21 days
+  });
+
+  it("says nothing for a missing, broken or future date", () => {
+    expect(agoLabel(null, TODAY)).toBeNull();
+    expect(agoLabel(undefined, TODAY)).toBeNull();
+    expect(agoLabel("some time back", TODAY)).toBeNull();
+    expect(agoLabel("2026-08-21", TODAY)).toBeNull();
+  });
+});
+
+describe("apertureview — hardenLabel + hardenLines", () => {
+  const streak = (over: Partial<ApertureStreak>): ApertureStreak => ({
+    count: 10,
+    target: 12,
+    state: "hardening",
+    ...over,
+  });
+
+  it("reads a harden date in the meta line's register", () => {
+    expect(hardenLabel("2026-08-12")).toBe("hardens ~aug 12");
+    expect(hardenLabel("2026-12-01")).toBe("hardens ~dec 1");
+    expect(hardenLabel("not-a-date")).toBeNull();
+  });
+
+  it("names each streak still working toward its target", () => {
+    expect(
+      hardenLines({
+        finance: streak({ earliestHarden: "2026-08-30" }),
+        logbook: streak({
+          count: 40,
+          target: 90,
+          earliestHarden: "2026-09-02",
+        }),
+      }),
+    ).toEqual(["finance · hardens ~aug 30", "logbook · hardens ~sep 2"]);
+  });
+
+  it("drops a streak that has already reached its target", () => {
+    // The date is history once the count is there — the chip says "hardened".
+    expect(
+      hardenLines({
+        finance: streak({ count: 12, earliestHarden: "2026-08-30" }),
+      }),
+    ).toEqual([]);
+    expect(
+      hardenLines({
+        finance: streak({
+          count: 97,
+          target: 90,
+          earliestHarden: "2026-08-30",
+        }),
+      }),
+    ).toEqual([]);
+  });
+
+  it("drops a streak with no date, or one nobody can parse", () => {
+    expect(hardenLines({ finance: streak({}) })).toEqual([]);
+    expect(
+      hardenLines({ finance: streak({ earliestHarden: "soon" }) }),
+    ).toEqual([]);
+    expect(hardenLines({})).toEqual([]);
+  });
+
+  it("keeps the emitter's own key order", () => {
+    const lines = hardenLines({
+      zeal: streak({ earliestHarden: "2026-09-09" }),
+      finance: streak({ earliestHarden: "2026-08-30" }),
+    });
+    expect(lines).toEqual([
+      "zeal · hardens ~sep 9",
+      "finance · hardens ~aug 30",
+    ]);
+  });
+
+  it("treats a streak named like an Object member as data", () => {
+    expect(
+      hardenLines({ toString: streak({ earliestHarden: "2026-08-30" }) }),
+    ).toEqual(["toString · hardens ~aug 30"]);
+  });
+});
+
+describe("apertureview — compactDollars", () => {
+  it("reads whole dollars under a thousand and compacts above it", () => {
+    expect(compactDollars(82_000)).toBe("$820");
+    expect(compactDollars(0)).toBe("$0");
+    expect(compactDollars(99_999)).toBe("$1000"); // $999.99, rounded
+    expect(compactDollars(126_500)).toBe("$1.3k");
+    expect(compactDollars(1_240_000)).toBe("$12.4k");
+    expect(compactDollars(100_000_000)).toBe("$1.0M");
   });
 });
 

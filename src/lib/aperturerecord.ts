@@ -109,42 +109,85 @@ export interface RecordTrend {
 }
 
 /**
- * Decrypted entries → one trend per streak, OLDEST first inside each strip: a
- * sparkline reads left to right in time, the opposite of the rows above it.
+ * The walk both trend lists share: an open record of numbers, read down the seals
+ * OLDEST first (a sparkline reads left to right in time, the opposite of the rows
+ * above it). `pick` says which record — streak counts, strike counts — and
+ * `targetOf` what the newest seal has to say about a name's ceiling, which is the
+ * only thing the two lists disagree about.
  *
- * The names are data (an open record, the same bargain as `streakChanges`), so
- * the vocabulary is whatever the seals carry — union across every fetched seal,
- * in first-seen order walking oldest → newest, and `Object.hasOwn` throughout so
- * a streak named `toString` diffs against the seals rather than Object.prototype.
- * A streak seen only once is dropped: one point is a reading, not a trend.
+ * The names are data (the same bargain as `streakChanges`), so the vocabulary is
+ * whatever the seals carry — union across every fetched seal, in first-seen order
+ * walking oldest → newest, and `Object.hasOwn` throughout so a name like
+ * `toString` reads off the seal rather than off Object.prototype. A name seen only
+ * once is dropped: one point is a reading, not a trend. A seal from before a name
+ * existed contributes NOTHING rather than a zero — padding would draw a climb out
+ * of thin air.
  */
-export function recordTrends(
+function trendsOver(
   entries: { day: string; doc: ApertureDoc }[],
+  pick: (doc: ApertureDoc) => Record<string, number>,
+  targetOf: (newest: ApertureDoc, name: string) => number | null,
 ): RecordTrend[] {
   const sorted = [...entries].sort((a, b) => a.day.localeCompare(b.day));
+  const records = sorted.map((e) => pick(e.doc));
   const newest = sorted[sorted.length - 1];
 
   const names: string[] = [];
-  for (const e of sorted)
-    for (const name of Object.keys(e.doc.sealed.streaks))
+  for (const rec of records)
+    for (const name of Object.keys(rec))
       if (!names.includes(name)) names.push(name);
 
   const trends: RecordTrend[] = [];
   for (const name of names) {
     const values: number[] = [];
-    for (const e of sorted)
-      if (Object.hasOwn(e.doc.sealed.streaks, name))
-        values.push(e.doc.sealed.streaks[name].count);
+    for (const rec of records)
+      if (Object.hasOwn(rec, name)) values.push(rec[name]);
     if (values.length < 2) continue;
     trends.push({
       name,
       values,
       first: values[0],
       last: values[values.length - 1],
-      target: Object.hasOwn(newest.doc.sealed.streaks, name)
-        ? newest.doc.sealed.streaks[name].target
-        : null,
+      target: targetOf(newest.doc, name),
     });
   }
   return trends;
+}
+
+/**
+ * Decrypted entries → one trend per streak, oldest first inside each strip — the
+ * week-over-week strip the record was kept for. The target is read from the NEWEST
+ * seal, and null once that seal no longer tracks the streak: a target retired
+ * weeks ago is not the one to read a strip against.
+ */
+export function recordTrends(
+  entries: { day: string; doc: ApertureDoc }[],
+): RecordTrend[] {
+  return trendsOver(
+    entries,
+    (doc) =>
+      Object.fromEntries(
+        Object.entries(doc.sealed.streaks).map(([name, s]) => [name, s.count]),
+      ),
+    (newest, name) =>
+      Object.hasOwn(newest.sealed.streaks, name)
+        ? newest.sealed.streaks[name].target
+        : null,
+  );
+}
+
+/**
+ * The same reading over the WALL's strike counters — how many strikes a week
+ * carried, seal by seal. A strike count has no ceiling to read against (the wall
+ * breaks on an event, not on a number), so `target` is always null and the row
+ * prints first → last alone.
+ */
+export function strikeTrends(
+  entries: { day: string; doc: ApertureDoc }[],
+): RecordTrend[] {
+  return trendsOver(
+    entries,
+    (doc) => doc.sealed.breakthrough.recentStrikes,
+    () => null,
+  );
 }

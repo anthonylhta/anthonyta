@@ -426,6 +426,34 @@ describe("aperture — the inward page's fields", () => {
   });
 });
 
+describe("aperture — the sealed next line", () => {
+  // What the next seal is waiting on: check-in prose, carried across the frame
+  // untouched. The site never parses it, so the frame's only job is to insist
+  // there is something to print.
+  it("accepts a document carrying one", () => {
+    const waiting = withSealed({
+      next: "middle — when the logbook streak hardens, ~apr 22",
+    });
+    expect(normalizeAperture(waiting)).toEqual(waiting);
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("next");
+  });
+
+  it("hard-rejects a present-but-malformed next line", () => {
+    const bad = (next: unknown) =>
+      expect(normalizeAperture(withSealed({ next }))).toBeNull();
+    bad(3);
+    bad("");
+    bad(null);
+    bad(["middle"]);
+    bad({ stage: "middle" });
+  });
+});
+
 describe("aperture — the sealed profile", () => {
   // Who the sheet is about. The birth DAY stays sealed (this repo is public) and
   // only the age it implies is ever rendered, so the frame has to be as strict
@@ -454,7 +482,9 @@ describe("aperture — the sealed profile", () => {
 
   it("drops an unknown key inside the profile", () => {
     const out = normalizeAperture(
-      withSealed({ profile: { born: "2001-08-19", now: "cut same-day", smuggled: "x" } }),
+      withSealed({
+        profile: { born: "2001-08-19", now: "cut same-day", smuggled: "x" },
+      }),
     );
     expect(out?.sealed.profile).toEqual({ born: "2001-08-19" });
   });

@@ -332,6 +332,43 @@ export function absorbedThisWeek(
   return cfg.invested[at].investedCents - prev;
 }
 
+/** How many weeks of flow the /aperture strips read back over. */
+const FLOW_WEEKS = 10;
+
+/**
+ * The trailing weeks of the stones ledger as two series, oldest → newest: what came
+ * IN each week, and what share of it was put away. Each point is the SAME reading
+ * the ledger prints for this week, taken again with the anchor moved back seven
+ * days at a time — so a strip and the stat above it can never disagree about a
+ * week, because they are one function.
+ *
+ * Nothing is padded. A week with no pay logged contributes no recovered point, and
+ * a week without both ends (or one with nothing recovered to divide by) contributes
+ * no rate point — the record band's rule, for the same reason: a zero the site made
+ * up would draw a collapse that never happened. The two series are therefore
+ * independent lengths, and each is drawn only once it has two points to draw.
+ *
+ * Absorbed itself is deliberately not a series here: on a weekly buy it is near
+ * constant by construction, so a flat line would be chrome. The RATE is what moves.
+ */
+export function weeklyFlow(
+  cfg: FinConfig,
+  todayISO: string,
+  weeks: number = FLOW_WEEKS,
+): { recovered: number[]; rate: number[] } {
+  const recovered: number[] = [];
+  const rate: number[] = [];
+  for (let k = weeks - 1; k >= 0; k--) {
+    const anchor = addDays(todayISO, -WEEK_DAYS * k);
+    const inn = recoveredThisWeek(cfg, anchor);
+    const away = absorbedThisWeek(cfg, anchor);
+    if (inn === null) continue;
+    recovered.push(inn);
+    if (away !== null && inn > 0) rate.push(Math.round((away / inn) * 100));
+  }
+  return { recovered, rate };
+}
+
 /**
  * One CSV import, as a pure config transform: parse the CMC export, stamp it
  * `asOf`, store it as the current snapshot, and upsert `today`'s invested total
