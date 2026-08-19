@@ -484,6 +484,20 @@ describe("aperturesync — rejection diagnosis", () => {
     );
   });
 
+  it("names a next line that isn't printable prose", () => {
+    // Sealed verbatim and never parsed, so the only thing that can go wrong with
+    // it is being absent-in-disguise — an empty string the page would draw as a
+    // bare "next ·" with nothing after it.
+    const bad = (next: unknown) => ({
+      ...raw,
+      sealed: { ...raw.sealed, next },
+    });
+    expect(explainRejected(bad(3))).toBe(
+      "sealed.next must be a non-empty string (found 3)",
+    );
+    expect(explainRejected(bad(""))).toBe("sealed.next must not be empty");
+  });
+
   it("names a birth day that isn't a day", () => {
     // The one field the site never renders as it was written — it becomes an age
     // in the browser — so a bad emission has to be named at seal time or it will
@@ -496,7 +510,6 @@ describe("aperturesync — rejection diagnosis", () => {
       'sealed.profile.born must be a YYYY-MM-DD day (found "19 August 2001")',
     );
   });
-
 
   it("names a missing sealed block", () => {
     const noSealed: Record<string, unknown> = { ...raw };

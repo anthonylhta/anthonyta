@@ -441,6 +441,7 @@ function walkSealed(x: unknown): Fail {
     ),
     eachRow(x.trials, "sealed.trials", walkTrial),
     walkBreakthrough(x.breakthrough, "sealed.breakthrough"),
+    ifPresent(x.next, "sealed.next", needNonEmptyStr),
     x.rented === undefined ? null : eachRow(x.rented, "sealed.rented", needStr),
     ifPresent(x.profile, "sealed.profile", (v, at) =>
       !isObj(v)

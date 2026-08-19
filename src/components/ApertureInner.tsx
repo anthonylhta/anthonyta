@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useVault } from "@/app/files/useVault";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
@@ -28,16 +28,21 @@ import {
   planRecordFetch,
   recordRows,
   recordTrends,
+  strikeTrends,
   type RecordRow,
   type RecordTrend,
 } from "@/lib/aperturerecord";
 import {
+  agoLabel,
+  compactDollars,
   conditionChipClass,
   conditionChipPrefix,
   conditionStatusWord,
   conditionsSummary,
+  daysOpen,
   declaredSeriesKeys,
   detailStatus,
+  hardenLines,
   imminentMajorTrial,
   isImminent,
   latestDailyDay,
@@ -59,6 +64,7 @@ import {
   monthToDateBaseline,
   normalizeFinConfig,
   recoveredThisWeek,
+  weeklyFlow,
   type FinConfig,
 } from "@/lib/fin";
 import { normalizeGymConfig, sessionCounts, sessionsThisWeek } from "@/lib/gym";
@@ -129,6 +135,8 @@ interface RecordState {
   /** One strip per streak the fetched seals carried — the same entries read
    *  down the columns instead of across the rows. */
   trends: RecordTrend[];
+  /** The same reading over the wall's strike counters, week by sealed week. */
+  strikes: RecordTrend[];
   /** Well-formed archived days beyond the fetch cap — counted, never fetched. */
   older: number;
   /** Fetched days that would not serve, decrypt or normalize. */
@@ -212,6 +220,7 @@ async function recordSeries(
     return {
       rows: recordRows(entries),
       trends: recordTrends(entries),
+      strikes: strikeTrends(entries),
       older: plan.older,
       unreadable: plan.fetch.length - entries.length,
     };
@@ -416,6 +425,13 @@ export function ApertureInner({
     };
   }, [status, openItem, today]);
 
+  // Ten weeks of the ledger, walked once per envelope rather than once per render:
+  // it is the same two readings the stats grid prints, taken ten times over.
+  const flow = useMemo(
+    () => (fin ? weeklyFlow(fin, today) : { recovered: [], rate: [] }),
+    [fin, today],
+  );
+
   switch (detailStatus(status, dataErr, doc)) {
     case "offline":
       return <StatusLine>store offline — set the R2_* env vars</StatusLine>;
@@ -454,6 +470,7 @@ export function ApertureInner({
   const { conditions, paths, vitalGu, trials, breakthrough, rented } =
     doc.sealed;
   const { open, resolved } = splitTrials(trials);
+  const harden = hardenLines(doc.sealed.streaks);
   const strikes = Object.entries(breakthrough.recentStrikes);
   const hasWallBody =
     breakthrough.event !== "" ||
@@ -539,6 +556,19 @@ export function ApertureInner({
         </div>
       )}
 
+      {/* What the NEXT seal is waiting on, in the check-in's own words. It sits
+          under the plaintext sea rather than inside it because the line is SEALED:
+          it names conditions and dates, and the glance stays rank and stage alone.
+          Printed verbatim — the site never computes a stage. */}
+      {doc.sealed.next && (
+        <div className="border-b border-hairline px-4 py-2.5">
+          <p className="text-xs text-muted">
+            <span className="text-muted/60">next · </span>
+            {doc.sealed.next}
+          </p>
+        </div>
+      )}
+
       {/* The status bands, in the register the sheet reads them in — the wall and
           the conditions first, then everything that was only ever readable at
           length. */}
@@ -589,22 +619,31 @@ export function ApertureInner({
             seal="律"
             right={conditionsSummary(conditions) || undefined}
           />
-          <div className="flex flex-wrap gap-2 border-b border-hairline px-4 py-3">
-            {conditions.map((c, i) => (
-              <span
-                key={i}
-                className={`inline-flex items-baseline gap-1.5 border px-2 py-0.5 text-xs ${conditionChipClass(c.status)}`}
-              >
-                <span className="text-[10px] uppercase tracking-[0.08em]">
-                  {conditionChipPrefix(c.status)}
-                  {conditionStatusWord(c.status)}
+          <div className="border-b border-hairline px-4 py-3">
+            <div className="flex flex-wrap gap-2">
+              {conditions.map((c, i) => (
+                <span
+                  key={i}
+                  className={`inline-flex items-baseline gap-1.5 border px-2 py-0.5 text-xs ${conditionChipClass(c.status)}`}
+                >
+                  <span className="text-[10px] uppercase tracking-[0.08em]">
+                    {conditionChipPrefix(c.status)}
+                    {conditionStatusWord(c.status)}
+                  </span>
+                  <span className="text-fg/90">{c.label}</span>
+                  <span className="tabular-nums text-muted">
+                    {c.progress}/{c.target}
+                  </span>
                 </span>
-                <span className="text-fg/90">{c.label}</span>
-                <span className="tabular-nums text-muted">
-                  {c.progress}/{c.target}
-                </span>
-              </span>
-            ))}
+              ))}
+            </div>
+            {/* When each hardening streak comes due — BELOW the chips, not inside
+                them: a hardening chip already reaches the edge of a phone. */}
+            {harden.length > 0 && (
+              <p className="mt-2 text-[11px] tabular-nums text-muted">
+                {harden.join(" · ")}
+              </p>
+            )}
           </div>
         </>
       )}
@@ -642,6 +681,7 @@ export function ApertureInner({
               const active = t.state === "active";
               const soon = isImminent(t.date, today);
               const when = trialCountdown(t.date, today);
+              const since = active ? daysOpen(t.opened, today) : null;
               const glyph = tierGlyph(t.tier);
               return (
                 <p key={i} className="text-xs">
@@ -666,9 +706,14 @@ export function ApertureInner({
                       </span>
                     )}
                     {t.tier} · {t.state}
-                    {active &&
-                      t.opened !== undefined &&
-                      ` · opened ${t.opened}`}
+                    {active && t.opened !== undefined && (
+                      <>
+                        {` · opened ${t.opened}`}
+                        {since !== null && (
+                          <span className="tabular-nums"> · {since}</span>
+                        )}
+                      </>
+                    )}
                   </span>
                   {!active && (
                     <>
@@ -699,12 +744,21 @@ export function ApertureInner({
               </button>
             )}
             {showResolved &&
-              resolved.map((t, i) => (
-                <p key={i} className="text-xs text-muted/60">
-                  {t.name} · {t.tier} · {t.state}
-                  {t.date && <span className="tabular-nums"> · {t.date}</span>}
-                </p>
-              ))}
+              resolved.map((t, i) => {
+                const ago = agoLabel(t.date, today);
+                return (
+                  <p key={i} className="text-xs text-muted/60">
+                    {t.name} · {t.tier} · {t.state}
+                    {t.date && (
+                      <span className="tabular-nums">
+                        {" "}
+                        · {t.date}
+                        {ago !== null && ` · ${ago}`}
+                      </span>
+                    )}
+                  </p>
+                );
+              })}
           </div>
         </>
       )}
@@ -753,31 +807,37 @@ export function ApertureInner({
                 <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
                   streaks · seal by seal
                 </p>
-                {record.trends.map(
-                  (t) =>
-                    t.values.length >= 2 && (
-                      <div
-                        key={t.name}
-                        className="flex items-center gap-3 text-xs"
-                      >
-                        <span className="w-20 shrink-0 truncate text-muted">
-                          {t.name}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <Sparkline
-                            values={t.values}
-                            delta={t.last - t.first}
-                            height={22}
-                            label={`${t.name} streak across seals`}
-                          />
-                        </span>
-                        <span className="w-24 shrink-0 text-right tabular-nums text-muted/60">
-                          {t.first} → {t.last}
-                          {t.target !== null ? ` / ${t.target}` : ""}
-                        </span>
-                      </div>
-                    ),
-                )}
+                {record.trends.map((t) => (
+                  <TrendRow
+                    key={t.name}
+                    label={t.name}
+                    values={t.values}
+                    delta={t.last - t.first}
+                    plot={`${t.name} streak across seals`}
+                    right={`${t.first} → ${t.last}${
+                      t.target !== null ? ` / ${t.target}` : ""
+                    }`}
+                  />
+                ))}
+              </>
+            )}
+            {/* The wall's own counters, read the same way. No target: the wall
+                breaks on an event, not on a number of strikes. */}
+            {record.strikes.length > 0 && (
+              <>
+                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                  strikes · week by seal
+                </p>
+                {record.strikes.map((t) => (
+                  <TrendRow
+                    key={t.name}
+                    label={t.name}
+                    values={t.values}
+                    delta={t.last - t.first}
+                    plot={`${t.name} strikes across seals`}
+                    right={`${t.first} → ${t.last}`}
+                  />
+                ))}
               </>
             )}
           </div>
@@ -804,6 +864,37 @@ export function ApertureInner({
           />
           <Stat label="runway" value={runway} />
         </div>
+        {/* The same two readings, ten weeks deep. Absorbed is not here on purpose:
+            on a weekly buy it barely moves, so the rate is what a strip can say. */}
+        {(flow.recovered.length >= 2 || flow.rate.length >= 2) && (
+          <div className="mt-3">
+            <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+              flow · last 10 weeks
+            </p>
+            {flow.recovered.length >= 2 && (
+              <TrendRow
+                label="recovered"
+                values={flow.recovered}
+                delta={
+                  flow.recovered[flow.recovered.length - 1] - flow.recovered[0]
+                }
+                plot="recovered per week, last ten weeks"
+                right={`${compactDollars(flow.recovered[0])} → ${compactDollars(
+                  flow.recovered[flow.recovered.length - 1],
+                )}`}
+              />
+            )}
+            {flow.rate.length >= 2 && (
+              <TrendRow
+                label="rate"
+                values={flow.rate}
+                delta={flow.rate[flow.rate.length - 1] - flow.rate[0]}
+                plot="absorption rate per week, last ten weeks"
+                right={`${flow.rate[0]}% → ${flow.rate[flow.rate.length - 1]}%`}
+              />
+            )}
+          </div>
+        )}
         <Flavor>
           mortal economics — stones earned, not produced. denominator ruled,
           re-read quarterly — not measured.
@@ -884,6 +975,41 @@ function Stat({
  *  register. Muted and italic, so it never competes with a figure. */
 function Flavor({ children }: { children: ReactNode }) {
   return <p className="mt-3 text-[11px] italic text-muted/60">{children}</p>;
+}
+
+/**
+ * One trend strip: what it is on the left, the ten-or-so readings across the
+ * middle, where it started and ended on the right. Shared by the record's two
+ * lists and the stones flow, so a change to the geometry can't leave one of them
+ * behind — and the label column is wide enough for the longest counter name a
+ * check-in has emitted.
+ */
+function TrendRow({
+  label,
+  values,
+  delta,
+  plot,
+  right,
+}: {
+  label: string;
+  values: number[];
+  /** Sign decides the line's colour; always `last - first`. */
+  delta: number;
+  /** The sparkline's aria-label — what the strip is a picture of. */
+  plot: string;
+  right: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 text-xs">
+      <span className="w-24 shrink-0 truncate text-muted">{label}</span>
+      <span className="min-w-0 flex-1">
+        <Sparkline values={values} delta={delta} height={22} label={plot} />
+      </span>
+      <span className="w-24 shrink-0 text-right tabular-nums text-muted/60">
+        {right}
+      </span>
+    </div>
+  );
 }
 
 /** A one-line failure, in the one colour a failure is allowed. The page header

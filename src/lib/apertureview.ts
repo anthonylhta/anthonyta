@@ -4,8 +4,10 @@ import {
   type ApertureCondition,
   type ApertureDoc,
   type ApertureStage,
+  type ApertureStreak,
   type ApertureTrial,
 } from "./aperture";
+import { audCompact } from "./money";
 
 /**
  * apertureview — the pure view spine of the character sheet: the inward reading on
@@ -504,6 +506,43 @@ export function trialCountdown(
 }
 
 /**
+ * How long an active trial has been open — "25d" — or null when there is no
+ * opened date, when it won't parse, or when it is dated AHEAD of today. A trial
+ * cannot have been open for a negative number of days, and printing "-3d" beside
+ * a row would be the site inventing a fact about a typo.
+ */
+export function daysOpen(
+  openedISO: string | undefined,
+  todayISO: string,
+): string | null {
+  if (openedISO === undefined) return null;
+  const gap = dayGap(openedISO, todayISO);
+  if (gap === null || gap > 0) return null;
+  return `${-gap}d`;
+}
+
+/** Past a fortnight a resolved trial reads in weeks: "3 weeks ago" is the unit a
+ *  person actually thinks in, where "97d ago" is arithmetic to be done. */
+const AGO_WEEK_DAYS = 14;
+
+/**
+ * How long ago a resolved trial settled — "5d ago" inside a fortnight, "12w ago"
+ * past it (floored, so a strip of weeks never rounds up into one it hasn't
+ * finished). Null for no date, an unparseable one, or a date still ahead: a trial
+ * resolved in the future is not a fact this page will print.
+ */
+export function agoLabel(
+  dateISO: string | null | undefined,
+  todayISO: string,
+): string | null {
+  if (dateISO === null || dateISO === undefined) return null;
+  const gap = dayGap(dateISO, todayISO);
+  if (gap === null || gap > 0) return null;
+  const days = -gap;
+  return days < AGO_WEEK_DAYS ? `${days}d ago` : `${Math.floor(days / 7)}w ago`;
+}
+
+/**
  * How long ago the seal was taken — "sealed today" under a full day, "sealed 3d
  * ago" past it (floored: the elapsed days actually completed). Null on an
  * unparseable seal, so the band shows no age rather than a wrong one.
@@ -513,6 +552,69 @@ export function sealedAgo(sealedAt: string, nowMs: number): string | null {
   if (!Number.isFinite(t)) return null;
   const days = Math.floor((nowMs - t) / DAY_MS);
   return days < 1 ? "sealed today" : `sealed ${days}d ago`;
+}
+
+// en-US short month over UTC: harden dates are bare Sydney calendar days, and
+// formatting the UTC-midnight they parse to preserves the written day.
+const HARDEN_DAY = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+/**
+ * A streak's harden date in the meta line's register: "hardens ~aug 12". The ~
+ * is honest — the date slips automatically with any pause, so it is an earliest,
+ * never a promise. Null on anything unparseable; a broken date must never render
+ * as a wrong day.
+ */
+export function hardenLabel(dateISO: string): string | null {
+  const t = Date.parse(dateISO);
+  if (!Number.isFinite(t)) return null;
+  return `hardens ~${HARDEN_DAY.format(t).toLowerCase()}`;
+}
+
+/**
+ * The line under the condition chips: one segment per streak still working toward
+ * its target and carrying an earliest-harden date — "finance · hardens ~aug 30".
+ *
+ * A streak already AT its target is left out on purpose: its date is history, and
+ * a chip that already reads "hardened" needs no forecast under it. So is a streak
+ * whose date won't parse — the same rule every date function here keeps.
+ *
+ * The names are data (the open streak record), so the walk is `Object.keys` in the
+ * emitter's own order with `Object.hasOwn` behind it: a streak named `toString`
+ * has to read off the seal, not off Object.prototype.
+ */
+export function hardenLines(streaks: Record<string, ApertureStreak>): string[] {
+  const lines: string[] = [];
+  for (const name of Object.keys(streaks)) {
+    if (!Object.hasOwn(streaks, name)) continue;
+    const s = streaks[name];
+    if (s.earliestHarden === undefined || s.count >= s.target) continue;
+    const label = hardenLabel(s.earliestHarden);
+    if (label !== null) lines.push(`${name} · ${label}`);
+  }
+  return lines;
+}
+
+// --- figures at a strip's width -------------------------------------------------
+
+/** Below this many dollars the cents are noise beside a sparkline and the whole
+ *  figure fits anyway, so it reads unshortened. */
+const COMPACT_FLOOR = 1000;
+
+/**
+ * A cents figure at the width the end of a trend row has for it — "$820", "$1.3k".
+ * Under a thousand dollars it reads as whole dollars (the exact figure is in the
+ * stats grid three lines above; this cell only has to say which way ten weeks
+ * went), and above it defers to the site's one compaction rule.
+ */
+export function compactDollars(cents: number): string {
+  const dollars = cents / 100;
+  return Math.abs(dollars) < COMPACT_FLOOR
+    ? `$${Math.round(dollars)}`
+    : audCompact(dollars);
 }
 
 // --- trials --------------------------------------------------------------------

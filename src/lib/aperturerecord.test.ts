@@ -6,6 +6,7 @@ import {
   RECORD_FETCH_CAP,
   recordRows,
   recordTrends,
+  strikeTrends,
 } from "./aperturerecord";
 
 // Wholly invented seals — this repo is public, so the fixtures are fiction by
@@ -249,6 +250,81 @@ describe("recordTrends", () => {
       recordTrends([
         { day: "2026-07-26", doc: streakSeal({ logbook: { count: 19 } }) },
       ]),
+    ).toEqual([]);
+  });
+});
+
+// A seal carrying a WHOLE strike record — the wall's own counters, which the
+// `doc` helper leaves empty. Invented like every other fixture here.
+function strikeSeal(recentStrikes: Record<string, number>): ApertureDoc {
+  const base = doc({});
+  return {
+    ...base,
+    sealed: {
+      ...base.sealed,
+      breakthrough: { ...base.sealed.breakthrough, recentStrikes },
+    },
+  };
+}
+
+describe("strikeTrends", () => {
+  it("reads oldest → newest whatever order the fetches resolved in", () => {
+    const trends = strikeTrends([
+      { day: "2026-07-26", doc: strikeSeal({ petitions: 0 }) },
+      { day: "2026-07-05", doc: strikeSeal({ petitions: 30 }) },
+      { day: "2026-07-12", doc: strikeSeal({ petitions: 11 }) },
+    ]);
+    // No target ever: the wall breaks on an event, not on a count of strikes.
+    expect(trends).toEqual([
+      {
+        name: "petitions",
+        values: [30, 11, 0],
+        first: 30,
+        last: 0,
+        target: null,
+      },
+    ]);
+  });
+
+  it("skips a seal from before a counter existed rather than zeroing it", () => {
+    const trends = strikeTrends([
+      { day: "2026-07-05", doc: strikeSeal({ petitions: 30 }) },
+      { day: "2026-07-12", doc: strikeSeal({ petitions: 11, surveys: 1 }) },
+      { day: "2026-07-26", doc: strikeSeal({ petitions: 0, surveys: 3 }) },
+    ]);
+    // First-seen order walking oldest → newest, so petitions leads the newcomer.
+    expect(trends.map((t) => t.name)).toEqual(["petitions", "surveys"]);
+    expect(trends[1]).toMatchObject({ values: [1, 3], first: 1, last: 3 });
+  });
+
+  it("drops a counter seen once — one reading is not a trend", () => {
+    const trends = strikeTrends([
+      { day: "2026-07-12", doc: strikeSeal({ petitions: 11 }) },
+      { day: "2026-07-26", doc: strikeSeal({ petitions: 0, surveys: 3 }) },
+    ]);
+    expect(trends.map((t) => t.name)).toEqual(["petitions"]);
+  });
+
+  it("treats a counter named like an Object member as data, not a method", () => {
+    const trends = strikeTrends([
+      { day: "2026-07-12", doc: strikeSeal({ toString: 2 }) },
+      { day: "2026-07-26", doc: strikeSeal({ toString: 9 }) },
+    ]);
+    expect(trends).toEqual([
+      { name: "toString", values: [2, 9], first: 2, last: 9, target: null },
+    ]);
+  });
+
+  it("makes no trends from an empty, unstruck or single-seal history", () => {
+    expect(strikeTrends([])).toEqual([]);
+    expect(
+      strikeTrends([
+        { day: "2026-07-12", doc: strikeSeal({}) },
+        { day: "2026-07-26", doc: strikeSeal({}) },
+      ]),
+    ).toEqual([]);
+    expect(
+      strikeTrends([{ day: "2026-07-26", doc: strikeSeal({ petitions: 0 }) }]),
     ).toEqual([]);
   });
 });
