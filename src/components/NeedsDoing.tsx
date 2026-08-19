@@ -8,6 +8,7 @@ import { GYM_CONTEXT } from "@/lib/aevcontext";
 import { CHORE_CADENCE_DAYS, choreState, type ChoreState } from "@/lib/chores";
 import {
   EMPTY_GYM_CONFIG,
+  GYM_WEEKLY_TARGET,
   lastSessionDate,
   normalizeGymConfig,
   sessionsThisWeek,
@@ -34,9 +35,6 @@ import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
  * read is failure-quiet — a miss reads as "no record", never as an error on the
  * homepage.
  */
-
-/** The week's training target the session count reads against. */
-const GYM_TARGET = 4;
 
 export function NeedsDoing({
   offline,
@@ -251,7 +249,7 @@ function GymStatus({
 }) {
   if (state.status === "unknown")
     return <span className="text-muted/50">no record</span>;
-  const count = `${thisWeek}/${GYM_TARGET} wk`;
+  const count = `${thisWeek}/${GYM_WEEKLY_TARGET} wk`;
   if (state.status === "ok")
     return (
       <span className="text-muted">

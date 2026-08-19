@@ -10,6 +10,7 @@ import {
   STEPS_HISTORY_CAP,
   trailingSeries,
   upsertDay,
+  weekAverage,
 } from "./steps";
 
 describe("isStepsIngest", () => {
@@ -129,6 +130,38 @@ describe("trailingSeries", () => {
   it("crosses a month boundary correctly", () => {
     const data = { days: { "2026-08-01": 5000, "2026-07-31": 4000 } };
     expect(trailingSeries(data, 2, "2026-08-01")).toEqual([4000, 5000]);
+  });
+});
+
+describe("weekAverage", () => {
+  it("is null when nothing in the window was recorded", () => {
+    expect(weekAverage({ days: {} }, "2026-08-20")).toBeNull();
+    // A day just outside the seven is not in the window.
+    expect(
+      weekAverage({ days: { "2026-08-13": 9000 } }, "2026-08-20"),
+    ).toBeNull();
+  });
+
+  it("averages the recorded days only, never the gaps", () => {
+    const data = {
+      days: { "2026-08-20": 10000, "2026-08-19": 5000, "2026-08-14": 3000 },
+    };
+    // Three recorded days in the window → 18000/3, NOT 18000/7.
+    expect(weekAverage(data, "2026-08-20")).toBe(6000);
+  });
+
+  it("averages a full week and rounds", () => {
+    const days: Record<string, number> = {};
+    for (let d = 14; d <= 20; d++) days[`2026-08-${d}`] = d * 1000;
+    // 14..20 thousand → 17000 exactly.
+    expect(weekAverage({ days }, "2026-08-20")).toBe(17000);
+    days["2026-08-20"] = 20001;
+    expect(weekAverage({ days }, "2026-08-20")).toBe(17000); // 17000.14 → 17000
+  });
+
+  it("ignores days after today", () => {
+    const data = { days: { "2026-08-21": 30000, "2026-08-20": 6000 } };
+    expect(weekAverage(data, "2026-08-20")).toBe(6000);
   });
 });
 

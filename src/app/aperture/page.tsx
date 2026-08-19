@@ -20,7 +20,7 @@ import { getSteps } from "@/lib/connectors/steps";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { sydneyToday } from "@/lib/fin";
 import { r2Enabled } from "@/lib/r2";
-import { stepsForDay, trailingSeries } from "@/lib/steps";
+import { stepsForDay, trailingSeries, weekAverage } from "@/lib/steps";
 
 export const metadata = { title: "aperture" };
 
@@ -175,7 +175,12 @@ export default async function AperturePage() {
           </div>
         )}
 
-        <ApertureInner offline={!r2Enabled()} series={series} today={today} />
+        <ApertureInner
+          offline={!r2Enabled()}
+          series={series}
+          stepsWeekAvg={weekAverage(steps, today)}
+          today={today}
+        />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>

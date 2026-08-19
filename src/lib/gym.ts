@@ -436,6 +436,34 @@ export function bestE1rm(
   return best;
 }
 
+/**
+ * The best estimated one-rep max per lift, heaviest first — the vessel's chip
+ * line, the whole log read as one row of figures. Only exercises with a set
+ * somewhere in the log appear: one added to the catalog and never done has
+ * nothing to estimate, and a chip reading zero would be a claim about a lift
+ * nobody performed.
+ *
+ * Sorted on the ROUNDED estimate, so two chips printing the same number sit in
+ * name order rather than in an order the decimals decide and the eye can't see;
+ * the name tiebreak makes the ordering total, so a redeploy can't reshuffle the
+ * line. Every reading is Epley's model — the `~` it is worn under belongs to the
+ * surface, exactly as it does everywhere else this estimate renders.
+ */
+export function liftChips(
+  cfg: GymConfig,
+  max = 6,
+): { name: string; e1rm: number }[] {
+  return cfg.exercises
+    .flatMap((e) => {
+      const best = bestE1rm(cfg, e.id);
+      return best === null
+        ? []
+        : [{ name: e.name, e1rm: Math.round(best.e1rm) }];
+    })
+    .sort((a, b) => b.e1rm - a.e1rm || a.name.localeCompare(b.name))
+    .slice(0, max);
+}
+
 // --- the in-progress draft -----------------------------------------------------
 
 /**
@@ -596,6 +624,14 @@ export function sessionCounts(
   }
   return out.reverse();
 }
+
+/**
+ * The week's training target every session count is read against — the owner's
+ * own cadence, not a cap: nothing here refuses a fifth session. It lives beside
+ * the count rather than beside one of its readers because two surfaces print it
+ * (the needs-doing board and the vessel), and they must never disagree.
+ */
+export const GYM_WEEKLY_TARGET = 4;
 
 /** How many sessions in the last 7 days INCLUDING today — a trailing week, not
  *  a Mon–Sun one, so the number never resets mid-training-week. Summing the

@@ -67,11 +67,19 @@ import {
   weeklyFlow,
   type FinConfig,
 } from "@/lib/fin";
-import { normalizeGymConfig, sessionCounts, sessionsThisWeek } from "@/lib/gym";
+import {
+  GYM_WEEKLY_TARGET,
+  liftChips,
+  normalizeGymConfig,
+  sessionCounts,
+  sessionsThisWeek,
+  type GymConfig,
+} from "@/lib/gym";
 import {
   dayTotals,
   driftLabel,
   normalizeMealsConfig,
+  trailingAverage,
   trailingProtein,
   weeklyWeightAverages,
   weightTrend,
@@ -238,17 +246,20 @@ async function recordSeries(
 }
 
 /**
- * The gym path's evidence, derived IN THE BROWSER. Every other strip on the band
- * is server-rendered, but the gym log lives in the E2EE `meta/gym` envelope — the
- * server cannot see a session, so it cannot draw one. Best-effort by construction,
- * so ANY miss (no envelope yet, a store flake, a shape this build doesn't trust)
- * returns null and the row renders bare, exactly as an undrawable series does. It
- * never delays or fails the page.
+ * The gym log, opened ONCE for the two readings it feeds: the gym path's evidence
+ * strip (when a path declares it) and the vessel's training figures — the week's
+ * sessions and the best estimate per lift, which no declaration gates, because
+ * the body is read whether or not a path has been declared over it. Every other
+ * strip on the paths band is server-rendered; this one can't be, since the log
+ * lives in the E2EE `meta/gym` envelope and the server cannot see a session.
+ *
+ * Best-effort by construction, on the meal log's exact terms: ANY miss (no
+ * envelope yet, a store flake, a shape this build doesn't trust) returns null and
+ * the page carries on without either reading. It never delays or fails the page.
  */
-async function gymSeries(
-  today: string,
+async function gymConfig(
   openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
-): Promise<EvidenceSeries | null> {
+): Promise<GymConfig | null> {
   try {
     const res = await fetch("/api/gym");
     if (res.status !== 200) return null;
@@ -257,14 +268,7 @@ async function gymSeries(
       GYM_CONTEXT,
     );
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    const cfg = normalizeGymConfig(parsed);
-    if (!cfg) return null;
-    // The same ten-week window every other strip in the band runs, so the row
-    // lines up with its neighbours.
-    return {
-      levels: toLevels(sessionCounts(cfg, ACTIVITY_DAYS, today)),
-      value: sessionsThisWeek(cfg, today),
-    };
+    return normalizeGymConfig(parsed);
   } catch {
     return null;
   }
@@ -298,11 +302,16 @@ async function mealsConfig(
 export function ApertureInner({
   offline,
   series,
+  stepsWeekAvg,
   today,
 }: {
   offline: boolean;
   /** The server-assembled path evidence — commits, languages, steps. */
   series: PathSeries;
+  /** The week's mean daily step count, read on the server: the step store is the
+   *  one plaintext body reading, so the vessel's walking figure needs no key —
+   *  null when nothing has been posted for the week. */
+  stepsWeekAvg: number | null;
   /** The Sydney calendar day, anchored once on the server so the strips this page
    *  draws and the ones it derives in the browser can't sit on different days. */
   today: string;
@@ -311,8 +320,9 @@ export function ApertureInner({
   const [doc, setDoc] = useState<ApertureDoc | null>(null);
   const [fin, setFin] = useState<FinConfig | null>(null);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
-  /** The sealed gym strip, once it lands — see `gymSeries`. */
-  const [gym, setGym] = useState<EvidenceSeries | null>(null);
+  /** The sealed gym log, once it lands — the training strip and the vessel's
+   *  figures are both derived from it below. */
+  const [gymCfg, setGymCfg] = useState<GymConfig | null>(null);
   /** The sealed meal log, once it lands — the protein strip and the vessel are
    *  both derived from it below. */
   const [mealsCfg, setMealsCfg] = useState<MealsConfig | null>(null);
@@ -332,7 +342,7 @@ export function ApertureInner({
       setDoc(null);
       setFin(null);
       setDataErr(null);
-      setGym(null);
+      setGymCfg(null);
       setMealsCfg(null);
       setRecord(null);
       setPending(false);
@@ -406,20 +416,15 @@ export function ApertureInner({
         );
         if (behind && !cancelled) setPending(true);
 
-        // The meal log — one request and one decrypt, unconditionally: the
-        // vessel band reads a body, which no path has to have been declared over.
-        // The protein strip still waits on a declaration, but it comes off these
-        // same bytes rather than a second decrypt.
+        // Both sealed logs — one request and one decrypt each, unconditionally:
+        // the vessel band reads a body, which no path has to have been declared
+        // over. The two evidence strips still wait on a declaration, but they
+        // come off these same bytes rather than a second decrypt.
         const meals = await mealsConfig(openItem);
         if (meals && !cancelled) setMealsCfg(meals);
 
-        // The sealed gym strip, only when a path actually asks for it — it costs
-        // a request and a decrypt, and a document may never name it.
-        const declared = declaredSeriesKeys(next.sealed.paths);
-        if (declared.has("gym")) {
-          const gymEv = await gymSeries(today, openItem);
-          if (gymEv && !cancelled) setGym(gymEv);
-        }
+        const gymLog = await gymConfig(openItem);
+        if (gymLog && !cancelled) setGymCfg(gymLog);
 
         // The seal history — a listing plus up to a dozen fetches and decrypts.
         const rec = await recordSeries(openItem);
@@ -445,6 +450,19 @@ export function ApertureInner({
       value: Math.round(dayTotals(mealsCfg, today).p),
     };
   }, [doc, mealsCfg, today]);
+
+  // The gym path's evidence, off the log already open here — sessions per day over
+  // the same ten-week window every other strip in the band runs, so the row lines
+  // up with its neighbours, and this week's count beside it. Declaration-gated for
+  // the meals strip's reason: an undeclared series is one the band would never draw.
+  const gymEvidence = useMemo<EvidenceSeries | null>(() => {
+    if (!doc || !gymCfg) return null;
+    if (!declaredSeriesKeys(doc.sealed.paths).has("gym")) return null;
+    return {
+      levels: toLevels(sessionCounts(gymCfg, ACTIVITY_DAYS, today)),
+      value: sessionsThisWeek(gymCfg, today),
+    };
+  }, [doc, gymCfg, today]);
 
   // Ten weeks of the ledger, walked once per envelope rather than once per render:
   // it is the same two readings the stats grid prints, taken ten times over.
@@ -503,19 +521,30 @@ export function ApertureInner({
   // it just arrives later (and, on any miss, not at all).
   const allSeries: PathSeries = {
     ...series,
-    ...(gym ? { gym } : {}),
+    ...(gymEvidence ? { gym: gymEvidence } : {}),
     ...(mealsEvidence ? { meals: mealsEvidence } : {}),
   };
 
-  // The vessel — the weight log read as ten weekly averages, plus this week's.
-  // Two weeks is the least that can be drawn as a trend, so below that the band
-  // does not exist: absence is the rule, and a lone point is not a picture.
+  // The vessel — the body itself, read from the two sealed logs and the one
+  // plaintext store: the week's training against its target, how far it walked,
+  // what it was fed, what it can lift, and where its weight is going. Each figure
+  // is drawn only if it exists; the band itself exists only if any of them do,
+  // because absence is the rule and an empty vessel is not a reading.
+  //
+  // Two weeks is the least the weight can be drawn as a trend, so below that the
+  // strip is absent even when the rest of the band is present: a lone point is
+  // not a picture.
   const weightWeeks = mealsCfg ? weeklyWeightAverages(mealsCfg, today) : [];
   const weightNow = mealsCfg ? weightTrend(mealsCfg, today) : null;
   const weightDrift =
     weightNow && weightNow.deltaPerWeek !== null
       ? driftLabel(weightNow.deltaPerWeek)
       : null;
+  const lifts = gymCfg ? liftChips(gymCfg) : [];
+  const fed = mealsCfg ? trailingAverage(mealsCfg, today, 7) : null;
+  const hasVesselStats =
+    gymCfg !== null || stepsWeekAvg !== null || fed !== null;
+  const hasVessel = hasVesselStats || weightWeeks.length >= 2;
 
   const recovered = fin ? recoveredThisWeek(fin, today) : null;
   const absorbed = fin ? absorbedThisWeek(fin, today) : null;
@@ -946,38 +975,82 @@ export function ApertureInner({
         </Flavor>
       </Section>
 
-      {weightWeeks.length >= 2 && (
+      {hasVessel && (
         <Section label="the vessel">
-          <TrendRow
-            label="weight"
-            values={weightWeeks}
-            delta={weightWeeks[weightWeeks.length - 1] - weightWeeks[0]}
-            plot="weekly average bodyweight, last ten weeks"
-            // No unit in the cell — it overflowed the phone; the line below owns it.
-            right={`${weightWeeks[0].toFixed(1)} → ${weightWeeks[
-              weightWeeks.length - 1
-            ].toFixed(1)}`}
-          />
-          <p className="mt-2 text-[11px] tabular-nums text-muted">
-            {weightNow?.avg != null && (
-              <>
-                this week{" "}
-                <span className="text-fg/90">
-                  {weightNow.avg.toFixed(1)} kg
+          {hasVesselStats && (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+              {gymCfg && (
+                <Stat
+                  label="sessions this wk"
+                  value={`${sessionsThisWeek(gymCfg, today)}`}
+                  suffix={`/ ${GYM_WEEKLY_TARGET}`}
+                />
+              )}
+              {stepsWeekAvg !== null && (
+                <Stat label="steps · 7d avg" value={commas(stepsWeekAvg)} />
+              )}
+              {fed && (
+                <Stat
+                  label="protein · 7d avg"
+                  value={`${Math.round(fed.avg.p)}`}
+                  suffix="g"
+                />
+              )}
+            </div>
+          )}
+          {/* What the vessel can move, one chip per lift — Epley's estimate, so
+              the line compares efforts the log recorded at different reps. */}
+          {lifts.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-baseline gap-1.5 text-xs">
+              <span className="mr-0.5 text-[10px] uppercase tracking-[0.15em] text-muted">
+                e1rm
+              </span>
+              {lifts.map((l) => (
+                <span
+                  key={l.name}
+                  className="border border-hairline px-1.5 py-px tabular-nums text-muted"
+                >
+                  <span className="text-fg/90">{l.name}</span> {l.e1rm}
                 </span>
-                {weightDrift && (
+              ))}
+            </div>
+          )}
+          {weightWeeks.length >= 2 && (
+            <>
+              <div className="mt-3">
+                <TrendRow
+                  label="weight"
+                  values={weightWeeks}
+                  delta={weightWeeks[weightWeeks.length - 1] - weightWeeks[0]}
+                  plot="weekly average bodyweight, last ten weeks"
+                  // No unit in the cell — it overflowed the phone; the line below owns it.
+                  right={`${weightWeeks[0].toFixed(1)} → ${weightWeeks[
+                    weightWeeks.length - 1
+                  ].toFixed(1)}`}
+                />
+              </div>
+              <p className="mt-2 text-[11px] tabular-nums text-muted">
+                {weightNow?.avg != null && (
                   <>
-                    {" · "}
-                    <span className={weightDrift.tone}>
-                      {weightDrift.text} kg/wk
+                    this week{" "}
+                    <span className="text-fg/90">
+                      {weightNow.avg.toFixed(1)} kg
                     </span>
+                    {weightDrift && (
+                      <>
+                        {" · "}
+                        <span className={weightDrift.tone}>
+                          {weightDrift.text} kg/wk
+                        </span>
+                      </>
+                    )}
+                    {" · "}
                   </>
                 )}
-                {" · "}
-              </>
-            )}
-            weekly averages, 10 wk
-          </p>
+                weekly averages, 10 wk
+              </p>
+            </>
+          )}
           <Flavor>
             the vessel every path runs on — read the average, never the morning.
           </Flavor>
@@ -1022,10 +1095,14 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 function Stat({
   label,
   value,
+  suffix,
   tone,
 }: {
   label: string;
   value: string;
+  /** What the figure is measured in or against (`g`, `/ 4`) — muted, so the
+   *  figure stays the thing being read and the unit is only there when asked for. */
+  suffix?: string;
   tone?: string;
 }) {
   return (
@@ -1035,6 +1112,7 @@ function Stat({
       </p>
       <p className={`mt-0.5 text-sm tabular-nums ${tone ?? "text-fg/90"}`}>
         {value}
+        {suffix && <span className="text-muted"> {suffix}</span>}
       </p>
     </div>
   );
