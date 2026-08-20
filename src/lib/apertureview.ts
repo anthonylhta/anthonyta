@@ -780,6 +780,33 @@ export function mortalSegments(s: MortalSignals): MortalSegment[] {
   return segments;
 }
 
+// --- the harvest ----------------------------------------------------------------
+
+/** A `**bold lead**` at the very head of a paragraph, and nothing anywhere else. */
+const LEAD = /^\*\*(.+?)\*\*/;
+
+/**
+ * A harvest paragraph split into its bold LEAD and the prose that follows it. The
+ * check-in writes its passages with a numbered lead sentence (`**1. The line
+ * pattern.** Ability holds…`), and that lead is the only markdown this page reads:
+ * everything else — including a `**` later in the same paragraph — prints
+ * literally, because the sealed passage is prose the site renders and never
+ * interprets.
+ *
+ * The separator rides in `rest` (`" Ability holds…"`), so a caller can print the
+ * two halves back to back and get the sentence it sealed. An unterminated `**`, or
+ * one that isn't at the head, is not a lead — those cases return the paragraph
+ * whole rather than swallowing text into an emphasis that was never opened.
+ */
+export function splitLead(paragraph: string): {
+  lead: string | null;
+  rest: string;
+} {
+  const m = LEAD.exec(paragraph);
+  if (m === null) return { lead: null, rest: paragraph };
+  return { lead: m[1], rest: paragraph.slice(m[0].length) };
+}
+
 // --- the adjudication rider -----------------------------------------------------
 
 /** A vault daily note's title is its Sydney calendar day, and nothing else is. */

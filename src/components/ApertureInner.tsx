@@ -49,6 +49,7 @@ import {
   pathAnchor,
   pathEvidence,
   signedCount,
+  splitLead,
   splitTrials,
   tierGlyph,
   trialCountdown,
@@ -120,6 +121,10 @@ const GRADE_LADDER: readonly string[] = [
 /** Weeks in a month, for turning a weekly burn into a runway a person reads in
  *  months. The average, not 4 — a 4-week month would flatter the number. */
 const WEEKS_PER_MONTH = 52 / 12;
+
+/** How many rulings stand open before the rest go behind a `+n more` — enough to
+ *  read the last check-in's reasoning without the band becoming the page. */
+const RULINGS_SHOWN = 3;
 
 /** A figure in cents as the page prints it, or the honest dash. Null means "not
  *  knowable here" — never a zero the page made up. */
@@ -321,6 +326,12 @@ export function ApertureInner({
   /** Raw journal days have run ≥2 days past the seal — flag, never resolve. */
   const [pending, setPending] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
+  /** Which harvest entries are open, keyed by day + title — every one starts
+   *  closed, so the band reads as a list of what was yielded, not a wall of it. */
+  const [openHarvest, setOpenHarvest] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [showRulings, setShowRulings] = useState(false);
 
   // Render-phase adjustment (not an effect): dropping everything decrypted the
   // moment the vault stops being unlocked, per the lint-blessed reset pattern.
@@ -337,6 +348,8 @@ export function ApertureInner({
       setRecord(null);
       setPending(false);
       setShowResolved(false);
+      setOpenHarvest(new Set());
+      setShowRulings(false);
     }
   }
 
@@ -497,6 +510,22 @@ export function ApertureInner({
     breakthrough.event !== "" ||
     breakthrough.routes.length > 0 ||
     strikes.length > 0;
+
+  // The two prose bands, newest first — sorted here rather than trusted from the
+  // seal, because the emitter's order is a writing order and the page reads back
+  // in time. `YYYY-MM-DD` sorts as it counts, so the comparison is the string's.
+  const harvest = [...(doc.sealed.enlightenments ?? [])].sort((a, b) =>
+    b.date.localeCompare(a.date),
+  );
+  const rulings = [...(doc.sealed.rulings ?? [])].sort((a, b) =>
+    b.date.localeCompare(a.date),
+  );
+  const toggleHarvest = (key: string) =>
+    setOpenHarvest((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   // The server's evidence, plus the series only this browser can produce. The
   // band consumes them identically — a sealed strip is not a special kind of row,
@@ -794,6 +823,63 @@ export function ApertureInner({
         </>
       )}
 
+      {/* What the trials YIELDED — the band sits directly under them because it is
+          the other half of the same reading: a trial is what happened, an
+          enlightenment is what was taken from it. Every entry starts closed, so
+          the band reads as a list and opens into a passage only when asked. */}
+      {harvest.length > 0 && (
+        <>
+          <ZoneHeader
+            label="the harvest"
+            seal="悟"
+            right={`${harvest.length} ${harvest.length === 1 ? "entry" : "entries"}`}
+          />
+          <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+            {harvest.map((e) => {
+              const key = `${e.date}${e.title}`;
+              const shown = openHarvest.has(key);
+              return (
+                <div key={key}>
+                  <button
+                    type="button"
+                    onClick={() => toggleHarvest(key)}
+                    aria-expanded={shown}
+                    className="text-left text-xs"
+                  >
+                    <span className="tabular-nums text-muted">{e.date}</span>{" "}
+                    <span className="text-fg/90">{e.title}</span>
+                    {e.trial && (
+                      <span className="text-muted/60"> · {e.trial}</span>
+                    )}{" "}
+                    <span className="text-muted">{shown ? "▾" : "▸"}</span>
+                  </button>
+                  {shown && (
+                    <div className="mt-1 mb-1.5 ml-4 flex flex-col gap-1.5 text-xs leading-relaxed text-fg/80">
+                      {e.body.map((paragraph, i) => {
+                        // The passage as sealed. The one piece of markup read here
+                        // is the bold lead the check-in opens a numbered passage
+                        // with; everything else prints exactly as it was written.
+                        const { lead, rest } = splitLead(paragraph);
+                        return (
+                          <p key={i}>
+                            {lead && <span className="text-fg/90">{lead}</span>}
+                            {rest}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <p className="mt-1 text-[11px] italic text-muted/60">
+              the record is the harvest, never the suffering — recorded only
+              through yield.
+            </p>
+          </div>
+        </>
+      )}
+
       {/* Every day the LISTING knew about, drawn or accounted for: rows on
           screen, the capped-out tail, and the ones that wouldn't open. */}
       {record && recordTotal > 0 && (
@@ -870,6 +956,39 @@ export function ApertureInner({
                   />
                 ))}
               </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* The decisions behind the figures, under the history they explain: the
+          record says what each seal READ, and these say why it read that way. */}
+      {rulings.length > 0 && (
+        <>
+          <ZoneHeader
+            label="rulings"
+            seal="判"
+            right={`last ${rulings.length}`}
+          />
+          <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+            {(showRulings ? rulings : rulings.slice(0, RULINGS_SHOWN)).map(
+              (r, i) => (
+                <p key={i} className="text-[11px] leading-relaxed text-muted">
+                  <span className="tabular-nums text-muted/60">{r.date}</span> ·{" "}
+                  {r.text}
+                </p>
+              ),
+            )}
+            {rulings.length > RULINGS_SHOWN && (
+              <button
+                type="button"
+                onClick={() => setShowRulings(!showRulings)}
+                className="self-start text-[11px] text-muted transition-colors hover:text-(--essence)"
+              >
+                {showRulings
+                  ? "▴ fewer"
+                  : `+${rulings.length - RULINGS_SHOWN} more ▸`}
+              </button>
             )}
           </div>
         </>
@@ -1323,6 +1442,7 @@ function PathCard({ path }: { path: AperturePath }) {
           </span>
         )}
       </div>
+      <PeakLine peak={path.peak} />
       <GuList gu={path.gu} />
       <NextLine next={path.next} />
       {path.sub?.map((s, i) => (
@@ -1342,6 +1462,7 @@ function SubPath({ path }: { path: AperturePath }) {
       <p className="text-[11px] uppercase tracking-[0.15em] text-muted/70">
         {path.name}
       </p>
+      <PeakLine peak={path.peak} />
       <GuList gu={path.gu} />
       <NextLine next={path.next} />
       {path.sub?.map((s, i) => (
@@ -1370,6 +1491,18 @@ function GuList({ gu }: { gu?: ApertureGu[] }) {
         </p>
       ))}
     </div>
+  );
+}
+
+/** How high the path goes — the ceiling, printed at the head of the card where
+ *  `next` is printed at its foot: what it is worth reaching, then the next step
+ *  toward it. Shared with the sub-path card for the same reason `NextLine` is. */
+function PeakLine({ peak }: { peak?: string }) {
+  if (!peak) return null;
+  return (
+    <p className="mt-1.5 text-[11px] text-muted">
+      peak · <span className="text-fg/80">{peak}</span>
+    </p>
   );
 }
 

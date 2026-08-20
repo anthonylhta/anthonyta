@@ -376,9 +376,76 @@ function walkPath(x: unknown, at: string): Fail {
     ifPresent(x.verified, `${at}.verified`, needBool),
     ifPresent(x.note, `${at}.note`, needStr),
     ifPresent(x.activity, `${at}.activity`, needStr),
+    ifPresent(x.peak, `${at}.peak`, needNonEmptyStr),
     ifPresent(x.next, `${at}.next`, needStr),
     x.gu === undefined ? null : eachRow(x.gu, `${at}.gu`, walkGu),
     x.sub === undefined ? null : eachRow(x.sub, `${at}.sub`, walkPath),
+  );
+}
+
+/**
+ * The prose ceilings, MIRRORED from lib/aperture rather than imported — the same
+ * bargain the predicates above keep, where a diagnostic never widens the module
+ * it diagnoses. Drift here costs a pinned line, not a wrong verdict: the gate is
+ * still `normalizeAperture`, and a ceiling this walk has stale simply falls
+ * through to the honest "couldn't pin it".
+ */
+const MAX_ENLIGHTENMENTS = 50;
+const MAX_PARAGRAPHS = 60;
+const MAX_PARAGRAPH_CHARS = 4000;
+const MAX_TITLE_CHARS = 200;
+const MAX_RULINGS = 30;
+const MAX_RULING_CHARS = 4000;
+
+/** Printable prose with a ceiling — a title, a paragraph, a ruling. */
+function needProse(max: number): (v: unknown, at: string) => Fail {
+  return (v, at) =>
+    first(
+      needNonEmptyStr(v, at),
+      typeof v === "string" && v.length > max
+        ? `${at} must be at most ${max} characters (found ${v.length})`
+        : null,
+    );
+}
+
+/** An array field with a ceiling. The ROWS are walked first: a malformed row is a
+ *  more useful thing to be told about than a list one entry too long. */
+function cappedRows(
+  v: unknown,
+  at: string,
+  max: number,
+  walk: (row: unknown, at: string) => Fail,
+): Fail {
+  const rows = eachRow(v, at, walk);
+  if (rows !== null) return rows;
+  return Array.isArray(v) && v.length > max
+    ? `${at} must hold at most ${max} entries (found ${v.length})`
+    : null;
+}
+
+function walkEnlightenment(x: unknown, at: string): Fail {
+  if (!isObj(x)) return `${at} must be an object (found ${show(x)})`;
+  const body = x.body;
+  return first(
+    needDay(x.date, `${at}.date`),
+    needProse(MAX_TITLE_CHARS)(x.title, `${at}.title`),
+    ifPresent(x.trial, `${at}.trial`, needStr),
+    Array.isArray(body) && body.length === 0
+      ? `${at}.body must hold at least one paragraph`
+      : cappedRows(
+          body,
+          `${at}.body`,
+          MAX_PARAGRAPHS,
+          needProse(MAX_PARAGRAPH_CHARS),
+        ),
+  );
+}
+
+function walkRuling(x: unknown, at: string): Fail {
+  if (!isObj(x)) return `${at} must be an object (found ${show(x)})`;
+  return first(
+    needDay(x.date, `${at}.date`),
+    needProse(MAX_RULING_CHARS)(x.text, `${at}.text`),
   );
 }
 
@@ -442,6 +509,17 @@ function walkSealed(x: unknown): Fail {
     eachRow(x.trials, "sealed.trials", walkTrial),
     walkBreakthrough(x.breakthrough, "sealed.breakthrough"),
     ifPresent(x.next, "sealed.next", needNonEmptyStr),
+    x.enlightenments === undefined
+      ? null
+      : cappedRows(
+          x.enlightenments,
+          "sealed.enlightenments",
+          MAX_ENLIGHTENMENTS,
+          walkEnlightenment,
+        ),
+    x.rulings === undefined
+      ? null
+      : cappedRows(x.rulings, "sealed.rulings", MAX_RULINGS, walkRuling),
     x.rented === undefined ? null : eachRow(x.rented, "sealed.rented", needStr),
     ifPresent(x.profile, "sealed.profile", (v, at) =>
       !isObj(v)
