@@ -3,6 +3,7 @@ import {
   EMPTY_GYM_CONFIG,
   EMPTY_GYM_DRAFT,
   GYM_MAX_BYTES,
+  GYM_WEEKLY_TARGET,
   MAX_SESSIONS,
   addExercise,
   addSession,
@@ -17,6 +18,7 @@ import {
   fitsGymCap,
   gymPayloadBytes,
   isPr,
+  liftChips,
   parseDraft,
   parseSetInput,
   prefillSet,
@@ -694,6 +696,73 @@ describe("epley / bestE1rm", () => {
   it("is null for an exercise with no sets", () => {
     expect(bestE1rm(cfg, "row")).toBeNull();
     expect(bestE1rm(EMPTY_GYM_CONFIG, "bench")).toBeNull();
+  });
+});
+
+describe("liftChips", () => {
+  const catalog = [
+    { id: "bench", name: "bench press" },
+    { id: "squat", name: "squat" },
+    { id: "dead", name: "deadlift" },
+    { id: "row", name: "row" },
+  ];
+
+  it("is empty with nothing logged", () => {
+    expect(liftChips(EMPTY_GYM_CONFIG)).toEqual([]);
+    expect(liftChips(base({ sessions: [] }))).toEqual([]);
+  });
+
+  it("ranks by estimate and omits lifts never done", () => {
+    const cfg = base({
+      exercises: catalog,
+      sessions: [
+        session({
+          id: "s1",
+          entries: [
+            { exerciseId: "bench", sets: [{ w: 60, r: 8 }] }, // 76
+            { exerciseId: "dead", sets: [{ w: 140, r: 1 }] }, // 140
+            { exerciseId: "squat", sets: [{ w: 100, r: 5 }] }, // ~117
+            { exerciseId: "row", sets: [] }, // never loaded — no chip
+          ],
+        }),
+      ],
+    });
+    expect(liftChips(cfg)).toEqual([
+      { name: "deadlift", e1rm: 140 },
+      { name: "squat", e1rm: 117 },
+      { name: "bench press", e1rm: 76 },
+    ]);
+  });
+
+  it("breaks ties by name and caps the line", () => {
+    const cfg = base({
+      exercises: catalog,
+      sessions: [
+        session({
+          id: "s1",
+          entries: catalog.map((e) => ({
+            exerciseId: e.id,
+            sets: [{ w: 50, r: 5 }],
+          })),
+        }),
+      ],
+    });
+    expect(liftChips(cfg).map((c) => c.name)).toEqual([
+      "bench press",
+      "deadlift",
+      "row",
+      "squat",
+    ]);
+    expect(liftChips(cfg, 2).map((c) => c.name)).toEqual([
+      "bench press",
+      "deadlift",
+    ]);
+  });
+});
+
+describe("GYM_WEEKLY_TARGET", () => {
+  it("is the cadence both surfaces read the week against", () => {
+    expect(GYM_WEEKLY_TARGET).toBe(4);
   });
 });
 

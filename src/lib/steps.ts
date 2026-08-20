@@ -135,6 +135,31 @@ export function trailingSeries(
   return out.reverse();
 }
 
+/**
+ * The mean daily count over the last 7 calendar days ending at `today`
+ * (inclusive), across the days that actually HAVE a record — null when none of
+ * them do.
+ *
+ * Recorded days only, unlike `trailingSeries`: a missing day is a day the phone
+ * never posted, not a day nobody moved, so averaging the gaps in as zeroes would
+ * print a number the body never walked. Rounded, because a step count with a
+ * decimal in it is the arithmetic showing through.
+ */
+export function weekAverage(data: StepsData, todayISO: string): number | null {
+  let sum = 0;
+  let logged = 0;
+  let cursor = todayISO;
+  for (let i = 0; i < 7; i++) {
+    const count = stepsForDay(data, cursor);
+    if (count !== null) {
+      sum += count;
+      logged += 1;
+    }
+    cursor = prevDay(cursor);
+  }
+  return logged === 0 ? null : Math.round(sum / logged);
+}
+
 /** Comma-group a non-negative integer: 6240 → "6,240". Deterministic (SSR-safe). */
 export function commas(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
