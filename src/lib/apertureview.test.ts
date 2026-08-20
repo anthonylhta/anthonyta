@@ -41,6 +41,7 @@ import {
   pathEvidence,
   sealedAgo,
   signedCount,
+  splitLead,
   splitTrials,
   tierGlyph,
   trialCountdown,
@@ -961,6 +962,60 @@ describe("apertureview — compactDollars", () => {
     expect(compactDollars(126_500)).toBe("$1.3k");
     expect(compactDollars(1_240_000)).toBe("$12.4k");
     expect(compactDollars(100_000_000)).toBe("$1.0M");
+  });
+});
+
+describe("apertureview — splitLead", () => {
+  it("reads a bold lead at the head of a paragraph", () => {
+    expect(
+      splitLead("**1. The bar pattern.** It held at every bar set for it."),
+    ).toEqual({
+      lead: "1. The bar pattern.",
+      rest: " It held at every bar set for it.",
+    });
+  });
+
+  it("keeps the separating space in the rest, so the halves rejoin", () => {
+    const { lead, rest } = splitLead("**Lead.** Then the prose.");
+    expect(`${lead}${rest}`).toBe("Lead. Then the prose.");
+  });
+
+  it("reads a paragraph that is nothing but its lead", () => {
+    expect(splitLead("**All of it.**")).toEqual({
+      lead: "All of it.",
+      rest: "",
+    });
+  });
+
+  it("finds no lead in an ordinary paragraph", () => {
+    expect(splitLead("It did not hold where no bar had been set.")).toEqual({
+      lead: null,
+      rest: "It did not hold where no bar had been set.",
+    });
+    expect(splitLead("")).toEqual({ lead: null, rest: "" });
+  });
+
+  it("finds no lead when the emphasis is never closed", () => {
+    // Half-written markup prints as it was written — the alternative is
+    // swallowing the whole passage into an emphasis nobody opened.
+    expect(splitLead("**unterminated, and the rest of it")).toEqual({
+      lead: null,
+      rest: "**unterminated, and the rest of it",
+    });
+    expect(splitLead("****")).toEqual({ lead: null, rest: "****" });
+  });
+
+  it("only reads emphasis at the START, and only once", () => {
+    // Everything after the lead is prose the site prints literally — this is the
+    // one piece of markup the harvest reads, not a markdown renderer.
+    expect(splitLead("A sentence with **emphasis** inside it.")).toEqual({
+      lead: null,
+      rest: "A sentence with **emphasis** inside it.",
+    });
+    expect(splitLead("**Lead.** and **more** after.")).toEqual({
+      lead: "Lead.",
+      rest: " and **more** after.",
+    });
   });
 });
 

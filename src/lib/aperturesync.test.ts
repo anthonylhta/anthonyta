@@ -454,6 +454,119 @@ describe("aperturesync — rejection diagnosis", () => {
     );
   });
 
+  it("names a peak line that isn't printable prose", () => {
+    const peaked = (peak: unknown) => ({
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        paths: [{ ...raw.sealed.paths[0], peak }, raw.sealed.paths[1]],
+      },
+    });
+    expect(explainRejected(peaked(3))).toBe(
+      "sealed.paths[0].peak must be a non-empty string (found 3)",
+    );
+    expect(explainRejected(peaked(""))).toBe(
+      "sealed.paths[0].peak must not be empty",
+    );
+  });
+
+  it("names a bad harvest paragraph by its entry and index", () => {
+    const bad = {
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        enlightenments: [
+          { date: "2026-02-14", title: "the cold forge", body: ["yield."] },
+          {
+            date: "2026-02-21",
+            title: "the second night",
+            body: ["yield.", "held.", "carried.", ""],
+          },
+        ],
+      },
+    };
+    expect(explainRejected(bad)).toBe(
+      "sealed.enlightenments[1].body[3] must not be empty",
+    );
+  });
+
+  it("names a harvest entry's date, title and empty body", () => {
+    const entry = (patch: Record<string, unknown>) => ({
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        enlightenments: [
+          {
+            date: "2026-02-14",
+            title: "the cold forge",
+            body: ["yield."],
+            ...patch,
+          },
+        ],
+      },
+    });
+    expect(explainRejected(entry({ date: "14 February 2026" }))).toBe(
+      'sealed.enlightenments[0].date must be a YYYY-MM-DD day (found "14 February 2026")',
+    );
+    expect(explainRejected(entry({ title: "" }))).toBe(
+      "sealed.enlightenments[0].title must not be empty",
+    );
+    expect(explainRejected(entry({ body: [] }))).toBe(
+      "sealed.enlightenments[0].body must hold at least one paragraph",
+    );
+  });
+
+  it("names a list that ran past its ceiling, and the paragraph that did", () => {
+    // The ceilings are mirrored from lib/aperture, so these two expectations are
+    // also what catches the mirror going stale — a drifted number reads as an
+    // unpinned rejection here rather than a wrong one.
+    const many = {
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        rulings: Array.from({ length: 31 }, () => ({
+          date: "2026-03-01",
+          text: "held.",
+        })),
+      },
+    };
+    expect(explainRejected(many)).toBe(
+      "sealed.rulings must hold at most 30 entries (found 31)",
+    );
+    const long = {
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        enlightenments: [
+          {
+            date: "2026-02-14",
+            title: "the cold forge",
+            body: ["x".repeat(4001)],
+          },
+        ],
+      },
+    };
+    expect(explainRejected(long)).toBe(
+      "sealed.enlightenments[0].body[0] must be at most 4000 characters (found 4001)",
+    );
+  });
+
+  it("names a ruling's own fields by index", () => {
+    const ruling = (r: unknown) => ({
+      ...raw,
+      sealed: {
+        ...raw.sealed,
+        rulings: [{ date: "2026-03-01", text: "held." }, r],
+      },
+    });
+    expect(explainRejected(ruling({ date: "2026-03-08", text: 3 }))).toBe(
+      "sealed.rulings[1].text must be a non-empty string (found 3)",
+    );
+    expect(explainRejected(ruling("2026-03-08 · held."))).toBe(
+      'sealed.rulings[1] must be an object (found "2026-03-08 · held.")',
+    );
+  });
+
   it("names a bad vital-gu candidate by its index", () => {
     const bad = {
       ...raw,

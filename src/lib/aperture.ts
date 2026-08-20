@@ -176,6 +176,9 @@ export interface AperturePath {
   verified?: boolean;
   note?: string;
   activity?: string;
+  /** How high this path can go and what it compounds into, in the check-in's own
+   *  words — the ceiling, where `next` is the very next step toward it. */
+  peak?: string;
   /** The gu the path holds. Absent on a path the check-in hasn't inventoried. */
   gu?: ApertureGu[];
   /** What the next rung asks for, in the emitter's own words. */
@@ -214,6 +217,47 @@ export interface ApertureBreakthrough {
 }
 
 /**
+ * One enlightenment — what a trial YIELDED, written up at the check-in and sealed
+ * whole. `body` is the passage as paragraphs, carried across the frame untouched:
+ * the site prints them and never parses them (the one exception is a `**bold**`
+ * lead at the head of a paragraph, which `apertureview.splitLead` reads for
+ * emphasis alone — everything else prints literally).
+ *
+ * `trial` names the trial the entry came out of, when it came out of one; an
+ * enlightenment that arrived on its own terms simply doesn't carry it.
+ */
+export interface ApertureEnlightenment {
+  /** The day it was written, `YYYY-MM-DD`. */
+  date: string;
+  title: string;
+  trial?: string;
+  /** At least one paragraph — an entry with no body is not an entry. */
+  body: string[];
+}
+
+/** One adjudication the check-in made, in its own words and dated — the ledger of
+ *  decisions behind the figures the rest of the page renders. */
+export interface ApertureRuling {
+  date: string;
+  text: string;
+}
+
+/**
+ * Ceilings on the two prose arrays. They are not a formatting opinion: this
+ * document is decrypted and rendered in one pass in the browser, so a runaway
+ * emission would be a page that takes seconds to draw rather than a line that
+ * looks wrong. Over any of them is a HARD REJECT like every other frame breach —
+ * the sync script's walk names which one, so an over-long check-in is caught at
+ * seal time rather than at read time.
+ */
+const MAX_ENLIGHTENMENTS = 50;
+const MAX_PARAGRAPHS = 60;
+const MAX_PARAGRAPH_CHARS = 4000;
+const MAX_TITLE_CHARS = 200;
+const MAX_RULINGS = 30;
+const MAX_RULING_CHARS = 4000;
+
+/**
  * Standing context about the person the sheet is about. `born` is a `YYYY-MM-DD`
  * calendar day the browser turns into an age. (A `now` line was designed and cut
  * the same day — the age and the daily quote carry the block.)
@@ -249,6 +293,11 @@ export interface ApertureSealed {
    * again whenever a week has nothing to say about what comes next.
    */
   next?: string;
+  /** The harvest: what the trials yielded, newest first once the page has sorted
+   *  them. Absent on every document sealed before the band existed. */
+  enlightenments?: ApertureEnlightenment[];
+  /** The decisions behind the figures, dated. Absent on the same terms. */
+  rulings?: ApertureRuling[];
   /** Borrowed capability — what is rented rather than held, one line each. */
   rented?: string[];
   /** Who the sheet is about — absent on every document sealed before it existed. */
@@ -391,12 +440,16 @@ function normStrings(x: unknown): string[] | null {
 function normPath(x: unknown): AperturePath | null {
   if (!isObj(x)) return null;
   if (!isStr(x.name)) return null;
-  const { role, attainment, verified, note, activity, gu, next, sub } = x;
+  const { role, attainment, verified, note, activity, peak, gu, next, sub } = x;
   if (role !== undefined && !isStr(role)) return null;
   if (attainment !== undefined && !isStr(attainment)) return null;
   if (verified !== undefined && typeof verified !== "boolean") return null;
   if (note !== undefined && !isStr(note)) return null;
   if (activity !== undefined && !isStr(activity)) return null;
+  // The peak is a printed LINE, not a label: an empty one would render as a bare
+  // "peak ·" with nothing after it, so it is absent-in-disguise and rejects — the
+  // same reading the sealed `next` line gets.
+  if (peak !== undefined && !isNonEmptyStr(peak)) return null;
   if (next !== undefined && !isStr(next)) return null;
   const gus = gu === undefined ? undefined : normArray(gu, normGu);
   if (gus === null) return null;
@@ -409,6 +462,7 @@ function normPath(x: unknown): AperturePath | null {
     ...(verified !== undefined ? { verified } : {}),
     ...(note !== undefined ? { note } : {}),
     ...(activity !== undefined ? { activity } : {}),
+    ...(peak !== undefined ? { peak } : {}),
     ...(gus !== undefined ? { gu: gus } : {}),
     ...(next !== undefined ? { next } : {}),
     ...(subs !== undefined ? { sub: subs } : {}),
@@ -460,6 +514,38 @@ function normTrial(x: unknown): ApertureTrial | null {
   };
 }
 
+/** Prose with a ceiling: non-empty, and short enough that the page can draw it. */
+function isProse(x: unknown, max: number): x is string {
+  return isNonEmptyStr(x) && x.length <= max;
+}
+
+function normEnlightenment(x: unknown): ApertureEnlightenment | null {
+  if (!isObj(x)) return null;
+  if (!isDay(x.date)) return null;
+  if (!isProse(x.title, MAX_TITLE_CHARS)) return null;
+  const { trial } = x;
+  // The title and the paragraphs are printed as the entry; the trial name is
+  // printed only when there is one, so an empty one is silence, not bare chrome.
+  if (trial !== undefined && !isStr(trial)) return null;
+  const body = normArray(x.body, (v) =>
+    isProse(v, MAX_PARAGRAPH_CHARS) ? v : null,
+  );
+  if (body === null || body.length === 0 || body.length > MAX_PARAGRAPHS)
+    return null;
+  return {
+    date: x.date,
+    title: x.title,
+    ...(trial !== undefined ? { trial } : {}),
+    body,
+  };
+}
+
+function normRuling(x: unknown): ApertureRuling | null {
+  if (!isObj(x)) return null;
+  if (!isDay(x.date) || !isProse(x.text, MAX_RULING_CHARS)) return null;
+  return { date: x.date, text: x.text };
+}
+
 function normBreakthrough(x: unknown): ApertureBreakthrough | null {
   if (!isObj(x)) return null;
   if (!isStr(x.wall) || !isStr(x.event)) return null;
@@ -486,6 +572,22 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (vitalGu === null) return null;
   const rented = x.rented === undefined ? undefined : normStrings(x.rented);
   if (rented === null) return null;
+  // The two prose arrays: one bad row rejects the whole list (normArray), and a
+  // list past its ceiling rejects the document.
+  const enlightenments =
+    x.enlightenments === undefined
+      ? undefined
+      : normArray(x.enlightenments, normEnlightenment);
+  if (enlightenments === null) return null;
+  if (
+    enlightenments !== undefined &&
+    enlightenments.length > MAX_ENLIGHTENMENTS
+  )
+    return null;
+  const rulings =
+    x.rulings === undefined ? undefined : normArray(x.rulings, normRuling);
+  if (rulings === null) return null;
+  if (rulings !== undefined && rulings.length > MAX_RULINGS) return null;
   const profile = x.profile === undefined ? undefined : normProfile(x.profile);
   if (profile === null) return null;
   // An EMPTY next line is malformed rather than absent: a seal either says what
@@ -500,6 +602,8 @@ function normSealed(x: unknown): ApertureSealed | null {
     trials,
     breakthrough,
     ...(next !== undefined ? { next } : {}),
+    ...(enlightenments !== undefined ? { enlightenments } : {}),
+    ...(rulings !== undefined ? { rulings } : {}),
     ...(rented !== undefined ? { rented } : {}),
     ...(profile !== undefined ? { profile } : {}),
   };
