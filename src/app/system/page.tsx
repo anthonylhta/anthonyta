@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { AuthJournalPanel } from "@/components/AuthJournal";
 import { LayoutPanel } from "@/components/LayoutPanel";
 import { PasskeyManager } from "@/components/PasskeyManager";
+import { PushPanel } from "@/components/PushPanel";
 import { RecoveryShares } from "@/components/RecoveryShares";
 import { RotationPanel } from "@/components/RotationPanel";
 import {
@@ -16,6 +17,7 @@ import { TotpDrawer } from "@/components/TotpDrawer";
 import { readDays } from "@/lib/anastore";
 import { getAuthLog } from "@/lib/authlogstore";
 import { sydneyToday } from "@/lib/fin";
+import { vapidPublicKey } from "@/lib/pushsend";
 import { r2Enabled } from "@/lib/r2";
 
 export const metadata = { title: "system" };
@@ -63,6 +65,15 @@ export default async function SystemPage() {
         <Section label="2fa" right="totp" />
         <div className="px-4 py-3">
           <TotpDrawer offline={!r2Enabled()} />
+        </div>
+
+        {/* ───────────── PUSH ───────────── */}
+        <Section label="push" right="notifications" />
+        <div className="px-4 py-3">
+          {/* The VAPID public key is handed to the browser's push service by
+              design — not a secret, so it rides as a prop rather than earning a
+              route of its own. */}
+          <PushPanel offline={!r2Enabled()} vapidPublicKey={vapidPublicKey()} />
         </div>
 
         {/* ───────────── LAYOUT ───────────── */}
