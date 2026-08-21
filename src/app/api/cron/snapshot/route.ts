@@ -8,7 +8,25 @@ import {
   type SnapIndex,
 } from "@/lib/fin";
 import { getSnapIndex, putSnapIndex } from "@/lib/finstore";
+import {
+  categoryOn,
+  checkStaleness,
+  INGEST_SOURCES,
+  parsePushConfig,
+  pruneSubs,
+  serializePushConfig,
+  setEpisode,
+  stalenessBody,
+  type IngestSource,
+  type PushConfig,
+} from "@/lib/push";
+import { deliver, pushConfigured } from "@/lib/pushsend";
+import { getPushRaw, putPush } from "@/lib/pushstore";
 import { sweepExpiredShares } from "@/lib/shares";
+import { parseSleepStore } from "@/lib/sleep";
+import { getSleepRaw } from "@/lib/sleepstore";
+import { parseStepsStore } from "@/lib/steps";
+import { getStepsRaw } from "@/lib/stepsstore";
 import { isTftHistory, upsertHistoryDay, type TftHistory } from "@/lib/tft";
 import { getTftHistoryRaw, putTftHistory } from "@/lib/tftstore";
 
@@ -33,6 +51,10 @@ export const dynamic = "force-dynamic";
  *             It piggybacks on this already-authorized nightly run;
  *             `sweepExpiredShares` never throws, but a defensive `catch → -1`
  *             keeps a sweep hiccup from sinking the snapshot.
+ * - `alarm` — the ingest-staleness push: the phone pushes steps and sleep, and
+ *             nothing else notices when it quietly stops. Once per silence
+ *             episode, never off a read error, and never for a store that has
+ *             had no data yet (lib/push's `checkStaleness` owns the rules).
  *
  * Runs late each Sydney evening via Vercel Cron (vercel.json). Vercel sends
  * `Authorization: Bearer <CRON_SECRET>`; required, fail-closed in production
@@ -113,6 +135,62 @@ async function writeTftHistory(
   return (await putTftHistory(JSON.stringify(next))) ? "written" : "failed";
 }
 
+/** The recorded-day map for one plaintext ingest source; `null` when the store
+ *  couldn't be read, which `checkStaleness` turns into silence rather than an
+ *  alarm — "I can't see it" is not "it stopped". */
+async function recordedDays(
+  source: IngestSource,
+): Promise<Record<string, number> | null> {
+  try {
+    if (source === "steps") {
+      const read = await getStepsRaw();
+      if (read.state === "error") return null;
+      return read.state === "absent" ? {} : parseStepsStore(read.value).days;
+    }
+    const read = await getSleepRaw();
+    if (read.state === "error") return null;
+    return read.state === "absent" ? {} : parseSleepStore(read.value).nights;
+  } catch (err) {
+    console.error(`[cron:snapshot] ${source} read failed:`, err);
+    return null;
+  }
+}
+
+/** Notify the owner about ingests that have gone quiet, at most once per silence.
+ *  One write folds the episode stamps and any dead-subscription prune together,
+ *  so the send can't race the bookkeeping. */
+async function alarmStaleIngests(date: string): Promise<Outcome> {
+  if (!pushConfigured()) return "skipped";
+
+  const read = await getPushRaw();
+  // A flaky read must never read as absent here either: this rewrites the whole
+  // config, so an error-as-empty would drop every enrolled device.
+  if (read.state === "error") return "failed";
+  if (read.state === "absent") return "skipped";
+  const cfg = parsePushConfig(read.value);
+  if (!categoryOn(cfg, "ingest")) return "skipped";
+
+  let next: PushConfig = cfg;
+  const alarms: string[] = [];
+  for (const source of INGEST_SOURCES) {
+    const verdict = checkStaleness(
+      await recordedDays(source),
+      date,
+      cfg.episodes[source],
+    );
+    next = setEpisode(next, source, verdict.episode);
+    if (verdict.alarm) alarms.push(stalenessBody(source, verdict.days));
+  }
+
+  for (const body of alarms)
+    next = pruneSubs(next, await deliver(next, "ingest", body, "/"));
+
+  const serialized = serializePushConfig(next);
+  if (serialized !== serializePushConfig(cfg) && !(await putPush(serialized)))
+    return "failed";
+  return alarms.length > 0 ? "written" : "skipped";
+}
+
 export async function GET(req: Request) {
   const denied = authorizeCron(req);
   if (denied) return denied;
@@ -125,11 +203,17 @@ export async function GET(req: Request) {
     getTftHistoryRaw(),
   ]);
 
-  const [index, tft, swept] = await Promise.all([
+  const [index, tft, swept, alarm] = await Promise.all([
     writeIndex(reading, snapIndex, date),
     writeTftHistory(tftStats, tftHistory, date),
     // A sweep failure must never fail the snapshot (the sweep never throws anyway).
     sweepExpiredShares(Math.floor(Date.now() / 1000)).catch(() => -1),
+    // Nor may a notification: the courtesy job is the last thing allowed to sink
+    // the jobs that actually record history.
+    alarmStaleIngests(date).catch((err) => {
+      console.error("[cron:snapshot] ingest alarm failed:", err);
+      return "failed" as Outcome;
+    }),
   ]);
 
   return Response.json({
@@ -137,6 +221,7 @@ export async function GET(req: Request) {
     index,
     tft,
     swept,
+    alarm,
     at: new Date().toISOString(),
   });
 }

@@ -2,6 +2,7 @@ import { fromB64url, randomId } from "@/lib/crypto";
 import { dropPath, MAX_ENVELOPE_BYTES } from "@/lib/dropbox";
 import { putDrop } from "@/lib/dropstore";
 import { POW_BITS, verify } from "@/lib/pow";
+import { pushAfter } from "@/lib/pushsend";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,12 @@ export async function POST(request: Request) {
     const ok = await putDrop(dropPath(randomId()), envelope);
     // Store off / write failure — generic, no oracle, never a crash.
     if (!ok) return new Response("Unavailable", { status: 503 });
+
+    // Tell the owner mail landed — AFTER the response, never inside it. Sending
+    // inline would make a stored message measurably slower than a rejected one,
+    // which is the timing oracle this route's generic rejections exist to deny.
+    // The line carries no content: the server can't read the envelope anyway.
+    pushAfter("dropbox", "sealed mail waiting", "/");
     return Response.json({ ok: true });
   } catch (err) {
     console.error("[dropbox] ingest failed", err);
