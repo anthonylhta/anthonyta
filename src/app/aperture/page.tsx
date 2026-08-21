@@ -16,10 +16,12 @@ import {
 } from "@/lib/apertureview";
 import { getApertureGlance } from "@/lib/connectors/aperture";
 import { getGithub } from "@/lib/connectors/github";
+import { getSleep } from "@/lib/connectors/sleep";
 import { getSteps } from "@/lib/connectors/steps";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { sydneyToday } from "@/lib/fin";
 import { r2Enabled } from "@/lib/r2";
+import { weekAverage as sleepWeekAverage } from "@/lib/sleep";
 import { stepsForDay, trailingSeries, weekAverage } from "@/lib/steps";
 
 export const metadata = { title: "aperture" };
@@ -59,11 +61,12 @@ export default async function AperturePage() {
 
   const who = session.user.name ?? "anthony";
   const today = sydneyToday();
-  const [glance, gh, lang, steps] = await Promise.all([
+  const [glance, gh, lang, steps, sleep] = await Promise.all([
     getApertureGlance(),
     getGithub(),
     getLanguageStats(),
     getSteps(today),
+    getSleep(today),
   ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
   const membrane = glance ? membraneOf(glance.stage) : null;
@@ -178,6 +181,7 @@ export default async function AperturePage() {
         <ApertureInner
           offline={!r2Enabled()}
           series={series}
+          sleepWeekAvg={sleepWeekAverage(sleep, today)}
           stepsWeekAvg={weekAverage(steps, today)}
           today={today}
         />

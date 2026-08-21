@@ -270,6 +270,13 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     note: "Bearer-gated hidden owner surface (ADR 0022) — the phone's daily step push. Secretless CI is production with no STEPS_INGEST_SECRET → the gate fails CLOSED → every call 404s, including a valid-shaped body: no route-exists or validation oracle.",
   },
   {
+    routeKey: "/api/daily/sleep",
+    probe: "/api/daily/sleep",
+    shape: "owner-api",
+    methods: ["POST"],
+    note: "Bearer-gated hidden owner surface (ADR 0022) — the phone's nightly sleep push, on the steps ingest's own STEPS_INGEST_SECRET (same device, same trust domain). Secretless CI is production with no secret → the gate fails CLOSED → every call 404s, including a valid-shaped body: no route-exists or validation oracle.",
+  },
+  {
     routeKey: "/files/share-target",
     probe: "/files/share-target",
     shape: "owner-api",

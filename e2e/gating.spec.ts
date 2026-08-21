@@ -228,6 +228,34 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(404);
   });
 
+  // The sleep ingest is the steps ingest's sibling — same bearer, same wall — so
+  // the guest sees exactly the same nothing on all three probes.
+  test("POST /api/daily/sleep with no auth is 404 for a guest", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/daily/sleep", { data: {} });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/daily/sleep with a junk bearer is 404", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/daily/sleep", {
+      headers: { authorization: "Bearer not-the-secret" },
+      data: { minutes: 400 },
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test("POST /api/daily/sleep 404s even for a valid-shaped body (the wall holds)", async ({
+    request,
+  }) => {
+    const res = await request.post("/api/daily/sleep", {
+      data: { minutes: 400, date: "2026-08-20" },
+    });
+    expect(res.status()).toBe(404);
+  });
+
   // Passkey enrollment is owner-gated: no unauthenticated path may exist to
   // plant a credential, and the endpoints must be invisible (ADR 0022).
   for (const path of [
