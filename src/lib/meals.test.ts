@@ -13,6 +13,7 @@ import {
   dayTotals,
   daysSinceYmd,
   driftLabel,
+  energyBalance,
   entriesFor,
   nextDay,
   prevDay,
@@ -1093,6 +1094,80 @@ describe("driftLabel", () => {
   it("claims no direction for a flat week", () => {
     expect(driftLabel(0)).toEqual({ text: "0.0", tone: "text-muted" });
     expect(driftLabel(-0)).toEqual({ text: "0.0", tone: "text-muted" });
+  });
+});
+
+// --- energy balance ------------------------------------------------------------
+
+/** A week eaten and a fortnight weighed: four written days at a flat 2,750 kcal
+ *  over the two weigh-ins a week that a drift needs. */
+const fedAndWeighed = base({
+  foods: [
+    food({
+      id: "day",
+      name: "a day's food",
+      kcal: 2750,
+      p: 140,
+      c: 300,
+      f: 90,
+    }),
+  ],
+  entries: ["2026-08-16", "2026-08-15", "2026-08-14", "2026-08-13"].map(
+    (date, i) => entry({ id: `d${i}`, date, foodId: "day" }),
+  ),
+  weights: weighed.weights,
+});
+
+describe("energyBalance", () => {
+  it("prices the week's gain as a daily surplus, and the rest as the burn", () => {
+    // +0.3 kg over the week is 2,310 kcal put on, or 330 a day; the 2,750 eaten
+    // had 2,420 of them to burn.
+    expect(energyBalance(fedAndWeighed, TODAY)).toEqual({
+      surplus: 330,
+      tdee: 2420,
+    });
+  });
+
+  it("reads a loss as a deficit, and the burn above the intake", () => {
+    const losing = setWeight(
+      setWeight(fedAndWeighed, "2026-08-15", 66),
+      "2026-08-16",
+      66,
+    );
+    expect(energyBalance(losing, TODAY)).toEqual({
+      surplus: -990,
+      tdee: 3740,
+    });
+  });
+
+  it("rounds both figures to the nearest ten", () => {
+    // A fifth of a day's food on one of the four, so the mean carries a fraction.
+    const uneven = addEntry(
+      fedAndWeighed,
+      entry({ id: "d4", date: "2026-08-15", foodId: "day", qty: 0.2 }),
+    );
+    // 2,887.5 eaten less a 330 surplus is 2,557.5, which reads as 2,560.
+    expect(energyBalance(uneven, TODAY)).toEqual({ surplus: 330, tdee: 2560 });
+  });
+
+  it("says nothing when the drift wasn't earned", () => {
+    // One morning in either week is two mornings compared, not a trend — and a
+    // surplus off it would be a confident number about noise.
+    expect(
+      energyBalance(clearWeight(fedAndWeighed, "2026-08-15"), TODAY),
+    ).toBeNull();
+    expect(
+      energyBalance(clearWeight(fedAndWeighed, "2026-08-08"), TODAY),
+    ).toBeNull();
+  });
+
+  it("says nothing about a week that was barely written down", () => {
+    const thin = removeEntry(fedAndWeighed, "d0");
+    expect(trailingAverage(thin, TODAY, 7)?.logged).toBe(3);
+    expect(energyBalance(thin, TODAY)).toBeNull();
+    // Weighed all fortnight and fed nothing into the log at all.
+    expect(energyBalance(weighed, TODAY)).toBeNull();
+    expect(energyBalance(EMPTY_MEALS_CONFIG, TODAY)).toBeNull();
   });
 });
 

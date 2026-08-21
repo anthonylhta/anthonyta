@@ -21,7 +21,10 @@ import { getSteps } from "@/lib/connectors/steps";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { sydneyToday } from "@/lib/fin";
 import { r2Enabled } from "@/lib/r2";
-import { weekAverage as sleepWeekAverage } from "@/lib/sleep";
+import {
+  weekAverage as sleepWeekAverage,
+  weeklyAverages as sleepWeeklyAverages,
+} from "@/lib/sleep";
 import { stepsForDay, trailingSeries, weekAverage } from "@/lib/steps";
 
 export const metadata = { title: "aperture" };
@@ -182,6 +185,7 @@ export default async function AperturePage() {
           offline={!r2Enabled()}
           series={series}
           sleepWeekAvg={sleepWeekAverage(sleep, today)}
+          sleepWeeks={sleepWeeklyAverages(sleep, today)}
           stepsWeekAvg={weekAverage(steps, today)}
           today={today}
         />
