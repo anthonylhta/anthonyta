@@ -143,6 +143,32 @@ export function weekAverage(data: SleepData, todayISO: string): number | null {
 }
 
 /**
+ * Weekly averages, oldest → newest — the vessel's rest strip. Each value is one
+ * 7-day window, stepping back a week at a time from `todayISO`, which is the
+ * anchoring the bodyweight strip beside it already uses: rolling sevens off
+ * today, not calendar weeks. The two pictures have to line up week for week, or
+ * reading one against the other says nothing.
+ *
+ * A week the phone posted nothing for is `null` rather than a zero — the
+ * recorded-nights rule of `weekAverage`, carried up a level: a week of no data
+ * is not a week of no sleep. The caller decides what a gap looks like; this
+ * function will not invent a night either way.
+ */
+export function weeklyAverages(
+  data: SleepData,
+  todayISO: string,
+  weeks = 10,
+): (number | null)[] {
+  const out: (number | null)[] = [];
+  let cursor = todayISO;
+  for (let k = 0; k < weeks; k++) {
+    out.push(weekAverage(data, cursor));
+    for (let i = 0; i < 7; i++) cursor = prevDay(cursor);
+  }
+  return out.reverse();
+}
+
+/**
  * A ~2-week placeholder ending at `today`, for when the store is entirely OFF
  * (no R2 — local dev, CI) so the vessel looks alive. Deterministic (a fixed
  * pattern of plausible nights), so screenshots + tests stay stable. NOT used for

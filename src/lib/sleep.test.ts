@@ -9,6 +9,7 @@ import {
   sleepForNight,
   upsertNight,
   weekAverage,
+  weeklyAverages,
 } from "./sleep";
 
 describe("isSleepIngest", () => {
@@ -158,6 +159,60 @@ describe("weekAverage", () => {
   it("crosses a month boundary correctly", () => {
     const data = { nights: { "2026-08-01": 400, "2026-07-31": 500 } };
     expect(weekAverage(data, "2026-08-01")).toBe(450);
+  });
+});
+
+describe("weeklyAverages", () => {
+  it("reads oldest → newest, one value per window", () => {
+    const data = {
+      nights: {
+        "2026-08-20": 480,
+        "2026-08-19": 400,
+        "2026-08-10": 300,
+        "2026-08-08": 360,
+      },
+    };
+    expect(weeklyAverages(data, "2026-08-20", 3)).toEqual([null, 330, 440]);
+  });
+
+  it("carries a week with nothing recorded as a gap, never a zero", () => {
+    // A fortnight the phone said nothing about is not a fortnight without sleep.
+    const data = { nights: { "2026-08-20": 480, "2026-08-03": 420 } };
+    expect(weeklyAverages(data, "2026-08-20", 3)).toEqual([420, null, 480]);
+    expect(weeklyAverages({ nights: {} }, "2026-08-20")).toEqual(
+      Array(10).fill(null),
+    );
+  });
+
+  it("gives one week's value and nine gaps for a log that just started", () => {
+    expect(
+      weeklyAverages({ nights: { "2026-08-20": 432 } }, "2026-08-20", 4),
+    ).toEqual([null, null, null, 432]);
+  });
+
+  it("steps back in whole sevens, so a window ends where the next begins", () => {
+    const seven = { nights: { "2026-08-13": 420 } };
+    expect(weeklyAverages(seven, "2026-08-20", 2)).toEqual([420, null]);
+    const six = { nights: { "2026-08-14": 420 } };
+    expect(weeklyAverages(six, "2026-08-20", 2)).toEqual([null, 420]);
+  });
+
+  it("reaches sixty-nine days back over the default ten weeks", () => {
+    const oldest = weeklyAverages(
+      { nights: { "2026-06-12": 400 } },
+      "2026-08-20",
+    );
+    expect(oldest).toHaveLength(10);
+    expect(oldest[0]).toBe(400);
+    // One night earlier is past the strip's reach entirely.
+    expect(
+      weeklyAverages({ nights: { "2026-06-11": 400 } }, "2026-08-20"),
+    ).toEqual(Array(10).fill(null));
+  });
+
+  it("rounds each window's mean", () => {
+    const data = { nights: { "2026-08-20": 480, "2026-08-18": 401 } };
+    expect(weeklyAverages(data, "2026-08-20", 1)).toEqual([441]); // 440.5
   });
 });
 

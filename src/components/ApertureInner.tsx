@@ -309,6 +309,7 @@ export function ApertureInner({
   offline,
   series,
   sleepWeekAvg,
+  sleepWeeks,
   stepsWeekAvg,
   today,
 }: {
@@ -319,6 +320,9 @@ export function ApertureInner({
    *  class the step count rides — null when no night has been posted for the
    *  week. */
   sleepWeekAvg: number | null;
+  /** The same figure over each of the last ten weeks, oldest → newest, with a
+   *  week nothing was posted for as a null. */
+  sleepWeeks: (number | null)[];
   /** The week's mean daily step count, read on the server: the step store is
    *  plaintext, so the vessel's walking figure needs no key — null when nothing
    *  has been posted for the week. */
@@ -566,9 +570,15 @@ export function ApertureInner({
   // is drawn only if it exists; the band itself exists only if any of them do,
   // because absence is the rule and an empty vessel is not a reading.
   //
-  // Two weeks is the least the weight can be drawn as a trend, so below that the
-  // strip is absent even when the rest of the band is present: a lone point is
-  // not a picture.
+  // Two weeks is the least either strip can be drawn as a trend, so below that
+  // it is absent even when the rest of the band is present: a lone point is not
+  // a picture.
+  //
+  // A week the phone posted nothing for drops OUT of the rest strip rather than
+  // landing in it as a zero-hour night — the same hole the weight strip leaves
+  // for an unweighed week, and for the same reason: padding a gap would draw a
+  // cliff to the floor and back.
+  const sleepStrip = sleepWeeks.filter((v): v is number => v !== null);
   const weightWeeks = mealsCfg ? weeklyWeightAverages(mealsCfg, today) : [];
   const weightNow = mealsCfg ? weightTrend(mealsCfg, today) : null;
   const weightDrift =
@@ -585,7 +595,8 @@ export function ApertureInner({
     stepsWeekAvg !== null ||
     sleepWeekAvg !== null ||
     fed !== null;
-  const hasVessel = hasVesselStats || weightWeeks.length >= 2;
+  const hasVessel =
+    hasVesselStats || weightWeeks.length >= 2 || sleepStrip.length >= 2;
 
   const recovered = fin ? recoveredThisWeek(fin, today) : null;
   const absorbed = fin ? absorbedThisWeek(fin, today) : null;
@@ -1151,6 +1162,21 @@ export function ApertureInner({
                   <span className="text-fg/90">{l.name}</span> {l.e1rm}
                 </span>
               ))}
+            </div>
+          )}
+          {sleepStrip.length >= 2 && (
+            <div className="mt-3">
+              <TrendRow
+                label="sleep"
+                values={sleepStrip}
+                delta={sleepStrip[sleepStrip.length - 1] - sleepStrip[0]}
+                plot="weekly average sleep, last ten weeks"
+                // Hours, and no unit in the cell — the weight strip's rule, and
+                // the figure above the band already says which unit it is.
+                right={`${(sleepStrip[0] / 60).toFixed(1)} → ${(
+                  sleepStrip[sleepStrip.length - 1] / 60
+                ).toFixed(1)}`}
+              />
             </div>
           )}
           {weightWeeks.length >= 2 && (
