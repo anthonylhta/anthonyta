@@ -307,15 +307,20 @@ async function mealsConfig(
 export function ApertureInner({
   offline,
   series,
+  sleepWeekAvg,
   stepsWeekAvg,
   today,
 }: {
   offline: boolean;
   /** The server-assembled path evidence — commits, languages, steps. */
   series: PathSeries;
-  /** The week's mean daily step count, read on the server: the step store is the
-   *  one plaintext body reading, so the vessel's walking figure needs no key —
-   *  null when nothing has been posted for the week. */
+  /** The week's mean minutes asleep, read on the server off the same plaintext
+   *  class the step count rides — null when no night has been posted for the
+   *  week. */
+  sleepWeekAvg: number | null;
+  /** The week's mean daily step count, read on the server: the step store is
+   *  plaintext, so the vessel's walking figure needs no key — null when nothing
+   *  has been posted for the week. */
   stepsWeekAvg: number | null;
   /** The Sydney calendar day, anchored once on the server so the strips this page
    *  draws and the ones it derives in the browser can't sit on different days. */
@@ -572,7 +577,10 @@ export function ApertureInner({
   const lifts = gymCfg ? liftChips(gymCfg) : [];
   const fed = mealsCfg ? trailingAverage(mealsCfg, today, 7) : null;
   const hasVesselStats =
-    gymCfg !== null || stepsWeekAvg !== null || fed !== null;
+    gymCfg !== null ||
+    stepsWeekAvg !== null ||
+    sleepWeekAvg !== null ||
+    fed !== null;
   const hasVessel = hasVesselStats || weightWeeks.length >= 2;
 
   const recovered = fin ? recoveredThisWeek(fin, today) : null;
@@ -1107,6 +1115,13 @@ export function ApertureInner({
               )}
               {stepsWeekAvg !== null && (
                 <Stat label="steps · 7d avg" value={commas(stepsWeekAvg)} />
+              )}
+              {sleepWeekAvg !== null && (
+                <Stat
+                  label="sleep · 7d avg"
+                  value={(sleepWeekAvg / 60).toFixed(1)}
+                  suffix="h"
+                />
               )}
               {fed && (
                 <Stat
