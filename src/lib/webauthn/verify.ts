@@ -2,6 +2,7 @@ import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { recordAuthEvent } from "@/lib/authlogstore";
 import { fromB64url } from "@/lib/crypto";
+import { pushAfter } from "@/lib/pushsend";
 import { challengeFromCookieHeader, openChallenge } from "./cookie";
 import {
   isWebauthnRecord,
@@ -122,6 +123,13 @@ async function verifyAssertion(
   // (guests probing the wall must not write into the journal), and never a
   // gate: recordAuthEvent cannot throw and its failure doesn't deny the owner.
   await recordAuthEvent("signin", `${cred.label} #${cred.id.slice(0, 6)}`);
+
+  // …and buzz the owner's other devices, off the response path. Same success
+  // point as the journal entry, for the same reason: a sign-in the owner didn't
+  // make is exactly what the "last sign-in" line and the journal exist to
+  // surface — a notification just gets there first. Failures are never journaled
+  // and are never notified, so a guest probing the wall can't ring the phone.
+  pushAfter("signin", `passkey sign-in · ${cred.label}`, "/system");
 
   return owner();
 }

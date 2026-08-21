@@ -202,6 +202,13 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/push",
+    probe: "/api/push",
+    shape: "owner-api",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    note: "Web Push subscriptions. Plaintext by necessity (the server is the sender), so the 404 wall is the ONLY thing standing between a guest and an endpoint that could buzz the owner's phone — hence all four verbs walled, and GET never returns the endpoint or the subscription keys even past the gate.",
+  },
+  {
     routeKey: "/api/rotation",
     probe: "/api/rotation",
     shape: "owner-api",

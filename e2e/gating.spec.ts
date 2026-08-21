@@ -39,6 +39,7 @@ test.describe("guest gating", () => {
     "/api/transit/trip?from=stop%3A1&to=stop%3A2", // TfNSW journey proxy
     "/api/layout", // owner layout config write/read (ADR: layout visibility)
     "/api/todo", // E2EE quick-capture envelope (ADR: quick capture)
+    "/api/push", // web push subscriptions — plaintext, so the wall is the whole guard
     "/reader", // the owner-only morning feeds page (ADR: rss reader)
     "/api/aperture", // E2EE private status envelope (the aperture module)
     "/aperture", // the owner-only inward page (stones, gu, attainment)
@@ -89,6 +90,31 @@ test.describe("guest gating", () => {
 
   test("PUT /api/fin/config is 404 for a guest", async ({ request }) => {
     const res = await request.put("/api/fin/config", { data: "AEV1xxxx" });
+    expect(res.status()).toBe(404);
+  });
+
+  // Every write verb on the push config, not just the read: a guest who could
+  // POST a subscription would own a channel straight to the owner's lock screen.
+  test("POST /api/push is 404 for a guest", async ({ request }) => {
+    const res = await request.post("/api/push", {
+      data: {
+        endpoint: "https://example.invalid/push/abc",
+        keys: { p256dh: "AAAA", auth: "BBBB" },
+        label: "attacker",
+      },
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test("PUT /api/push is 404 for a guest", async ({ request }) => {
+    const res = await request.put("/api/push", {
+      data: { categories: { dropbox: false, signin: false, ingest: false } },
+    });
+    expect(res.status()).toBe(404);
+  });
+
+  test("DELETE /api/push is 404 for a guest", async ({ request }) => {
+    const res = await request.delete("/api/push?id=anything");
     expect(res.status()).toBe(404);
   });
 

@@ -14,6 +14,11 @@
  * So the SW stashes them in SHARED_CACHE and 303s to /files?shared=1, where the
  * page encrypts and uploads them. No crypto runs in the SW — it has no key and
  * never sees the passphrase; it only holds bytes for the window to collect.
+ *
+ * The second non-fetch job: Web Push. `push` shows the notification, and
+ * `notificationclick` focuses an already-open tab or opens the payload's url.
+ * The copy is whatever the server sent and is deliberately contentless — a
+ * notification renders on a locked screen, so it never carries sealed detail.
  */
 const VERSION = "v2";
 const CACHE = `anthonyta-${VERSION}`;
@@ -44,6 +49,54 @@ self.addEventListener("activate", (event) => {
         ),
       )
       .then(() => self.clients.claim()),
+  );
+});
+
+// A push arrives whether or not a tab is open — the whole point. The payload is
+// the hub's minimal `{ t, body, url }`; anything unreadable still shows a bare
+// line rather than nothing, because a silently-dropped push looks like a broken
+// feature. `t` rides as the tag so a second alarm of the same kind replaces the
+// first instead of stacking.
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = {};
+  }
+  const body = typeof payload.body === "string" ? payload.body : "anthonyta";
+  const url = typeof payload.url === "string" ? payload.url : "/";
+  const tag = typeof payload.t === "string" ? payload.t : "hub";
+  event.waitUntil(
+    self.registration.showNotification("anthonyta", {
+      body,
+      tag,
+      icon: "/icons/192",
+      badge: "/icons/192",
+      data: { url },
+    }),
+  );
+});
+
+// Tapping the notification should land in the app, not spawn a fourth copy of
+// it: focus an existing same-origin client where one exists, otherwise open.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || "/";
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const client of clients) {
+        if (new URL(client.url).origin !== self.location.origin) continue;
+        await client.focus();
+        if ("navigate" in client) await client.navigate(url);
+        return;
+      }
+      await self.clients.openWindow(url);
+    })(),
   );
 });
 

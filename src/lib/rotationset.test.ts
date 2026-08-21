@@ -15,6 +15,7 @@ import { KEYSTORE_PATH } from "./inbox";
 import { LAYOUT_PATH } from "./layoutstore";
 import { MEALS_PATH } from "./mealsstore";
 import { PRF_WRAP_PATH } from "./prfstore";
+import { PUSH_PATH } from "./pushstore";
 import { classifyKey, partitionEstate, ROTATION_PATH } from "./rotationset";
 import { STEPS_PATH } from "./stepsstore";
 import { TFT_HISTORY_PATH } from "./tftstore";
@@ -43,6 +44,7 @@ describe("drift guards", () => {
     expect(classifyKey(WEBAUTHN_PATH).action).toBe("skip");
     expect(classifyKey(AUTHLOG_PATH).action).toBe("skip");
     expect(classifyKey(LAYOUT_PATH).action).toBe("skip");
+    expect(classifyKey(PUSH_PATH).action).toBe("skip");
     expect(classifyKey(SNAP_INDEX_PATH).action).toBe("skip");
     // Prefix skips, pinned via the real store keys.
     expect(classifyKey(BRIEFING_PATH).action).toBe("skip");
