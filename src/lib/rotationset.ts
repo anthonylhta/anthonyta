@@ -115,6 +115,10 @@ const META_SKIPS: ReadonlyMap<string, string> = new Map([
     "plaintext layout config — the lobby layout is public anyway",
   ],
   [
+    "meta/push.json",
+    "plaintext push subscriptions — the server is the sender, so it must hold the endpoints in the clear",
+  ],
+  [
     "meta/snap/index.json",
     "plaintext reading index — the deliberate E2EE boundary",
   ],
