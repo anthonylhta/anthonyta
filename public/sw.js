@@ -92,7 +92,13 @@ self.addEventListener("notificationclick", (event) => {
       for (const client of clients) {
         if (new URL(client.url).origin !== self.location.origin) continue;
         await client.focus();
-        if ("navigate" in client) await client.navigate(url);
+        // Uncontrolled clients (a tab open from before this worker activated)
+        // reject navigate(); focusing them is still the right landing.
+        try {
+          if ("navigate" in client) await client.navigate(url);
+        } catch {
+          /* focused is enough */
+        }
         return;
       }
       await self.clients.openWindow(url);
