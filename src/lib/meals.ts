@@ -737,6 +737,54 @@ export function driftLabel(delta: number): { text: string; tone: string } {
   };
 }
 
+// --- energy balance ------------------------------------------------------------
+
+/** What a kilogram of body mass is worth in kilocalories — the textbook figure
+ *  every energy-balance estimate is built on. Approximate by nature: it is fat's
+ *  number, and a week's drift is never only fat. */
+const KCAL_PER_KG = 7700;
+
+/** Days of the trailing week that must actually be written before an intake
+ *  average is allowed to become a claim about the whole week. Under this, the
+ *  mean is of the days that were remembered, which skews toward the days worth
+ *  remembering. */
+const ENERGY_MIN_LOGGED_DAYS = 4;
+
+/**
+ * What the week was worth: the daily energy balance the scale implies, and the
+ * intake it implies the body burns. The one reading neither log can give alone —
+ * the meals say what went in and the weight says what came of it.
+ *
+ * Both figures are estimates and are rounded to the nearest ten so they read as
+ * estimates. The surplus is the week's drift priced at `KCAL_PER_KG` and spread
+ * over seven days; the burn is simply what the intake had left over.
+ *
+ * Null unless BOTH halves are trustworthy, which is most of what this function
+ * is. The drift comes on `weightTrend`'s terms (two weigh-ins in each of the two
+ * weeks, or nothing) and the intake needs a week that was mostly written down;
+ * either missing and there is no line, because an energy balance off a half-kept
+ * log is a confident number about nothing.
+ */
+export function energyBalance(
+  cfg: MealsConfig,
+  day: string,
+): { surplus: number; tdee: number } | null {
+  const fed = trailingAverage(cfg, day, 7);
+  if (!fed || fed.logged < ENERGY_MIN_LOGGED_DAYS) return null;
+  const { deltaPerWeek } = weightTrend(cfg, day);
+  if (deltaPerWeek === null) return null;
+  const surplus = (deltaPerWeek * KCAL_PER_KG) / 7;
+  return {
+    surplus: nearestTen(surplus),
+    tdee: nearestTen(fed.avg.kcal - surplus),
+  };
+}
+
+/** To the nearest ten — the precision an estimate this soft can carry. */
+function nearestTen(n: number): number {
+  return Math.round(n / 10) * 10;
+}
+
 // --- the library's order -------------------------------------------------------
 
 /** Bucket edges, in days since the food was last eaten. */

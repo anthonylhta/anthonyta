@@ -79,6 +79,7 @@ import {
 import {
   dayTotals,
   driftLabel,
+  energyBalance,
   normalizeMealsConfig,
   trailingAverage,
   trailingProtein,
@@ -576,6 +577,9 @@ export function ApertureInner({
       : null;
   const lifts = gymCfg ? liftChips(gymCfg) : [];
   const fed = mealsCfg ? trailingAverage(mealsCfg, today, 7) : null;
+  // What the two logs say together, when both are kept well enough to be asked:
+  // null unless the drift was earned AND most of the week was written down.
+  const balance = mealsCfg ? energyBalance(mealsCfg, today) : null;
   const hasVesselStats =
     gymCfg !== null ||
     stepsWeekAvg !== null ||
@@ -1184,6 +1188,19 @@ export function ApertureInner({
                 weekly averages, 10 wk
               </p>
             </>
+          )}
+          {/* What the scale and the log say together — an estimate, and printed
+              in the muted register the rest of the band reads in rather than a
+              colour, because a surplus is a direction and not a verdict. */}
+          {balance && (
+            <p className="mt-2 text-[11px] tabular-nums text-muted">
+              balance ·{" "}
+              <span className="text-fg/90">
+                {signedCount(balance.surplus)} kcal/day
+              </span>
+              {" · "}
+              tdee ≈ <span className="text-fg/90">{commas(balance.tdee)}</span>
+            </p>
           )}
           <Flavor>
             the vessel every path runs on — read the average, never the morning.
