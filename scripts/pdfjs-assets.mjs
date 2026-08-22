@@ -14,7 +14,12 @@ const out = join(root, "public", "pdfjs");
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-cpSync(join(src, "build", "pdf.worker.min.mjs"), join(out, "pdf.worker.min.mjs"));
+cpSync(
+  join(src, "build", "pdf.worker.min.mjs"),
+  join(out, "pdf.worker.min.mjs"),
+);
 for (const dir of ["wasm", "standard_fonts", "cmaps"])
   cpSync(join(src, dir), join(out, dir), { recursive: true });
-console.log(`pdfjs assets → public/pdfjs (worker, wasm, standard_fonts, cmaps)`);
+console.log(
+  `pdfjs assets → public/pdfjs (worker, wasm, standard_fonts, cmaps)`,
+);
