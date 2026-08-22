@@ -143,7 +143,18 @@ export async function Lobby() {
         )}
 
         {!hidden.has("reading") && (
-          <Module label="reading" className="border-0">
+          <Module
+            label="reading"
+            className="border-0"
+            action={
+              <Link
+                href="/novels"
+                className="text-xs text-amber hover:underline"
+              >
+                [novels]
+              </Link>
+            }
+          >
             <div className="space-y-2">
               <p className="line-clamp-2 text-fg">{reading.title}</p>
               <p className="text-xs text-muted">
