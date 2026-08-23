@@ -36,6 +36,7 @@ const CATEGORY_COPY: Record<PushCategory, string> = {
   dropbox: "sealed mail arrives in the drop box",
   signin: "a passkey opens the door",
   ingest: "the phone stops posting steps or sleep",
+  share: "someone collects a share link",
 };
 
 /** A short, human device name — the passkey manager's sniff, same reasoning:
@@ -62,8 +63,8 @@ function day(iso: string): string {
 }
 
 /**
- * The /system push band — the owner enrolls a device, names which of the three
- * categories may interrupt, and drops devices that are gone.
+ * The /system push band — the owner enrolls a device, names which categories may
+ * interrupt, and drops devices that are gone.
  *
  * Every off-state is stated honestly rather than hidden, because all four are
  * real and each has a different fix: no VAPID keys in the env (the whole feature

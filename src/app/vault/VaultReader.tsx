@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useVault, type Vault } from "@/app/files/useVault";
 import { bumpSeenEpoch, getSeenEpoch } from "@/lib/keycache";
 import { hashBytes, isManifest } from "@/lib/merkle";
+import { onThisDay } from "@/lib/onthisday";
 import {
   isVaultIndex,
   VAULT_INDEX_PATH,
@@ -180,8 +181,58 @@ export function VaultReader({ offline }: { offline: boolean }) {
     <>
       <IntegrityLine view={integrity} />
       <VaultSearch openItem={openItem} notes={notes} />
+      <OnThisDay notes={notes} />
       <VaultList notes={notes} />
     </>
+  );
+}
+
+/** Today in Sydney as YYYY-MM-DD — the day the windows count back from. The
+ *  device clock is the owner's clock (the meal/gym log precedent), and pinning
+ *  the zone keeps the windows on the calendar the journal's titles are written
+ *  on. Only ever called once the index has decrypted, which is client-only. */
+function sydneyToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Sydney",
+  }).format(new Date());
+}
+
+/**
+ * The journal one month and one year ago, matched against the decrypted index
+ * here in the browser — no new store, no new route, nothing the server learns.
+ * Exception-only, like the ambient rows on the command center: a window with no
+ * daily note is absent, and a day with neither says nothing at all.
+ */
+function OnThisDay({ notes }: { notes: VaultIndexNote[] }) {
+  const { monthAgo, yearAgo } = onThisDay(notes, sydneyToday());
+  const rows: { label: string; note: VaultIndexNote }[] = [];
+  if (monthAgo) rows.push({ label: "one month ago", note: monthAgo });
+  if (yearAgo) rows.push({ label: "one year ago", note: yearAgo });
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="border-b border-hairline px-4 py-4">
+      <span className="text-[10px] uppercase tracking-[0.2em] text-muted">
+        on this day
+      </span>
+      <ul className="mt-2 divide-y divide-hairline/40">
+        {rows.map(({ label, note }) => (
+          <li key={label} className="flex items-baseline gap-3 py-1">
+            <span className="shrink-0 text-[11px] text-muted">{label} →</span>
+            <Link
+              href={`/vault/${note.id}`}
+              prefetch
+              className="shrink-0 text-[13px] tabular-nums text-fg hover:text-amber"
+            >
+              {note.title}
+            </Link>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted/70">
+              {note.preview}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

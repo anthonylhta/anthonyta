@@ -88,7 +88,7 @@ describe("parsePushConfig", () => {
   it("round-trips a real config", () => {
     const source = cfg({
       subs: [sub()],
-      categories: { dropbox: true, signin: false, ingest: true },
+      categories: { dropbox: true, signin: false, ingest: true, share: true },
       episodes: { steps: "2026-08-10" },
     });
     expect(parsePushConfig(serializePushConfig(source))).toEqual(source);
@@ -114,11 +114,15 @@ describe("parsePushConfig", () => {
   });
 
   it("defaults a category the blob predates to ON", () => {
-    const parsed = normalizePushConfig({ categories: { dropbox: false } });
+    // Exactly the shape a config written before `share` existed has.
+    const parsed = normalizePushConfig({
+      categories: { dropbox: false, signin: true, ingest: true },
+    });
     expect(parsed.categories).toEqual({
       dropbox: false,
       signin: true,
       ingest: true,
+      share: true,
     });
   });
 
@@ -234,8 +238,16 @@ describe("category gating", () => {
     expect([...PUSH_CATEGORIES].sort()).toEqual([
       "dropbox",
       "ingest",
+      "share",
       "signin",
     ]);
+  });
+
+  it("gates the share alarm like the rest", () => {
+    const one = cfg({ subs: [sub()] });
+    expect(categoryOn(one, "share")).toBe(true);
+    expect(categoryOn(setCategory(one, "share", false), "share")).toBe(false);
+    expect(categoryOn(EMPTY_PUSH_CONFIG, "share")).toBe(false);
   });
 });
 

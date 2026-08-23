@@ -448,17 +448,20 @@ export function bestE1rm(
  * the name tiebreak makes the ordering total, so a redeploy can't reshuffle the
  * line. Every reading is Epley's model — the `~` it is worn under belongs to the
  * surface, exactly as it does everywhere else this estimate renders.
+ *
+ * The catalog `id` rides along so a chip can ask for its own lift's progression
+ * (`e1rmSeries`) without matching back on a display name.
  */
 export function liftChips(
   cfg: GymConfig,
   max = 6,
-): { name: string; e1rm: number }[] {
+): { id: string; name: string; e1rm: number }[] {
   return cfg.exercises
     .flatMap((e) => {
       const best = bestE1rm(cfg, e.id);
       return best === null
         ? []
-        : [{ name: e.name, e1rm: Math.round(best.e1rm) }];
+        : [{ id: e.id, name: e.name, e1rm: Math.round(best.e1rm) }];
     })
     .sort((a, b) => b.e1rm - a.e1rm || a.name.localeCompare(b.name))
     .slice(0, max);

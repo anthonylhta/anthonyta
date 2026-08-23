@@ -69,6 +69,7 @@ import {
   type FinConfig,
 } from "@/lib/fin";
 import {
+  e1rmSeries,
   GYM_WEEKLY_TARGET,
   liftChips,
   normalizeGymConfig,
@@ -585,7 +586,11 @@ export function ApertureInner({
     weightNow && weightNow.deltaPerWeek !== null
       ? driftLabel(weightNow.deltaPerWeek)
       : null;
-  const lifts = gymCfg ? liftChips(gymCfg) : [];
+  // Each chip's figure, and the progression behind it — the same series /gym
+  // plots per exercise, taken off the log already open here.
+  const lifts = gymCfg
+    ? liftChips(gymCfg).map((l) => ({ ...l, series: e1rmSeries(gymCfg, l.id) }))
+    : [];
   const fed = mealsCfg ? trailingAverage(mealsCfg, today, 7) : null;
   // What the two logs say together, when both are kept well enough to be asked:
   // null unless the drift was earned AND most of the week was written down.
@@ -1156,10 +1161,28 @@ export function ApertureInner({
               </span>
               {lifts.map((l) => (
                 <span
-                  key={l.name}
+                  key={l.id}
                   className="border border-hairline px-1.5 py-px tabular-nums text-muted"
                 >
                   <span className="text-fg/90">{l.name}</span> {l.e1rm}
+                  {/* Where the figure came from, at chip scale — two points is
+                      the least a line can mean anything with. The shared
+                      sparkline sizes itself (`h-12 w-full`), so the wrapper
+                      names the height a chip can carry and outranks it on the
+                      child selector. Flat `delta` keeps it muted: the number is
+                      the reading, and six coloured squiggles would out-shout the
+                      band's own strips. */}
+                  {l.series.length >= 2 && (
+                    <span className="ml-1.5 inline-block w-16 align-middle [&>svg]:h-4">
+                      <Sparkline
+                        values={l.series}
+                        delta={0}
+                        width={64}
+                        height={16}
+                        label={`${l.name} estimated 1RM progression`}
+                      />
+                    </span>
+                  )}
                 </span>
               ))}
             </div>
