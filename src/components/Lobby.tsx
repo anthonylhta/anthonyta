@@ -20,7 +20,7 @@ import { sampleBriefing } from "@/lib/sampleBriefing";
 import { me, nav, reading as mockReading, riichi } from "@/lib/mock";
 
 /** Nav links the lobby leads with, rendered brighter than the rest. */
-const PRIMARY_NAV = new Set<string>(["projects", "contact"]);
+const PRIMARY_NAV = new Set<string>(["projects", "resume", "contact"]);
 
 function NavItem({
   item,
