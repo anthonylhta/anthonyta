@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choreState, daysSince } from "./chores";
+import { choreState, daysSince, overdueChores } from "./chores";
 
 const NOW = new Date("2026-07-17T09:00:00+10:00");
 
@@ -39,5 +39,54 @@ describe("choreState", () => {
       ageDays: null,
       status: "unknown",
     });
+  });
+});
+
+describe("overdueChores", () => {
+  /** Days before NOW, as an ISO instant the connector could plausibly return. */
+  const ago = (days: number) =>
+    new Date(NOW.getTime() - days * 86_400_000).toISOString();
+
+  const fresh = { vaultSync: ago(1), backup: ago(2), aperture: ago(1) };
+
+  it("says nothing while everything is inside its cadence", () => {
+    expect(overdueChores(fresh, NOW)).toEqual([]);
+  });
+
+  it("ignores the amber middle — due is the board's job, not a push", () => {
+    // vault-sync's cadence is 4d: 5d is due, 8d is overdue.
+    expect(overdueChores({ ...fresh, vaultSync: ago(5) }, NOW)).toEqual([]);
+    expect(overdueChores({ ...fresh, vaultSync: ago(8) }, NOW)).toEqual([
+      { label: "vault-sync", days: 8, command: "npm run vault-sync" },
+    ]);
+  });
+
+  it("never counts a missing record as neglect", () => {
+    expect(
+      overdueChores({ vaultSync: null, backup: null, aperture: null }, NOW),
+    ).toEqual([]);
+  });
+
+  it("names the whole red set in the board's order, with each command", () => {
+    expect(
+      overdueChores(
+        { vaultSync: ago(9), backup: ago(62), aperture: ago(15) },
+        NOW,
+      ),
+    ).toEqual([
+      { label: "vault-sync", days: 9, command: "npm run vault-sync" },
+      { label: "backup", days: 62, command: "npm run hub-backup" },
+      // The seal's action is the weekly check-in, so it carries no command.
+      { label: "aperture seal", days: 15, command: null },
+    ]);
+  });
+
+  it("only turns red at twice the cadence, per chore", () => {
+    // backup is monthly — 31d is due, not overdue; the seal at 14d already is.
+    expect(
+      overdueChores({ ...fresh, backup: ago(31), aperture: ago(14) }, NOW).map(
+        (c) => c.label,
+      ),
+    ).toEqual(["aperture seal"]);
   });
 });

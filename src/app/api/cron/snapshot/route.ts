@@ -1,3 +1,5 @@
+import { overdueChores } from "@/lib/chores";
+import { getChoreReads } from "@/lib/connectors/chores";
 import { getTft } from "@/lib/connectors/tft";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { authorizeCron } from "@/lib/cron-auth";
@@ -10,6 +12,7 @@ import {
 import { getSnapIndex, putSnapIndex } from "@/lib/finstore";
 import {
   categoryOn,
+  checkChoresDigest,
   checkStaleness,
   INGEST_SOURCES,
   parsePushConfig,
@@ -55,6 +58,11 @@ export const dynamic = "force-dynamic";
  *             nothing else notices when it quietly stops. Once per silence
  *             episode, never off a read error, and never for a store that has
  *             had no data yet (lib/push's `checkStaleness` owns the rules).
+ * - `upkeep`— the maintenance digest: one line naming the chores that have gone
+ *             WELL overdue and the command each needs. Server-visible evidence
+ *             only (the finance chip's lives in an envelope), the red state
+ *             only, and at most weekly while it stays red (`overdueChores` +
+ *             `checkChoresDigest` own the rules).
  *
  * Runs late each Sydney evening via Vercel Cron (vercel.json). Vercel sends
  * `Authorization: Bearer <CRON_SECRET>`; required, fail-closed in production
@@ -191,6 +199,46 @@ async function alarmStaleIngests(date: string): Promise<Outcome> {
   return alarms.length > 0 ? "written" : "skipped";
 }
 
+/** Notify the owner about the hub's own upkeep once it is well behind, at most
+ *  weekly. Same shape as the ingest alarm, and the same refusals: no VAPID, an
+ *  unreadable config, or nobody enrolled is silence rather than an attempt.
+ *  Evidence that couldn't be read arrives as "no record" from the connector,
+ *  which is never overdue — an unreadable stamp says nothing about the chore. */
+async function alarmOverdueChores(date: string): Promise<Outcome> {
+  if (!pushConfigured()) return "skipped";
+
+  const read = await getPushRaw();
+  // Same read-modify-write discipline as above: an error must not read as
+  // absent, or the write would drop every enrolled device.
+  if (read.state === "error") return "failed";
+  if (read.state === "absent") return "skipped";
+  const cfg = parsePushConfig(read.value);
+  if (!categoryOn(cfg, "chores")) return "skipped";
+
+  const reads = await getChoreReads();
+  const verdict = checkChoresDigest(
+    overdueChores(
+      {
+        vaultSync: reads.vaultSyncedAt,
+        backup: reads.backupAt,
+        aperture: reads.apertureSealedAt,
+      },
+      new Date(),
+    ),
+    date,
+    cfg.episodes.chores,
+  );
+
+  let next = setEpisode(cfg, "chores", verdict.episode);
+  if (verdict.send)
+    next = pruneSubs(next, await deliver(next, "chores", verdict.body, "/"));
+
+  const serialized = serializePushConfig(next);
+  if (serialized !== serializePushConfig(cfg) && !(await putPush(serialized)))
+    return "failed";
+  return verdict.send ? "written" : "skipped";
+}
+
 export async function GET(req: Request) {
   const denied = authorizeCron(req);
   if (denied) return denied;
@@ -203,18 +251,26 @@ export async function GET(req: Request) {
     getTftHistoryRaw(),
   ]);
 
-  const [index, tft, swept, alarm] = await Promise.all([
+  const [index, tft, swept] = await Promise.all([
     writeIndex(reading, snapIndex, date),
     writeTftHistory(tftStats, tftHistory, date),
     // A sweep failure must never fail the snapshot (the sweep never throws anyway).
     sweepExpiredShares(Math.floor(Date.now() / 1000)).catch(() => -1),
-    // Nor may a notification: the courtesy job is the last thing allowed to sink
-    // the jobs that actually record history.
-    alarmStaleIngests(date).catch((err) => {
-      console.error("[cron:snapshot] ingest alarm failed:", err);
-      return "failed" as Outcome;
-    }),
   ]);
+
+  // The two notification jobs read-modify-write the SAME config blob, so they
+  // run in sequence: side by side, the later write would land on a config read
+  // before the earlier one and quietly undo its episode stamp and its prune.
+  // Neither may sink the jobs above — a courtesy is the last thing allowed to
+  // cost the record.
+  const alarm = await alarmStaleIngests(date).catch((err) => {
+    console.error("[cron:snapshot] ingest alarm failed:", err);
+    return "failed" as Outcome;
+  });
+  const upkeep = await alarmOverdueChores(date).catch((err) => {
+    console.error("[cron:snapshot] upkeep digest failed:", err);
+    return "failed" as Outcome;
+  });
 
   return Response.json({
     date,
@@ -222,6 +278,7 @@ export async function GET(req: Request) {
     tft,
     swept,
     alarm,
+    upkeep,
     at: new Date().toISOString(),
   });
 }
