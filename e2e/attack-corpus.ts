@@ -489,6 +489,13 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     note: "Public case study.",
   },
   {
+    routeKey: "/resume",
+    probe: "/resume",
+    shape: "public-serving",
+    methods: ["GET"],
+    note: "Public resume page (roadmap 82a) — static content from lib/resume.",
+  },
+  {
     routeKey: "/riichi",
     probe: "/riichi",
     shape: "public-serving",

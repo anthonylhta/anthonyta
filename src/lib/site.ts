@@ -28,4 +28,5 @@ export const PUBLIC_ROUTES = [
   "/novels",
   "/notes",
   "/contact",
+  "/resume",
 ] as const;

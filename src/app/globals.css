@@ -258,9 +258,10 @@ body {
   Recovery-share printing — one share per page. The classic "print only this
   subtree" trick: hide every mark, re-show the print root, and pin it to the top.
   Shares live only on paper/screen, so this is the only place they get inked.
+  Scoped with :has to pages that HAVE a print root — /resume prints as itself.
 */
 @media print {
-  body * {
+  body:has([data-print-root]) * {
     visibility: hidden;
   }
   [data-print-root],
@@ -279,5 +280,22 @@ body {
   }
   .print-share:last-child {
     break-after: auto;
+  }
+}
+
+/*
+  /resume print — the page IS the PDF (window.print(), no hosted binary):
+  chrome rows carry print:hidden, browsers leave the paper unpainted (white)
+  by default, and these token overrides re-ink the text for a light ground.
+  Scoped to the resume page so no other surface changes in print.
+*/
+@media print {
+  [data-page="resume"] {
+    --color-bg: #ffffff;
+    --color-surface: #ffffff;
+    --color-hairline: #d8d2c2;
+    --color-fg: #1a1813;
+    --color-muted: #5a5344;
+    --color-amber: #8a6a1a;
   }
 }

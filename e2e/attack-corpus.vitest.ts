@@ -75,10 +75,10 @@ describe("route manifest", () => {
     expect(count("owner-api")).toBe(33);
     expect(count("owner-page")).toBe(12);
     expect(count("public-inert")).toBe(2);
-    expect(count("public-serving")).toBe(18);
+    expect(count("public-serving")).toBe(19);
     expect(count("auth-handler")).toBe(1);
     expect(count("cron")).toBe(1);
-    expect(ROUTE_MANIFEST.length).toBe(67);
+    expect(ROUTE_MANIFEST.length).toBe(68);
   });
 
   it("exposes the shape helpers matching the partition", () => {
