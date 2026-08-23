@@ -79,6 +79,73 @@ export const EMPTY_PUSH_CONFIG: PushConfig = {
   episodes: {},
 };
 
+/**
+ * How the VAPID env trio reads. "off" is the designed absent state (CI, local
+ * dev, a fresh deploy). "misconfigured" is the state this type exists for: a
+ * value is set but web-push would refuse it at `setVapidDetails`, so every send
+ * dies while the panel looks healthy — the 2026-08-23 silent-phone bug, where a
+ * bare email in VAPID_SUBJECT hid behind a presence-only gate for a day. "ok"
+ * carries the public key the panel subscribes with.
+ */
+export type VapidStatus =
+  | { state: "off" }
+  | { state: "misconfigured"; problem: string }
+  | { state: "ok"; publicKey: string };
+
+/** Padless base64url of an exact byte count encodes to an exact char count
+ *  (65 → 87, 32 → 43), so key shape is judged without decoding. */
+const B64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+function isB64urlOfBytes(s: string, bytes: number): boolean {
+  return B64URL_RE.test(s) && s.length === Math.ceil((bytes * 4) / 3);
+}
+
+/** Exactly web-push's `validateSubject` rule: must parse as a URL whose
+ *  protocol is https: or mailto:. A bare email fails `new URL` outright. */
+function isVapidSubject(s: string): boolean {
+  try {
+    const u = new URL(s);
+    return u.protocol === "https:" || u.protocol === "mailto:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Judge the trio's SHAPE, not just presence, mirroring the checks web-push
+ * runs at `setVapidDetails` (subject protocol; 65-/32-byte padless base64url
+ * keys). The mirror must never be STRICTER than web-push — refusing a trio the
+ * library would accept invents an outage — so each rule is pinned to the
+ * installed validator, and the send path keeps its own try/catch as the
+ * backstop for anything subtler. Nothing set at all is the designed off state;
+ * once anything is set, silence would be a lie, so the first fault is named.
+ */
+export function vapidStatus(
+  pub: string | undefined,
+  priv: string | undefined,
+  subject: string | undefined,
+): VapidStatus {
+  if (!pub && !priv && !subject) return { state: "off" };
+  const bad = (problem: string): VapidStatus => ({
+    state: "misconfigured",
+    problem,
+  });
+  if (!pub) return bad("VAPID_PUBLIC_KEY unset");
+  if (!priv) return bad("VAPID_PRIVATE_KEY unset");
+  if (!subject) return bad("VAPID_SUBJECT unset");
+  if (!isB64urlOfBytes(pub, 65))
+    return bad(
+      "VAPID_PUBLIC_KEY malformed — need 65 bytes of padless base64url",
+    );
+  if (!isB64urlOfBytes(priv, 32))
+    return bad(
+      "VAPID_PRIVATE_KEY malformed — need 32 bytes of padless base64url",
+    );
+  if (!isVapidSubject(subject))
+    return bad("VAPID_SUBJECT must be a mailto: address or https: URL");
+  return { state: "ok", publicKey: pub };
+}
+
 function isCategory(x: unknown): x is PushCategory {
   return typeof x === "string" && PUSH_CATEGORIES.includes(x as PushCategory);
 }
