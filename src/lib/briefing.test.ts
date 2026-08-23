@@ -32,7 +32,6 @@ describe("isBriefing", () => {
     expect(
       isBriefing({
         ...base(),
-        portfolio: "the owner-only relevance note",
         sources: [{ label: "Trading Economics", url: "https://example.com" }],
       }),
     ).toBe(true);
@@ -81,7 +80,6 @@ describe("isBriefing", () => {
   });
 
   it("rejects a bad optional when present", () => {
-    expect(isBriefing({ ...base(), portfolio: 5 })).toBe(false);
     expect(isBriefing({ ...base(), sources: "nope" })).toBe(false);
     // a source missing its url
     expect(isBriefing({ ...base(), sources: [{ label: "x" }] })).toBe(false);
