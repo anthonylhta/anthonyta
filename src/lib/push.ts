@@ -16,9 +16,16 @@
  */
 
 import { type OverdueChore } from "./chores";
+import { HEALTH_TARGETS } from "./health";
 
 /** The things the hub is allowed to interrupt the owner for. */
-export type PushCategory = "dropbox" | "signin" | "ingest" | "share" | "chores";
+export type PushCategory =
+  | "dropbox"
+  | "signin"
+  | "ingest"
+  | "share"
+  | "chores"
+  | "health";
 
 export const PUSH_CATEGORIES: readonly PushCategory[] = [
   "dropbox",
@@ -26,6 +33,7 @@ export const PUSH_CATEGORIES: readonly PushCategory[] = [
   "ingest",
   "share",
   "chores",
+  "health",
 ];
 
 /** The plaintext ingest sources the staleness alarm watches. */
@@ -43,6 +51,15 @@ export const EPISODE_KEYS: readonly EpisodeKey[] = [
   ...INGEST_SOURCES,
   "chores",
 ];
+
+/** One sibling project's standing in the nightly health tripwire. Absent = that
+ *  project answered its last probe, so a healthy estate stores nothing at all. */
+export interface HealthEpisode {
+  /** Consecutive nightly probes this project has failed. */
+  fails: number;
+  /** Has THIS down-episode already been said out loud? */
+  told: boolean;
+}
 
 /** One subscribed device, exactly as the Push API hands it over. */
 export interface PushSub {
@@ -75,6 +92,15 @@ export interface PushConfig {
    *    (`checkChoresDigest`).
    */
   episodes: Partial<Record<EpisodeKey, string>>;
+  /**
+   * The project-health tripwire's bookkeeping, keyed by `HEALTH_TARGETS` key.
+   * A sibling field rather than another `episodes` entry because it is a
+   * different shape entirely: those are day markers, these are a running
+   * consecutive-failure count plus whether the current episode was announced.
+   * Only projects currently failing appear — a recovery deletes the entry, so
+   * the healthy steady state is `{}` (`checkHealthDown`).
+   */
+  health: Record<string, HealthEpisode>;
 }
 
 /** Devices kept. A single owner with a phone, a laptop and a spare is the whole
@@ -89,6 +115,10 @@ export const STALE_AFTER_DAYS = 2;
 
 /** How long overdue upkeep gets to stay overdue before it is mentioned again. */
 export const CHORES_DIGEST_DAYS = 7;
+
+/** Consecutive nightly probe failures before a project counts as really down.
+ *  One is noise — a deploy, a cold start, a flaky moment on the cron's way out. */
+export const HEALTH_DOWN_NIGHTS = 2;
 
 /** Endpoints are URLs from a browser vendor's push service; bound the length. */
 const MAX_ENDPOINT_CHARS = 1024;
@@ -108,8 +138,10 @@ export const EMPTY_PUSH_CONFIG: PushConfig = {
     ingest: true,
     share: true,
     chores: true,
+    health: true,
   },
   episodes: {},
+  health: {},
 };
 
 /**
@@ -268,7 +300,23 @@ export function normalizePushConfig(raw: unknown): PushConfig {
         episodes[k as EpisodeKey] = v;
   }
 
-  return { v: 1, subs: subs.slice(0, MAX_SUBS), categories, episodes };
+  // Health entries are dropped unless they name a project the hub still probes
+  // and carry both halves of a live episode: a retired target's bookkeeping
+  // cleans itself up, and a half-formed entry would count nights forever.
+  const health: PushConfig["health"] = {};
+  if (typeof o.health === "object" && o.health !== null) {
+    for (const [k, v] of Object.entries(o.health as Record<string, unknown>)) {
+      if (!HEALTH_TARGETS.some((t) => t.key === k)) continue;
+      if (typeof v !== "object" || v === null) continue;
+      const { fails, told } = v as Record<string, unknown>;
+      if (typeof fails !== "number" || !Number.isInteger(fails) || fails < 1)
+        continue;
+      if (typeof told !== "boolean") continue;
+      health[k] = { fails, told };
+    }
+  }
+
+  return { v: 1, subs: subs.slice(0, MAX_SUBS), categories, episodes, health };
 }
 
 /** Serialize for storage (a stable, versioned shape). */
@@ -278,6 +326,7 @@ export function serializePushConfig(cfg: PushConfig): string {
     subs: cfg.subs,
     categories: cfg.categories,
     episodes: cfg.episodes,
+    health: cfg.health,
   });
 }
 
@@ -338,6 +387,15 @@ export function setEpisode(
   if (day === undefined) delete episodes[key];
   else episodes[key] = day;
   return { ...cfg, episodes };
+}
+
+/** Replace the health tripwire's bookkeeping wholesale. The nightly job judges
+ *  every project in one pass, so there is nothing a per-project setter would buy. */
+export function setHealth(
+  cfg: PushConfig,
+  health: PushConfig["health"],
+): PushConfig {
+  return { ...cfg, health };
 }
 
 /** What the owner-gated route is allowed to hand back: NEVER the endpoint or the
@@ -501,6 +559,86 @@ export function checkChoresDigest(
     body: choresDigestBody(overdue),
     episode: today,
     reason: "overdue",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The project-health tripwire
+// ---------------------------------------------------------------------------
+
+/** One night's verdict on one sibling project, as the cron probed it. */
+export interface HealthProbe {
+  key: string;
+  label: string;
+  /** The probe's own doctrine: every failure is "down", never an error. */
+  down: boolean;
+}
+
+/** A project named in tonight's alarm, with the length of its silence. */
+export interface HealthDownRow {
+  label: string;
+  nights: number;
+}
+
+export interface HealthDownResult {
+  /** Send the alarm? */
+  alarm: boolean;
+  /** The line to send; empty unless `alarm`. */
+  body: string;
+  /** The bookkeeping the config should carry after tonight. */
+  health: Record<string, HealthEpisode>;
+}
+
+/** One line for the projects being named tonight — a count of nights, never a
+ *  diagnosis; the hub has no idea WHY a sibling stopped answering. */
+export function healthDownBody(down: readonly HealthDownRow[]): string {
+  return down.map((d) => `${d.label} down ${d.nights} nights`).join(" · ");
+}
+
+/**
+ * Judge tonight's probes against the running count, and keep the once-per-episode
+ * bookkeeping. Per project, in order:
+ *
+ *  - answered      — the entry is DELETED. A recovery re-arms silently: there is
+ *                    no "back up" buzz, because the homepage row already says so
+ *                    and an alarm nobody has to act on is an alarm that gets muted.
+ *  - failed, 1st   — count it and stay quiet. One missed probe is a deploy, a cold
+ *                    start, or a flaky second on the cron's way out — not an outage.
+ *  - failed, Nth   — at `HEALTH_DOWN_NIGHTS` consecutive failures, say it once and
+ *                    mark the episode told.
+ *  - failed, told  — silence for as long as it stays down. UNLIKE the maintenance
+ *                    digest there is no weekly re-send: an overdue chore is
+ *                    invisible until it is mentioned, whereas a down project is on
+ *                    the command center every day. This push is the tripwire, not
+ *                    the nag.
+ *
+ * A project that flaps (fail, answer, fail) never reaches the threshold, which is
+ * the entire point of counting CONSECUTIVE nights rather than failures.
+ */
+export function checkHealthDown(
+  probes: readonly HealthProbe[],
+  current: Record<string, HealthEpisode>,
+  downNights = HEALTH_DOWN_NIGHTS,
+): HealthDownResult {
+  const health: Record<string, HealthEpisode> = {};
+  const naming: HealthDownRow[] = [];
+
+  for (const probe of probes) {
+    if (!probe.down) continue;
+    const fails = (current[probe.key]?.fails ?? 0) + 1;
+    const told = current[probe.key]?.told === true;
+    if (!told && fails >= downNights) {
+      naming.push({ label: probe.label, nights: fails });
+      health[probe.key] = { fails, told: true };
+    } else {
+      health[probe.key] = { fails, told };
+    }
+  }
+
+  return {
+    alarm: naming.length > 0,
+    body: naming.length > 0 ? healthDownBody(naming) : "",
+    health,
   };
 }
 

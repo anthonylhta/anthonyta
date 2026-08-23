@@ -4,11 +4,14 @@ import {
   addSub,
   categoryOn,
   checkChoresDigest,
+  checkHealthDown,
   checkStaleness,
   choresDigestBody,
   CHORES_DIGEST_DAYS,
   daysBetween,
   EMPTY_PUSH_CONFIG,
+  healthDownBody,
+  HEALTH_DOWN_NIGHTS,
   isPushSub,
   MAX_SUBS,
   newestRecordedDay,
@@ -22,9 +25,11 @@ import {
   serializePushConfig,
   setCategory,
   setEpisode,
+  setHealth,
   stalenessBody,
   STALE_AFTER_DAYS,
   vapidStatus,
+  type HealthProbe,
   type PushConfig,
   type PushSub,
 } from "./push";
@@ -98,8 +103,10 @@ describe("parsePushConfig", () => {
         ingest: true,
         share: true,
         chores: true,
+        health: true,
       },
       episodes: { steps: "2026-08-10", chores: "2026-08-18" },
+      health: { riichi: { fails: 2, told: true } },
     });
     expect(parsePushConfig(serializePushConfig(source))).toEqual(source);
   });
@@ -124,7 +131,7 @@ describe("parsePushConfig", () => {
   });
 
   it("defaults a category the blob predates to ON", () => {
-    // Exactly the shape a config written before `chores` existed has.
+    // Exactly the shape a config written before `chores` and `health` existed has.
     const parsed = normalizePushConfig({
       categories: { dropbox: false, signin: true, ingest: true, share: true },
     });
@@ -134,6 +141,7 @@ describe("parsePushConfig", () => {
       ingest: true,
       share: true,
       chores: true,
+      health: true,
     });
   });
 
@@ -159,6 +167,45 @@ describe("parsePushConfig", () => {
     });
   });
 
+  it("keeps only live health entries for projects the hub still probes", () => {
+    const parsed = normalizePushConfig({
+      health: {
+        riichi: { fails: 2, told: true },
+        novel: { fails: 1, told: false },
+        // A project the hub no longer probes cleans itself up.
+        retired: { fails: 5, told: true },
+      },
+    });
+    expect(parsed.health).toEqual({
+      riichi: { fails: 2, told: true },
+      novel: { fails: 1, told: false },
+    });
+  });
+
+  it("drops a half-formed health entry rather than counting nights off it", () => {
+    const parsed = normalizePushConfig({
+      health: {
+        riichi: { fails: 2 },
+        novel: { told: true },
+        ishin: { fails: "two", told: true },
+      },
+    });
+    expect(parsed.health).toEqual({});
+    expect(
+      normalizePushConfig({
+        health: { riichi: { fails: 0, told: false } },
+      }).health,
+    ).toEqual({});
+    expect(
+      normalizePushConfig({
+        health: { riichi: { fails: 1.5, told: false } },
+      }).health,
+    ).toEqual({});
+    expect(normalizePushConfig({ health: { riichi: null } }).health).toEqual(
+      {},
+    );
+  });
+
   it("caps the device list", () => {
     const many = Array.from({ length: MAX_SUBS + 4 }, (_, i) =>
       sub({ id: `id-${i}`, endpoint: `https://push.example/${i}` }),
@@ -168,8 +215,14 @@ describe("parsePushConfig", () => {
 
   it("survives a blob whose fields are the wrong types entirely", () => {
     expect(
-      normalizePushConfig({ subs: "nope", categories: 7, episodes: [] }),
+      normalizePushConfig({
+        subs: "nope",
+        categories: 7,
+        episodes: [],
+        health: [],
+      }),
     ).toEqual(EMPTY_PUSH_CONFIG);
+    expect(normalizePushConfig({ health: "down" })).toEqual(EMPTY_PUSH_CONFIG);
   });
 });
 
@@ -253,6 +306,7 @@ describe("category gating", () => {
     expect([...PUSH_CATEGORIES].sort()).toEqual([
       "chores",
       "dropbox",
+      "health",
       "ingest",
       "share",
       "signin",
@@ -271,6 +325,13 @@ describe("category gating", () => {
     expect(categoryOn(one, "chores")).toBe(true);
     expect(categoryOn(setCategory(one, "chores", false), "chores")).toBe(false);
     expect(categoryOn(EMPTY_PUSH_CONFIG, "chores")).toBe(false);
+  });
+
+  it("gates the health tripwire like the rest", () => {
+    const one = cfg({ subs: [sub()] });
+    expect(categoryOn(one, "health")).toBe(true);
+    expect(categoryOn(setCategory(one, "health", false), "health")).toBe(false);
+    expect(categoryOn(EMPTY_PUSH_CONFIG, "health")).toBe(false);
   });
 });
 
@@ -609,5 +670,137 @@ describe("checkChoresDigest", () => {
       { label: "vault-sync", days: 9, command: "npm run vault-sync" },
     ];
     expect(checkChoresDigest(two, "2026-08-23", "2026-08-22").send).toBe(false);
+  });
+});
+
+describe("setHealth", () => {
+  it("replaces the whole map without touching the rest of the config", () => {
+    const before = cfg({ subs: [sub()], episodes: { steps: "2026-08-10" } });
+    const after = setHealth(before, { riichi: { fails: 1, told: false } });
+    expect(after.health).toEqual({ riichi: { fails: 1, told: false } });
+    expect(after.subs).toEqual(before.subs);
+    expect(after.episodes).toEqual(before.episodes);
+    expect(before.health).toEqual({});
+  });
+});
+
+describe("healthDownBody", () => {
+  it("names the project and how long it has been quiet", () => {
+    expect(healthDownBody([{ label: "riichi", nights: 2 }])).toBe(
+      "riichi down 2 nights",
+    );
+  });
+
+  it("joins several projects into one line", () => {
+    expect(
+      healthDownBody([
+        { label: "riichi", nights: 2 },
+        { label: "ishin", nights: 4 },
+      ]),
+    ).toBe("riichi down 2 nights · ishin down 4 nights");
+  });
+});
+
+describe("checkHealthDown", () => {
+  const probes = (...down: string[]): HealthProbe[] => [
+    { key: "riichi", label: "riichi", down: down.includes("riichi") },
+    { key: "novel", label: "webnovel", down: down.includes("novel") },
+    { key: "ishin", label: "ishin", down: down.includes("ishin") },
+  ];
+
+  it("says nothing and stores nothing when the estate answers", () => {
+    expect(checkHealthDown(probes(), {})).toEqual({
+      alarm: false,
+      body: "",
+      health: {},
+    });
+  });
+
+  it("counts the first failed night without buzzing", () => {
+    const out = checkHealthDown(probes("riichi"), {});
+    expect(out.alarm).toBe(false);
+    expect(out.body).toBe("");
+    expect(out.health).toEqual({ riichi: { fails: 1, told: false } });
+  });
+
+  it("buzzes on the second consecutive night and marks the episode told", () => {
+    const first = checkHealthDown(probes("riichi"), {});
+    const second = checkHealthDown(probes("riichi"), first.health);
+    expect(second.alarm).toBe(true);
+    expect(second.body).toBe("riichi down 2 nights");
+    expect(second.health).toEqual({ riichi: { fails: 2, told: true } });
+    expect(HEALTH_DOWN_NIGHTS).toBe(2);
+  });
+
+  it("stays silent every night after that — a tripwire, not a nag", () => {
+    let state = checkHealthDown(probes("riichi"), {}).health;
+    state = checkHealthDown(probes("riichi"), state).health;
+    for (const nights of [3, 4, 5]) {
+      const out = checkHealthDown(probes("riichi"), state);
+      expect(out.alarm).toBe(false);
+      expect(out.health.riichi).toEqual({ fails: nights, told: true });
+      state = out.health;
+    }
+  });
+
+  it("forgets a project the moment it answers again, silently", () => {
+    const down = checkHealthDown(probes("riichi"), {});
+    const back = checkHealthDown(probes(), down.health);
+    expect(back.alarm).toBe(false);
+    expect(back.body).toBe("");
+    expect(back.health).toEqual({});
+  });
+
+  it("never buzzes for a project that flaps", () => {
+    let state: ReturnType<typeof checkHealthDown>["health"] = {};
+    for (const tonight of [
+      probes("riichi"),
+      probes(),
+      probes("riichi"),
+      probes(),
+      probes("riichi"),
+    ]) {
+      const out = checkHealthDown(tonight, state);
+      expect(out.alarm).toBe(false);
+      state = out.health;
+    }
+  });
+
+  it("buzzes again once a recovered project goes down for a new episode", () => {
+    let state = checkHealthDown(probes("riichi"), {}).health;
+    const told = checkHealthDown(probes("riichi"), state);
+    expect(told.alarm).toBe(true);
+    state = checkHealthDown(probes(), told.health).health;
+    state = checkHealthDown(probes("riichi"), state).health;
+    const again = checkHealthDown(probes("riichi"), state);
+    expect(again.alarm).toBe(true);
+    expect(again.body).toBe("riichi down 2 nights");
+  });
+
+  it("names every project that qualifies tonight on one line", () => {
+    const first = checkHealthDown(probes("riichi", "ishin"), {});
+    expect(first.alarm).toBe(false);
+    const second = checkHealthDown(probes("riichi", "ishin"), first.health);
+    expect(second.alarm).toBe(true);
+    expect(second.body).toBe("riichi down 2 nights · ishin down 2 nights");
+    expect(second.health).toEqual({
+      riichi: { fails: 2, told: true },
+      ishin: { fails: 2, told: true },
+    });
+  });
+
+  it("leaves an already-told project out of a later project's alarm", () => {
+    let state = checkHealthDown(probes("riichi"), {}).health;
+    state = checkHealthDown(probes("riichi"), state).health;
+    state = checkHealthDown(probes("riichi", "ishin"), state).health;
+    const out = checkHealthDown(probes("riichi", "ishin"), state);
+    expect(out.body).toBe("ishin down 2 nights");
+    expect(out.health.riichi).toEqual({ fails: 4, told: true });
+  });
+
+  it("honours a custom threshold", () => {
+    expect(checkHealthDown(probes("riichi"), {}, 1).alarm).toBe(true);
+    const two = checkHealthDown(probes("riichi"), {}, 3);
+    expect(checkHealthDown(probes("riichi"), two.health, 3).alarm).toBe(false);
   });
 });
