@@ -17,7 +17,7 @@ import { TotpDrawer } from "@/components/TotpDrawer";
 import { readDays } from "@/lib/anastore";
 import { getAuthLog } from "@/lib/authlogstore";
 import { sydneyToday } from "@/lib/fin";
-import { vapidPublicKey } from "@/lib/pushsend";
+import { envVapidStatus } from "@/lib/pushsend";
 import { r2Enabled } from "@/lib/r2";
 
 export const metadata = { title: "system" };
@@ -73,7 +73,7 @@ export default async function SystemPage() {
           {/* The VAPID public key is handed to the browser's push service by
               design — not a secret, so it rides as a prop rather than earning a
               route of its own. */}
-          <PushPanel offline={!r2Enabled()} vapidPublicKey={vapidPublicKey()} />
+          <PushPanel offline={!r2Enabled()} vapid={envVapidStatus()} />
         </div>
 
         {/* ───────────── LAYOUT ───────────── */}

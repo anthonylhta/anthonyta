@@ -2,7 +2,12 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { fromB64url } from "@/lib/crypto";
-import { PUSH_CATEGORIES, type PushCategory, type PushView } from "@/lib/push";
+import {
+  PUSH_CATEGORIES,
+  type PushCategory,
+  type PushView,
+  type VapidStatus,
+} from "@/lib/push";
 
 const btn =
   "border border-hairline px-2 py-1 text-muted transition-colors hover:border-amber hover:text-amber disabled:opacity-30";
@@ -60,25 +65,27 @@ function day(iso: string): string {
  * The /system push band — the owner enrolls a device, names which of the three
  * categories may interrupt, and drops devices that are gone.
  *
- * Every off-state is stated honestly rather than hidden, because all three are
+ * Every off-state is stated honestly rather than hidden, because all four are
  * real and each has a different fix: no VAPID keys in the env (the whole feature
- * is off), no R2 (nowhere to store a subscription), and no PushManager (an iOS
- * browser outside the installed PWA, most often). Guessing between them would
- * leave the owner tapping a button that can't work.
+ * is off), a VAPID value web-push would refuse (set but broken — named, never
+ * rendered as healthy; bug note 2026-08-23), no R2 (nowhere to store a
+ * subscription), and no PushManager (an iOS browser outside the installed PWA,
+ * most often). Guessing between them would leave the owner tapping a button
+ * that can't work.
  */
 export function PushPanel({
   offline,
-  vapidPublicKey,
+  vapid,
 }: {
   offline: boolean;
-  vapidPublicKey: string | null;
+  vapid: VapidStatus;
 }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [view, setView] = useState<PushView | null>(null);
   const [enroll, setEnroll] = useState<Enroll>("idle");
   const supported = useSyncExternalStore(noop, pushSupported, () => false);
 
-  const dead = offline || vapidPublicKey === null;
+  const dead = offline || vapid.state !== "ok";
 
   useEffect(() => {
     if (dead) return;
@@ -100,13 +107,15 @@ export function PushPanel({
     };
   }, [dead]);
 
-  if (vapidPublicKey === null)
+  if (vapid.state === "off")
     return (
       <p className="text-xs text-muted">
         no keys configured — set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and
         VAPID_SUBJECT
       </p>
     );
+  if (vapid.state === "misconfigured")
+    return <p className="text-xs text-down">push broken — {vapid.problem}</p>;
   if (offline)
     return (
       <p className="text-xs text-muted">
@@ -123,7 +132,7 @@ export function PushPanel({
     );
 
   async function subscribe() {
-    if (vapidPublicKey === null) return;
+    if (vapid.state !== "ok") return;
     setEnroll("busy");
     try {
       const permission = await Notification.requestPermission();
@@ -138,7 +147,7 @@ export function PushPanel({
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         // re-wrapped so the type is Uint8Array<ArrayBuffer>, which BufferSource pins
-        applicationServerKey: new Uint8Array(fromB64url(vapidPublicKey)),
+        applicationServerKey: new Uint8Array(fromB64url(vapid.publicKey)),
       });
       const json = sub.toJSON() as {
         endpoint?: string;

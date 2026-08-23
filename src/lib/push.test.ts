@@ -20,6 +20,7 @@ import {
   setEpisode,
   stalenessBody,
   STALE_AFTER_DAYS,
+  vapidStatus,
   type PushConfig,
   type PushSub,
 } from "./push";
@@ -415,5 +416,68 @@ describe("copy and payload", () => {
     expect(
       pushPayload("signin", "passkey sign-in · android", "/system").url,
     ).toBe("/system");
+  });
+});
+
+describe("vapidStatus", () => {
+  // Shapes web-push itself accepts: 65 bytes → 87 chars, 32 bytes → 43 chars.
+  const pub = "B" + "A".repeat(86);
+  const priv = "A".repeat(43);
+
+  it("reads nothing set as the designed off state", () => {
+    expect(vapidStatus(undefined, undefined, undefined)).toEqual({
+      state: "off",
+    });
+    expect(vapidStatus("", "", "")).toEqual({ state: "off" });
+  });
+
+  it("names the missing var once anything is set", () => {
+    expect(vapidStatus(pub, undefined, undefined)).toEqual({
+      state: "misconfigured",
+      problem: "VAPID_PRIVATE_KEY unset",
+    });
+    expect(vapidStatus(pub, priv, undefined)).toEqual({
+      state: "misconfigured",
+      problem: "VAPID_SUBJECT unset",
+    });
+    expect(vapidStatus(undefined, priv, "mailto:a@b.com")).toEqual({
+      state: "misconfigured",
+      problem: "VAPID_PUBLIC_KEY unset",
+    });
+  });
+
+  it("refuses the bare-email subject that killed every send (2026-08-23)", () => {
+    const s = vapidStatus(pub, priv, "anthony.ta@live.com");
+    expect(s.state).toBe("misconfigured");
+    if (s.state === "misconfigured")
+      expect(s.problem).toContain("VAPID_SUBJECT");
+  });
+
+  it("mirrors web-push's subject rule: https: or mailto: only", () => {
+    expect(vapidStatus(pub, priv, "mailto:a@b.com").state).toBe("ok");
+    expect(vapidStatus(pub, priv, "https://anthonyta.dev").state).toBe("ok");
+    expect(vapidStatus(pub, priv, "http://anthonyta.dev").state).toBe(
+      "misconfigured",
+    );
+    expect(vapidStatus(pub, priv, "not a url").state).toBe("misconfigured");
+  });
+
+  it("checks key shape — length and padless base64url charset", () => {
+    expect(vapidStatus(pub.slice(1), priv, "mailto:a@b.com").state).toBe(
+      "misconfigured",
+    );
+    expect(vapidStatus(pub, priv + "=", "mailto:a@b.com").state).toBe(
+      "misconfigured",
+    );
+    expect(vapidStatus(pub, "A".repeat(44), "mailto:a@b.com").state).toBe(
+      "misconfigured",
+    );
+  });
+
+  it("hands the panel the public key only when the trio is sendable", () => {
+    expect(vapidStatus(pub, priv, "mailto:a@b.com")).toEqual({
+      state: "ok",
+      publicKey: pub,
+    });
   });
 });

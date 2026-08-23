@@ -5,8 +5,10 @@ import {
   pruneSubs,
   pushPayload,
   serializePushConfig,
+  vapidStatus,
   type PushCategory,
   type PushConfig,
+  type VapidStatus,
 } from "./push";
 import { getPushRaw, putPush } from "./pushstore";
 
@@ -23,22 +25,22 @@ import { getPushRaw, putPush } from "./pushstore";
  *    never be able to fail an ingest, a sign-in, or the nightly cron.
  */
 
-/** True only when all three VAPID vars are set — a half-configured pair would
- *  fail every send, so treat it as off rather than as broken. */
-export function pushConfigured(): boolean {
-  return vapidPublicKey() !== null;
+/** The env trio judged for SHAPE, not just presence — a malformed value fails
+ *  every send at `setVapidDetails` while a presence check renders the panel
+ *  healthy (bug note 2026-08-23). The send gate and the /system band both read
+ *  this one verdict, so they can never disagree again. */
+export function envVapidStatus(): VapidStatus {
+  return vapidStatus(
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY,
+    process.env.VAPID_SUBJECT,
+  );
 }
 
-/** The VAPID public key, for the /system panel's `pushManager.subscribe`. Not a
- *  secret (it is handed to the browser's push service by design), but returned
- *  only when the whole trio is present so the panel can't offer a subscribe that
- *  could never be sent to. */
-export function vapidPublicKey(): string | null {
-  const pub = process.env.VAPID_PUBLIC_KEY;
-  const priv = process.env.VAPID_PRIVATE_KEY;
-  const subject = process.env.VAPID_SUBJECT;
-  if (!pub || !priv || !subject) return null;
-  return pub;
+/** True only when the trio is present AND sendable; off and misconfigured both
+ *  refuse — a doomed send helps nobody, and the panel names the difference. */
+export function pushConfigured(): boolean {
+  return envVapidStatus().state === "ok";
 }
 
 /**
