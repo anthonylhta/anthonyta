@@ -147,12 +147,14 @@ export async function Lobby() {
             label="reading"
             className="border-0"
             action={
-              <Link
-                href="/novels"
+              <a
+                href="https://novel.anthonyta.dev/user/mando"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="text-xs text-amber hover:underline"
               >
-                [novels]
-              </Link>
+                [profile ↗]
+              </a>
             }
           >
             <div className="space-y-2">

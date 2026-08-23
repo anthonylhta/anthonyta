@@ -25,7 +25,6 @@ export const PUBLIC_ROUTES = [
   "/projects",
   "/projects/riichi",
   "/projects/ishin",
-  "/novels",
   "/notes",
   "/contact",
   "/resume",
