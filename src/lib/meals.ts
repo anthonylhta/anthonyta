@@ -15,6 +15,13 @@
  * newest-first by construction and eviction takes from the TAIL. Nothing ever
  * re-sorts by date — `date` is what the entry says about itself, not a key.
  *
+ * A day stops being a list once it is old enough. Past `FOLD_AFTER_DAYS` the
+ * entries of a day are replaced by the four figures they came to, in
+ * `dayTotals` — a tenth the bytes, and everything any surface still asks of a
+ * day that old. So `entries` is a WINDOW of the recent weeks and `dayTotals` is
+ * the tail behind it, which is what lets one fixed envelope hold years instead
+ * of dropping the oldest day off the end once the log gets long.
+ *
  * The WEIGHTS are the exception, and the only collection here kept sorted: one
  * weigh-in per day, oldest → newest, because every reading of them is a trailing
  * WINDOW and a cap that evicts the oldest is then just a slice off the front.
@@ -45,8 +52,22 @@ export const MEALS_MAX_BYTES = 262_144;
 export const MEALS_ENVELOPE_OVERHEAD = 128;
 
 export const MAX_FOODS = 200;
-/** At ~6 entries a day that is ~100 days — far past the 14-day strip's reach. */
+/** The itemized window's safety cap. The fold reaches a day first (60 days at
+ *  ~6 entries a day is ~370 rows), so this should never bind — it is the
+ *  backstop under a day that was logged item by item all afternoon. */
 export const MAX_ENTRIES = 600;
+/** Days past which a day stops being a list and becomes four figures. Every
+ *  window here is a fortnight or a week, so 60 days is weeks of slack behind the
+ *  furthest any surface looks — and far enough back that nothing still being
+ *  corrected gets folded out from under the correction. */
+export const FOLD_AFTER_DAYS = 60;
+/** Folded days kept, oldest evicted past it — the final backstop, not the
+ *  working limit. A row is ~75 bytes, so 2,000 of them (~5½ years) is ~150KB;
+ *  with a full library, a full itemized window and a full weight log behind them
+ *  the payload still lands inside `MEALS_MAX_BYTES`. That headroom is the point:
+ *  a log that outgrew the envelope would refuse every save, including the ones
+ *  that would shrink it. */
+export const MAX_DAY_TOTALS = 2000;
 /** ~13 months of daily weigh-ins; past it the OLDEST morning drops off. At ~30
  *  bytes a row the whole log is ~12KB — the weight of a fortnight of entries,
  *  and the strip never looks further back than ten weeks. */
@@ -56,6 +77,10 @@ const MAX_ID = 64;
 /** One portion, not a shopping trip; and kilocalories, not kilojoules. */
 const MAX_QTY = 100;
 const MAX_MACRO = 10_000;
+/** A FOLDED day's ceiling — every cap above it multiplied out. Deliberately far
+ *  past anything a person eats: a sum the fold can produce must never be a sum
+ *  the reader rejects, or the log would seal itself shut. */
+const MAX_DAY_MACRO = MAX_ENTRIES * MAX_MACRO * MAX_QTY;
 /** A person, not a barbell — outside these a figure is a typo, not a weigh-in. */
 const MIN_KG = 20;
 const MAX_KG = 300;
@@ -106,11 +131,26 @@ export interface MealsTargets {
   f: number;
 }
 
+/** One folded day — what it came to, and how much was in it. The list is gone
+ *  by design; the count is what keeps the day honest about the fact that it was
+ *  five things and not one. */
+export interface MealsDayTotal extends MealsTargets {
+  /** The Sydney calendar day it covers, `YYYY-MM-DD`. */
+  date: string;
+  /** How many entries folded into it. */
+  entries: number;
+}
+
 export interface MealsConfig {
-  v: 1;
+  v: 2;
   foods: MealsFood[];
   /** Newest-first by construction (see the module note). */
   entries: MealsEntry[];
+  /** The days behind the fold horizon, oldest → newest, one row per date.
+   *  Always present on a v2 config and empty until the first fold — "nothing has
+   *  aged out yet" and "nothing ever will" are not two states worth telling
+   *  apart. */
+  dayTotals: MealsDayTotal[];
   /** Absent until the owner sets them — there is no sensible default daily
    *  intake to invent, so the day renders as totals with nothing to read
    *  against. */
@@ -123,7 +163,12 @@ export interface MealsConfig {
   seq?: number;
 }
 
-export const EMPTY_MEALS_CONFIG: MealsConfig = { v: 1, foods: [], entries: [] };
+export const EMPTY_MEALS_CONFIG: MealsConfig = {
+  v: 2,
+  foods: [],
+  entries: [],
+  dayTotals: [],
+};
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -192,6 +237,27 @@ function isWeight(x: unknown): x is MealsWeight {
   );
 }
 
+/** A folded day's own figures, on the folded day's own (far looser) ceiling. */
+function isDayMacro(x: unknown): x is number {
+  return (
+    typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= MAX_DAY_MACRO
+  );
+}
+
+function isDayTotal(x: unknown): x is MealsDayTotal {
+  return (
+    isObj(x) &&
+    typeof x.date === "string" &&
+    DATE_RE.test(x.date) &&
+    isDayMacro(x.kcal) &&
+    isDayMacro(x.p) &&
+    isDayMacro(x.c) &&
+    isDayMacro(x.f) &&
+    // The count is a counter like the library's, and gets a counter's bound.
+    isUses(x.entries)
+  );
+}
+
 function isEntry(x: unknown): x is MealsEntry {
   return (
     isObj(x) &&
@@ -206,15 +272,38 @@ function isEntry(x: unknown): x is MealsEntry {
   );
 }
 
-/** Strict parse of a decrypted config — null on anything unrecognizable, so a
- *  tampered payload reads as "cannot decrypt", never as an empty log. */
+/**
+ * Strict parse of a decrypted config — null on anything unrecognizable, so a
+ * tampered payload reads as "cannot decrypt", never as an empty log.
+ *
+ * A v1 envelope is the shape from before the fold: every day it holds is still
+ * itemized, so it simply arrives with nothing folded. Writes always produce v2,
+ * and a build that predates the fold reads one as unrecognizable — which is the
+ * point of the bump: it refuses the log loudly rather than rewriting it without
+ * the folded days it doesn't know are there.
+ */
 export function normalizeMealsConfig(x: unknown): MealsConfig | null {
-  if (!isObj(x) || x.v !== 1) return null;
+  if (!isObj(x) || (x.v !== 1 && x.v !== 2)) return null;
   if (!Array.isArray(x.foods) || x.foods.length > MAX_FOODS) return null;
   if (!x.foods.every(isFood)) return null;
   if (!Array.isArray(x.entries) || x.entries.length > MAX_ENTRIES) return null;
   if (!x.entries.every(isEntry)) return null;
   if (x.targets !== undefined && !isTargets(x.targets)) return null;
+  let folded: MealsDayTotal[] = [];
+  if (x.v === 2) {
+    if (!Array.isArray(x.dayTotals) || x.dayTotals.length > MAX_DAY_TOTALS)
+      return null;
+    if (!x.dayTotals.every(isDayTotal)) return null;
+    // A date twice is two answers for one day — the ambiguity the weigh-ins
+    // refuse, and the one the fold's merge exists to prevent.
+    const days = new Set(x.dayTotals.map((d: MealsDayTotal) => d.date));
+    if (days.size !== x.dayTotals.length) return null;
+    folded = x.dayTotals as MealsDayTotal[];
+  } else if (x.dayTotals !== undefined) {
+    // Folded days under a v1 label: a shape nothing here ever wrote, and one
+    // that would lose them if it were read as the pre-fold vintage.
+    return null;
+  }
   if (x.weights !== undefined) {
     if (!Array.isArray(x.weights) || x.weights.length > MAX_WEIGHTS)
       return null;
@@ -229,9 +318,10 @@ export function normalizeMealsConfig(x: unknown): MealsConfig | null {
   // them would erase a field on the next write (the prf-label lesson: a rebuild
   // that forgets a field it didn't know about silently deletes it).
   return {
-    v: 1,
+    v: 2,
     foods: x.foods,
     entries: x.entries,
+    dayTotals: folded,
     ...(x.targets !== undefined ? { targets: x.targets as MealsTargets } : {}),
     ...(x.weights !== undefined ? { weights: x.weights as MealsWeight[] } : {}),
     ...(x.seq !== undefined ? { seq: x.seq as number } : {}),
@@ -257,9 +347,10 @@ export function fitsMealsCap(cfg: MealsConfig): boolean {
  * counters, so the derive-on-absent rule lives in exactly one place.
  *
  * A food carrying `uses` answers from the counter: an all-time figure, kept past
- * the rolling entry window. A food without one is answered from the entries
- * still in view — an honest ~3-month reading for a library that predates the
- * counters, replaced by the real one the first time it is logged again.
+ * the fold and the rolling entry window both. A food without one is answered
+ * from the entries still in view — an honest reading over the itemized window
+ * for a library that predates the counters, replaced by the real one the first
+ * time it is logged again.
  */
 export function foodUsage(
   cfg: MealsConfig,
@@ -326,9 +417,10 @@ function unbumpUsage(
 
 function rebuild(cfg: MealsConfig, patch: Partial<MealsConfig>): MealsConfig {
   const next: MealsConfig = {
-    v: 1,
+    v: 2,
     foods: cfg.foods,
     entries: cfg.entries,
+    dayTotals: cfg.dayTotals,
     ...(cfg.targets !== undefined ? { targets: cfg.targets } : {}),
     ...(cfg.weights !== undefined ? { weights: cfg.weights } : {}),
     ...patch,
@@ -373,6 +465,9 @@ export function updateFood(
  * every past day that contained it, which is history the log has no right to
  * change. Rename it instead. An unknown id is a no-op too, so the 409 dance can
  * re-run this against a base another device already pruned.
+ *
+ * A food eaten only on days that have since FOLDED is deletable again, and
+ * safely: those days are figures now, not references, so nothing rewrites.
  */
 export function removeFood(cfg: MealsConfig, id: string): MealsConfig {
   if (!cfg.foods.some((f) => f.id === id)) return cfg;
@@ -382,8 +477,8 @@ export function removeFood(cfg: MealsConfig, id: string): MealsConfig {
 
 /**
  * Prepend one eaten thing (newest first). Past the cap the OLDEST entry (the
- * tail) is evicted: the trailing strip looks back a fortnight, so a log losing
- * its hundredth day back is the honest trade for a fixed envelope.
+ * tail) is evicted — a backstop the fold now reaches first, so an old day loses
+ * its itemization to `foldOldDays` rather than losing itself off the tail.
  *
  * Also counts the food (see `bumpUsage`). Idempotent on `id`, so the 409 dance
  * can re-run it against a fresh base that may already contain it — and the same
@@ -398,12 +493,83 @@ export function addEntry(cfg: MealsConfig, entry: MealsEntry): MealsConfig {
 }
 
 /** Remove one entry by id, uncounting its food. An unknown id is a no-op
- *  (re-runnable). */
+ *  (re-runnable) — including for an entry that has since folded away, which is
+ *  why the page stops offering the × once a day is a total. */
 export function removeEntry(cfg: MealsConfig, id: string): MealsConfig {
   const gone = cfg.entries.find((e) => e.id === id);
   if (!gone) return cfg;
   const entries = cfg.entries.filter((e) => e.id !== id);
   return rebuild(cfg, { foods: unbumpUsage(cfg, gone, entries), entries });
+}
+
+/**
+ * Fold every day past the horizon into its totals — how the log grows old.
+ * Inside `FOLD_AFTER_DAYS` a day is a list of things eaten; past it, it is four
+ * figures and a count, which is all any surface still asks of a day that far
+ * back (the bars, the strips and the averages all read `dayTotals`, and they
+ * read a folded day exactly the same way). The itemized window stays weeks long
+ * and the envelope holds years.
+ *
+ * The figures are the ones the day showed: summed in the log's own order, so the
+ * arithmetic is the one `dayTotals` did, then kept to one decimal — the module's
+ * standing rule against float dust (`parseMacroInput`), and a tenth below
+ * anything a reading prints.
+ *
+ * A day folded twice MERGES rather than opening a second row for the same date:
+ * a forgotten dinner back-filled onto an old day adds to its total. That, and
+ * the no-op when nothing is past the horizon, are what make this safe to run on
+ * every save and to re-run inside the 409 dance.
+ *
+ * `today` comes from the device, like every other date here — a clock running
+ * ahead folds early, and nothing un-folds.
+ */
+export function foldOldDays(cfg: MealsConfig, today: string): MealsConfig {
+  const cutoff = backDays(today, FOLD_AFTER_DAYS);
+  if (!cfg.entries.some((e) => e.date < cutoff)) return cfg;
+
+  // Sum first, round once: rounding each addition would drift the total off the
+  // figure the day actually showed.
+  const kept: MealsEntry[] = [];
+  const sums = new Map<string, { totals: MealsTargets; entries: number }>();
+  for (const e of cfg.entries) {
+    if (e.date >= cutoff) {
+      kept.push(e);
+      continue;
+    }
+    const acc = sums.get(e.date) ?? {
+      totals: { kcal: 0, p: 0, c: 0, f: 0 },
+      entries: 0,
+    };
+    const macros = entryMacros(cfg, e);
+    acc.totals.kcal += macros.kcal;
+    acc.totals.p += macros.p;
+    acc.totals.c += macros.c;
+    acc.totals.f += macros.f;
+    acc.entries += 1;
+    sums.set(e.date, acc);
+  }
+
+  const rows = new Map(cfg.dayTotals.map((d) => [d.date, d]));
+  for (const [date, acc] of sums) {
+    const prior = rows.get(date);
+    rows.set(date, {
+      date,
+      kcal: oneDecimal((prior?.kcal ?? 0) + acc.totals.kcal),
+      p: oneDecimal((prior?.p ?? 0) + acc.totals.p),
+      c: oneDecimal((prior?.c ?? 0) + acc.totals.c),
+      f: oneDecimal((prior?.f ?? 0) + acc.totals.f),
+      entries: Math.min(MAX_USES, (prior?.entries ?? 0) + acc.entries),
+    });
+  }
+
+  return rebuild(cfg, {
+    entries: kept,
+    // Oldest → newest like the weigh-ins, so the cap takes from the front: past
+    // it the oldest day goes, which is the one thing left to lose.
+    dayTotals: [...rows.values()]
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      .slice(-MAX_DAY_TOTALS),
+  });
 }
 
 /**
@@ -438,9 +604,42 @@ export function foodName(cfg: MealsConfig, id: string): string {
   return cfg.foods.find((f) => f.id === id)?.name ?? "?";
 }
 
-/** Everything eaten on one day, in the log's own (newest-first) order. */
+/** Everything eaten on one day, in the log's own (newest-first) order — EMPTY
+ *  for a folded day, whose list is gone by design. Ask `foldedDay` before
+ *  reading an empty answer as "nothing was eaten". */
 export function entriesFor(cfg: MealsConfig, date: string): MealsEntry[] {
   return cfg.entries.filter((e) => e.date === date);
+}
+
+/** The folded record for a day, or null while the day is still itemized (or was
+ *  never written at all) — the question every surface asks before it reaches for
+ *  the entries. */
+export function foldedDay(
+  cfg: MealsConfig,
+  date: string,
+): MealsDayTotal | null {
+  return cfg.dayTotals.find((d) => d.date === date) ?? null;
+}
+
+/** Whether anything was written against a day — entries, or a folded total. What
+ *  separates a day that went unlogged from one whose list has aged out: the
+ *  windows here average the days that were written, and a folded day was. */
+export function dayIsLogged(cfg: MealsConfig, date: string): boolean {
+  return entriesFor(cfg, date).length > 0 || foldedDay(cfg, date) !== null;
+}
+
+/** One entry's macros — the food's per-unit figures times the quantity, and the
+ *  only place that multiplication lives. An entry whose food has left the
+ *  library contributes NOTHING rather than guessing (see `dayTotals`). */
+function entryMacros(cfg: MealsConfig, entry: MealsEntry): MealsTargets {
+  const food = cfg.foods.find((f) => f.id === entry.foodId);
+  if (!food) return { kcal: 0, p: 0, c: 0, f: 0 };
+  return {
+    kcal: food.kcal * entry.qty,
+    p: food.p * entry.qty,
+    c: food.c * entry.qty,
+    f: food.f * entry.qty,
+  };
 }
 
 /**
@@ -448,16 +647,22 @@ export function entriesFor(cfg: MealsConfig, date: string): MealsEntry[] {
  * food has left the library contributes NOTHING rather than guessing — but
  * `removeFood` refuses while entries reference it, so this only happens to a
  * payload that was edited elsewhere.
+ *
+ * A FOLDED day answers from its own record instead: the entries that made it are
+ * gone, and these are the figures they came to. Every reading here goes through
+ * this function, which is what makes the fold invisible to all of them.
  */
 export function dayTotals(cfg: MealsConfig, date: string): MealsTargets {
+  const folded = foldedDay(cfg, date);
+  if (folded)
+    return { kcal: folded.kcal, p: folded.p, c: folded.c, f: folded.f };
   const totals: MealsTargets = { kcal: 0, p: 0, c: 0, f: 0 };
   for (const e of entriesFor(cfg, date)) {
-    const food = cfg.foods.find((f) => f.id === e.foodId);
-    if (!food) continue;
-    totals.kcal += food.kcal * e.qty;
-    totals.p += food.p * e.qty;
-    totals.c += food.c * e.qty;
-    totals.f += food.f * e.qty;
+    const macros = entryMacros(cfg, e);
+    totals.kcal += macros.kcal;
+    totals.p += macros.p;
+    totals.c += macros.c;
+    totals.f += macros.f;
   }
   return totals;
 }
@@ -552,10 +757,11 @@ export function trailingProtein(
  *
  * Only days with SOMETHING logged are averaged, and `logged` says how many that
  * was: a day with no entries is a day that went unwritten, not a day of fasting,
- * and folding it in as a zero would drag the average down toward meals that were
- * eaten and never typed. Null when the whole window is unwritten — there is no
- * average of no days to state, and a first week should say nothing rather than
- * something wrong.
+ * and counting it as a zero would drag the average down toward meals that were
+ * eaten and never typed. A folded day counts as written (`dayIsLogged`) — its
+ * list is gone, its totals are not. Null when the whole window is unwritten —
+ * there is no average of no days to state, and a first week should say nothing
+ * rather than something wrong.
  *
  * Plain means, unrounded: how many figures a reading shows is the surface's
  * call, not this one's.
@@ -569,7 +775,7 @@ export function trailingAverage(
   let logged = 0;
   let cursor = day;
   for (let i = 0; i < days; i++) {
-    if (entriesFor(cfg, cursor).length > 0) {
+    if (dayIsLogged(cfg, cursor)) {
       const totals = dayTotals(cfg, cursor);
       sum.kcal += totals.kcal;
       sum.p += totals.p;
@@ -747,7 +953,9 @@ const KCAL_PER_KG = 7700;
 /** Days of the trailing week that must actually be written before an intake
  *  average is allowed to become a claim about the whole week. Under this, the
  *  mean is of the days that were remembered, which skews toward the days worth
- *  remembering. */
+ *  remembering. A folded day is a written one — the gate counts what was logged,
+ *  not what is still itemized (and the window is a week, so it never reaches the
+ *  fold horizon anyway). */
 const ENERGY_MIN_LOGGED_DAYS = 4;
 
 /**

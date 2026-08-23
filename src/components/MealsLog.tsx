@@ -22,6 +22,8 @@ import {
   EMPTY_MEALS_CONFIG,
   entriesFor,
   fitsMealsCap,
+  foldedDay,
+  foldOldDays,
   foodName,
   foodUsage,
   matchFoods,
@@ -246,22 +248,28 @@ export function MealsLog({ offline }: { offline: boolean }) {
     setNotice(null);
     try {
       let base = cfg;
+      // Every save is also when the log sheds what it no longer needs itemized:
+      // days past the horizon fold to their totals. It rides here rather than in
+      // any one transform because it belongs to the WRITE, and because the 409
+      // dance re-applies this whole function against a fresh base.
+      const today = sydneyToday();
+      const applyAll = (from: MealsConfig) => foldOldDays(apply(from), today);
       // The cap is client-side law — refuse with a reason rather than let the
       // route answer an opaque 404 on an oversized frame.
-      if (!fitsMealsCap(apply(base))) {
+      if (!fitsMealsCap(applyAll(base))) {
         setNotice("log is full — the envelope cap is reached");
         return false;
       }
-      let result = await putConfig(apply(base), configExisted);
+      let result = await putConfig(applyAll(base), configExisted);
       if (result === "conflict") {
         base = await fetchConfigFresh();
-        result = await putConfig(apply(base), true);
+        result = await putConfig(applyAll(base), true);
       }
       if (result !== "ok") {
         setNotice("could not save — try again");
         return false;
       }
-      setCfg(apply(base));
+      setCfg(applyAll(base));
       setConfigExisted(true);
       return true;
     } catch {
@@ -364,6 +372,10 @@ function TodayView({
   const totals = dayTotals(cfg, day);
   const targets = cfg.targets ?? null;
   const entries = entriesFor(cfg, day);
+  // Far enough back and the day is four figures and a count: the bars above
+  // still read, the list below is gone, and there is nothing left to edit
+  // against — so the composer stands down rather than logging into a total.
+  const folded = foldedDay(cfg, day);
   // The trend behind the day — trailing from the VIEWED day, so stepping back
   // reads that day's week rather than this one's.
   const week = trailingAverage(cfg, day, 7);
@@ -464,7 +476,12 @@ function TodayView({
         )}
       </div>
 
-      {cfg.foods.length === 0 ? (
+      {folded ? (
+        <p className="px-4 py-3 text-xs text-muted">
+          folded · {folded.entries} {folded.entries === 1 ? "item" : "items"} —
+          this day is kept as its totals
+        </p>
+      ) : cfg.foods.length === 0 ? (
         <div className="flex items-center gap-2 border-b border-hairline px-4 py-3 text-xs">
           <p className="text-muted">add foods in the foods tab →</p>
         </div>
@@ -503,44 +520,45 @@ function TodayView({
         </FoodPicker>
       )}
 
-      {entries.length === 0 ? (
-        <p className="px-4 py-3 text-xs text-muted">
-          {onToday
-            ? "nothing logged today"
-            : `nothing logged on ${dayHeading(day)}`}
-        </p>
-      ) : (
-        entries.map((e) => {
-          const food = cfg.foods.find((f) => f.id === e.foodId);
-          return (
-            <div
-              key={e.id}
-              className="flex items-baseline gap-3 border-b border-hairline px-4 py-2 text-[13px]"
-            >
-              <span className="min-w-0 flex-1 text-fg/90">
-                {foodName(cfg, e.foodId)}{" "}
-                <span className="text-muted">×{e.qty}</span>
-              </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted">
-                {food
-                  ? `${commas(Math.round(food.kcal * e.qty))} · p${Math.round(
-                      food.p * e.qty,
-                    )}`
-                  : "—"}
-              </span>
-              <button
-                type="button"
-                aria-label="remove entry"
-                disabled={busy}
-                className="shrink-0 text-muted/50 transition-colors hover:text-down disabled:opacity-30"
-                onClick={() => void saveConfig((b) => removeEntry(b, e.id))}
+      {!folded &&
+        (entries.length === 0 ? (
+          <p className="px-4 py-3 text-xs text-muted">
+            {onToday
+              ? "nothing logged today"
+              : `nothing logged on ${dayHeading(day)}`}
+          </p>
+        ) : (
+          entries.map((e) => {
+            const food = cfg.foods.find((f) => f.id === e.foodId);
+            return (
+              <div
+                key={e.id}
+                className="flex items-baseline gap-3 border-b border-hairline px-4 py-2 text-[13px]"
               >
-                ×
-              </button>
-            </div>
-          );
-        })
-      )}
+                <span className="min-w-0 flex-1 text-fg/90">
+                  {foodName(cfg, e.foodId)}{" "}
+                  <span className="text-muted">×{e.qty}</span>
+                </span>
+                <span className="shrink-0 text-xs tabular-nums text-muted">
+                  {food
+                    ? `${commas(Math.round(food.kcal * e.qty))} · p${Math.round(
+                        food.p * e.qty,
+                      )}`
+                    : "—"}
+                </span>
+                <button
+                  type="button"
+                  aria-label="remove entry"
+                  disabled={busy}
+                  className="shrink-0 text-muted/50 transition-colors hover:text-down disabled:opacity-30"
+                  onClick={() => void saveConfig((b) => removeEntry(b, e.id))}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })
+        ))}
     </div>
   );
 }
@@ -883,7 +901,8 @@ function FoodsView({
   const today = sydneyToday();
 
   /** A food that has been eaten can't leave — removing it would rewrite the
-   *  totals of every day that contained it (see `removeFood`). */
+   *  totals of every day that contained it (see `removeFood`). Once those days
+   *  have folded it can go again: they are figures now, not references. */
   const inUse = (id: string) => cfg.entries.some((e) => e.foodId === id);
 
   return (
@@ -992,7 +1011,11 @@ function FoodsView({
           is a real number and worth showing rather than discovering. */}
       <p className="px-4 py-2.5 text-[11px] tabular-nums text-muted/60">
         envelope · {commas(used)} / {commas(MEALS_MAX_BYTES)} bytes ·{" "}
-        {cfg.entries.length} entries · {cfg.foods.length} foods
+        {cfg.entries.length} entries
+        {/* Said only once there are some — a log inside its first two months has
+            nothing to report here. */}
+        {cfg.dayTotals.length > 0 && ` · ${cfg.dayTotals.length} folded days`} ·{" "}
+        {cfg.foods.length} foods
       </p>
     </div>
   );

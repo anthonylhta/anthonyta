@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_MEALS_CONFIG,
+  FOLD_AFTER_DAYS,
+  MAX_DAY_TOTALS,
   MAX_ENTRIES,
   MAX_WEIGHTS,
   MEALS_MAX_BYTES,
@@ -10,6 +12,7 @@ import {
   bucketFoods,
   clearWeight,
   dayHeading,
+  dayIsLogged,
   dayTotals,
   daysSinceYmd,
   driftLabel,
@@ -18,6 +21,8 @@ import {
   nextDay,
   prevDay,
   fitsMealsCap,
+  foldOldDays,
+  foldedDay,
   foodName,
   foodUsage,
   matchFoods,
@@ -39,6 +44,7 @@ import {
   weightFor,
   weightTrend,
   type MealsConfig,
+  type MealsDayTotal,
   type MealsEntry,
   type MealsFood,
   type MealsWeight,
@@ -68,13 +74,34 @@ const weight = (over: Partial<MealsWeight> = {}): MealsWeight => ({
   ...over,
 });
 
+const dayTotal = (over: Partial<MealsDayTotal> = {}): MealsDayTotal => ({
+  date: "2026-06-01",
+  kcal: 2750,
+  p: 140,
+  c: 300,
+  f: 90,
+  entries: 5,
+  ...over,
+});
+
+/** One decimal — what the fold stores at, mirrored here so the identity tests
+ *  can say so out loud. */
+const dp = (n: number): number => Math.round(n * 10) / 10;
+
+/** `n` whole days before a day-string, for building a log that reaches back. */
+const daysBefore = (ymd: string, n: number): string =>
+  new Date(new Date(`${ymd}T00:00:00Z`).getTime() - n * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
 /** A day `n` steps along from a fixed start — distinct dates, in order. */
 const dayAt = (n: number): string =>
   new Date(Date.UTC(2025, 0, 1) + n * 86_400_000).toISOString().slice(0, 10);
 
 /** A config with a small library and one entry, the shape most tests start from. */
 const base = (over: Partial<MealsConfig> = {}): MealsConfig => ({
-  v: 1,
+  v: 2,
+  dayTotals: [],
   foods: [
     food(),
     food({
@@ -100,6 +127,79 @@ describe("normalizeMealsConfig", () => {
     expect(normalizeMealsConfig({ v: 1, foods: [], entries: [] })).toEqual(
       EMPTY_MEALS_CONFIG,
     );
+  });
+
+  it("reads a v1 envelope as v2 with nothing folded", () => {
+    // The vintage from before the fold: everything it holds is still itemized,
+    // so it arrives with an empty tail and gains one on its first old day.
+    const v1 = { v: 1, foods: [food()], entries: [entry()], seq: 3 };
+    expect(normalizeMealsConfig(v1)).toEqual({
+      v: 2,
+      foods: [food()],
+      entries: [entry()],
+      dayTotals: [],
+      seq: 3,
+    });
+  });
+
+  it("carries the folded days through the rebuild", () => {
+    const folded = base({ dayTotals: [dayTotal()] });
+    expect(normalizeMealsConfig(JSON.parse(JSON.stringify(folded)))).toEqual(
+      folded,
+    );
+    // Unlike the weigh-ins, the list is not optional on a v2 config.
+    const missing: Record<string, unknown> = { ...base() };
+    delete missing.dayTotals;
+    expect(normalizeMealsConfig(missing)).toBeNull();
+  });
+
+  it("accepts a folded day far above the per-unit macro cap", () => {
+    // A day's total is a sum, not a serving: a figure the fold can produce must
+    // never be one the reader rejects, or the log would seal itself shut.
+    expect(
+      normalizeMealsConfig(base({ dayTotals: [dayTotal({ kcal: 40_000 })] })),
+    ).not.toBeNull();
+  });
+
+  it("rejects a folded day that isn't one", () => {
+    expect(
+      normalizeMealsConfig(
+        base({ dayTotals: [dayTotal({ date: "1/6/2026" })] }),
+      ),
+    ).toBeNull();
+    expect(
+      normalizeMealsConfig(base({ dayTotals: [dayTotal({ p: -1 })] })),
+    ).toBeNull();
+    expect(
+      normalizeMealsConfig(base({ dayTotals: [dayTotal({ entries: 1.5 })] })),
+    ).toBeNull();
+    expect(normalizeMealsConfig(base({ dayTotals: {} as never }))).toBeNull();
+  });
+
+  it("rejects two totals for one day", () => {
+    expect(
+      normalizeMealsConfig(base({ dayTotals: [dayTotal(), dayTotal()] })),
+    ).toBeNull();
+  });
+
+  it("rejects folded days under a v1 label rather than dropping them", () => {
+    // Nothing here ever wrote that shape, and reading it as the old vintage
+    // would lose the days it is carrying.
+    expect(
+      normalizeMealsConfig({
+        v: 1,
+        foods: [],
+        entries: [],
+        dayTotals: [dayTotal()],
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a config over the folded-day cap", () => {
+    const dayTotals = Array.from({ length: MAX_DAY_TOTALS + 1 }, (_, i) =>
+      dayTotal({ date: dayAt(i) }),
+    );
+    expect(normalizeMealsConfig(base({ dayTotals }))).toBeNull();
   });
 
   it("carries seq through the rebuild and rejects an invalid one (58b)", () => {
@@ -140,8 +240,8 @@ describe("normalizeMealsConfig", () => {
   it("rejects anything unrecognizable rather than degrading to empty", () => {
     expect(normalizeMealsConfig(null)).toBeNull();
     expect(normalizeMealsConfig("nope")).toBeNull();
-    expect(normalizeMealsConfig({ ...EMPTY_MEALS_CONFIG, v: 2 })).toBeNull();
-    expect(normalizeMealsConfig({ v: 1, foods: [] })).toBeNull();
+    expect(normalizeMealsConfig({ ...EMPTY_MEALS_CONFIG, v: 3 })).toBeNull();
+    expect(normalizeMealsConfig({ v: 2, foods: [] })).toBeNull();
     expect(
       normalizeMealsConfig({ ...EMPTY_MEALS_CONFIG, entries: [{}] }),
     ).toBeNull();
@@ -523,6 +623,250 @@ describe("trailingAverage", () => {
   });
 });
 
+// --- the fold ------------------------------------------------------------------
+
+/** The day the fold is run on, and the two days either side of the horizon. */
+const NOW = "2026-08-16";
+const EDGE = daysBefore(NOW, FOLD_AFTER_DAYS);
+const OLD = daysBefore(NOW, FOLD_AFTER_DAYS + 1);
+
+describe("foldOldDays", () => {
+  it("draws the horizon at FOLD_AFTER_DAYS, keeping the day that sits on it", () => {
+    expect(daysSinceYmd(EDGE, NOW)).toBe(FOLD_AFTER_DAYS);
+    const cfg = base({
+      entries: [
+        entry({ id: "edge", date: EDGE }),
+        entry({ id: "old", date: OLD }),
+      ],
+    });
+    const next = foldOldDays(cfg, NOW);
+    expect(next.entries.map((e) => e.id)).toEqual(["edge"]);
+    expect(next.dayTotals.map((d) => d.date)).toEqual([OLD]);
+  });
+
+  it("leaves a log with nothing past the horizon exactly as it was", () => {
+    const cfg = base({ entries: [entry({ id: "edge", date: EDGE })] });
+    expect(foldOldDays(cfg, NOW)).toBe(cfg);
+    expect(foldOldDays(EMPTY_MEALS_CONFIG, NOW)).toBe(EMPTY_MEALS_CONFIG);
+  });
+
+  it("keeps the day's own figures, and how many things made them", () => {
+    const cfg = base({
+      entries: [
+        entry({ id: "a", date: OLD, foodId: "rice", qty: 2 }),
+        entry({ id: "b", date: OLD, foodId: "chicken", qty: 1.5 }),
+      ],
+    });
+    expect(foldOldDays(cfg, NOW).dayTotals).toEqual([
+      {
+        date: OLD,
+        kcal: 200 * 2 + 220 * 1.5,
+        p: 4 * 2 + 26 * 1.5,
+        c: 44 * 2,
+        f: 1 * 2 + 13 * 1.5,
+        entries: 2,
+      },
+    ]);
+  });
+
+  it("folds to the figures the day itself showed", () => {
+    // Macros that don't land on a round number in binary: 76.3 × 3 is
+    // 228.89999999999998 before it is anything else.
+    const cfg = base({
+      foods: [
+        food({ id: "tuna", name: "tuna", kcal: 76.3, p: 17.2, c: 0.3, f: 1.4 }),
+      ],
+      entries: [
+        entry({ id: "a", date: OLD, foodId: "tuna", qty: 3 }),
+        entry({ id: "b", date: OLD, foodId: "tuna", qty: 0.7 }),
+      ],
+    });
+    const before = dayTotals(cfg, OLD);
+    const after = dayTotals(foldOldDays(cfg, NOW), OLD);
+    // Kept to one decimal — the module's standing rule against float dust, and
+    // below anything a reading prints: every figure on the page is unmoved.
+    expect(after).toEqual({
+      kcal: dp(before.kcal),
+      p: dp(before.p),
+      c: dp(before.c),
+      f: dp(before.f),
+    });
+    for (const k of ["kcal", "p", "c", "f"] as const)
+      expect(Math.round(after[k])).toBe(Math.round(before[k]));
+  });
+
+  it("counts an entry whose food left the library without inventing its macros", () => {
+    const cfg = base({
+      foods: [],
+      entries: [entry({ id: "a", date: OLD, foodId: "rice", qty: 3 })],
+    });
+    expect(foldOldDays(cfg, NOW).dayTotals).toEqual([
+      { date: OLD, kcal: 0, p: 0, c: 0, f: 0, entries: 1 },
+    ]);
+  });
+
+  it("merges a back-filled entry into the day it already folded", () => {
+    const once = foldOldDays(
+      base({ entries: [entry({ id: "a", date: OLD, foodId: "rice" })] }),
+      NOW,
+    );
+    const again = foldOldDays(
+      addEntry(once, entry({ id: "b", date: OLD, foodId: "chicken" })),
+      NOW,
+    );
+    // One row for the day, not two — and the second helping is in it.
+    expect(again.dayTotals).toEqual([
+      { date: OLD, kcal: 420, p: 30, c: 44, f: 14, entries: 2 },
+    ]);
+    expect(again.entries).toEqual([]);
+  });
+
+  it("is a no-op run twice — the 409 dance re-applies it", () => {
+    const next = foldOldDays(
+      base({ entries: [entry({ id: "a", date: OLD })] }),
+      NOW,
+    );
+    expect(foldOldDays(next, NOW)).toBe(next);
+  });
+
+  it("keeps the folded days oldest → newest whatever order they arrived in", () => {
+    const cfg = base({
+      entries: [
+        entry({ id: "a", date: OLD }),
+        entry({ id: "b", date: daysBefore(NOW, 400) }),
+        entry({ id: "c", date: daysBefore(NOW, 90) }),
+      ],
+    });
+    expect(foldOldDays(cfg, NOW).dayTotals.map((d) => d.date)).toEqual([
+      daysBefore(NOW, 400),
+      daysBefore(NOW, 90),
+      OLD,
+    ]);
+  });
+
+  it("evicts the oldest folded day past the cap", () => {
+    const full = Array.from({ length: MAX_DAY_TOTALS }, (_, i) =>
+      dayTotal({ date: daysBefore(OLD, MAX_DAY_TOTALS - i) }),
+    );
+    const cfg = base({
+      dayTotals: full,
+      entries: [entry({ id: "a", date: OLD })],
+    });
+    const next = foldOldDays(cfg, NOW);
+    expect(next.dayTotals).toHaveLength(MAX_DAY_TOTALS);
+    // The new day is on the end; the one that fell off is the oldest.
+    expect(next.dayTotals.at(-1)?.date).toBe(OLD);
+    expect(next.dayTotals[0].date).toBe(daysBefore(OLD, MAX_DAY_TOTALS - 1));
+  });
+
+  it("leaves a food that only folded days ate deletable, and rewrites nothing", () => {
+    const cfg = base({
+      entries: [entry({ id: "a", date: OLD, foodId: "chicken" })],
+    });
+    // While the day is itemized, removing the food would rewrite its total.
+    expect(removeFood(cfg, "chicken")).toBe(cfg);
+    const folded = foldOldDays(cfg, NOW);
+    const pruned = removeFood(folded, "chicken");
+    expect(pruned.foods.map((f) => f.id)).toEqual(["rice"]);
+    expect(dayTotals(pruned, OLD)).toEqual(dayTotals(folded, OLD));
+  });
+});
+
+describe("a folded day reads like any other", () => {
+  const cfg = foldOldDays(
+    base({
+      entries: [
+        entry({ id: "old", date: OLD, foodId: "chicken", qty: 2 }),
+        entry({ id: "now", date: NOW, foodId: "rice" }),
+      ],
+    }),
+    NOW,
+  );
+
+  it("answers dayTotals from the folded record", () => {
+    expect(dayTotals(cfg, OLD)).toEqual({ kcal: 440, p: 52, c: 0, f: 26 });
+    expect(dayTotals(cfg, NOW)).toEqual({ kcal: 200, p: 4, c: 44, f: 1 });
+  });
+
+  it("has no entries left, and says so through foldedDay rather than by silence", () => {
+    expect(entriesFor(cfg, OLD)).toEqual([]);
+    expect(foldedDay(cfg, OLD)).toEqual({
+      date: OLD,
+      kcal: 440,
+      p: 52,
+      c: 0,
+      f: 26,
+      entries: 1,
+    });
+    // An itemized day and an unwritten one are both un-folded.
+    expect(foldedDay(cfg, NOW)).toBeNull();
+    expect(foldedDay(cfg, daysBefore(NOW, 300))).toBeNull();
+  });
+
+  it("counts as a written day, unlike one that went unlogged", () => {
+    expect(dayIsLogged(cfg, OLD)).toBe(true);
+    expect(dayIsLogged(cfg, NOW)).toBe(true);
+    expect(dayIsLogged(cfg, daysBefore(NOW, 300))).toBe(false);
+  });
+
+  it("draws into the trailing strip", () => {
+    expect(trailingProtein(cfg, OLD, 2)).toEqual([0, 52]);
+  });
+});
+
+describe("the ≥4/7 gate counts a folded day as a written one", () => {
+  // A week eaten and a fortnight weighed, all of it far enough back to have
+  // folded: the lists are gone, and a week that was written is still a week
+  // that was written.
+  const DAY = daysBefore(NOW, 76);
+  const eaten = base({
+    foods: [
+      food({
+        id: "day",
+        name: "a day's food",
+        kcal: 2750,
+        p: 140,
+        c: 300,
+        f: 90,
+      }),
+    ],
+    entries: [0, 1, 2, 3].map((i) =>
+      entry({ id: `d${i}`, date: daysBefore(DAY, i), foodId: "day" }),
+    ),
+  });
+  const weighed = [
+    [DAY, 67.5],
+    [daysBefore(DAY, 1), 67.3],
+    [daysBefore(DAY, 7), 67.1],
+    [daysBefore(DAY, 8), 67.1],
+  ].reduce<MealsConfig>(
+    (cfg, [date, kg]) => setWeight(cfg, date as string, kg as number),
+    eaten,
+  );
+  const folded = foldOldDays(weighed, NOW);
+
+  it("folds the whole week away and still reads it as four logged days", () => {
+    expect(folded.entries).toEqual([]);
+    expect(folded.dayTotals).toHaveLength(4);
+    expect(trailingAverage(folded, DAY, 7)).toEqual({
+      logged: 4,
+      avg: { kcal: 2750, p: 140, c: 300, f: 90 },
+    });
+  });
+
+  it("prices the week exactly as it did before the fold", () => {
+    // +0.3 kg on the week is 330 kcal a day put on, off a 2,750 intake.
+    expect(energyBalance(weighed, DAY)).toEqual({ surplus: 330, tdee: 2420 });
+    expect(energyBalance(folded, DAY)).toEqual(energyBalance(weighed, DAY));
+  });
+
+  it("still says nothing about a week that was barely written down", () => {
+    const thin = foldOldDays(removeEntry(weighed, "d0"), NOW);
+    expect(thin.dayTotals).toHaveLength(3);
+    expect(energyBalance(thin, DAY)).toBeNull();
+  });
+});
+
 describe("prevDay / nextDay / dayHeading", () => {
   it("walks backwards across month and year boundaries", () => {
     expect(prevDay("2026-08-01")).toBe("2026-07-31");
@@ -763,7 +1107,8 @@ describe("removeEntry counters", () => {
  *  them tied on count, so the name breaks it — case-insensitively), an older one,
  *  one older still, and one never logged. */
 const library = (): MealsConfig => ({
-  v: 1,
+  v: 2,
+  dayTotals: [],
   foods: [
     food({ id: "rice", name: "rice (bowl)", uses: 22, lastUsed: "2026-08-09" }),
     food({
@@ -850,7 +1195,12 @@ describe("bucketFoods", () => {
   it("splits at the 7- and 31-day edges", () => {
     const at = (lastUsed: string) =>
       bucketFoods(
-        { v: 1, foods: [food({ uses: 1, lastUsed })], entries: [] },
+        {
+          v: 2,
+          foods: [food({ uses: 1, lastUsed })],
+          entries: [],
+          dayTotals: [],
+        },
         TODAY,
       ).find((b) => b.foods.length > 0)!.key;
     expect(at("2026-08-10")).toBe("week"); // 6 days
@@ -1187,6 +1537,8 @@ describe("the weigh-ins survive every other transform", () => {
     ["setTargets", (c) => setTargets(c, { kcal: 2600, p: 150, c: 300, f: 80 })],
     ["setWeight", (c) => setWeight(c, "2026-08-15", 67.4)],
     ["clearWeight", (c) => clearWeight(c, "2026-08-16")],
+    // Far enough past the log's one entry that the fold actually bites.
+    ["foldOldDays", (c) => foldOldDays(c, "2026-12-01")],
   ];
 
   for (const [name, apply] of transforms) {
