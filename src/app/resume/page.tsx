@@ -35,13 +35,18 @@ export default function ResumePage() {
           <h1 className="text-[22px] font-semibold tracking-[0.02em]">
             {IDENTITY.name}
           </h1>
-          <p className="mt-1.5 text-xs leading-relaxed text-muted">
-            {IDENTITY.location}
-            <span className="px-1 text-muted/45">·</span>
-            {IDENTITY.email}
+          {/* Each token is its own nowrap chunk so the line wraps BETWEEN
+              items — adjacent JSX drops the whitespace between spans, which
+              left this a single unbreakable run pushing off a phone screen. */}
+          <p className="mt-1.5 flex flex-wrap items-baseline gap-y-0.5 text-xs leading-relaxed text-muted">
+            <span className="whitespace-nowrap">{IDENTITY.location}</span>
+            <span className="whitespace-nowrap">
+              <span className="px-1.5 text-muted/45">·</span>
+              {IDENTITY.email}
+            </span>
             {IDENTITY.links.map((l) => (
-              <span key={l.href}>
-                <span className="px-1 text-muted/45">·</span>
+              <span key={l.href} className="whitespace-nowrap">
+                <span className="px-1.5 text-muted/45">·</span>
                 <a
                   href={l.href}
                   target="_blank"
