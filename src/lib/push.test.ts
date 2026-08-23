@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { type OverdueChore } from "./chores";
 import {
   addSub,
   categoryOn,
+  checkChoresDigest,
   checkStaleness,
+  choresDigestBody,
+  CHORES_DIGEST_DAYS,
   daysBetween,
   EMPTY_PUSH_CONFIG,
   isPushSub,
@@ -88,8 +92,14 @@ describe("parsePushConfig", () => {
   it("round-trips a real config", () => {
     const source = cfg({
       subs: [sub()],
-      categories: { dropbox: true, signin: false, ingest: true, share: true },
-      episodes: { steps: "2026-08-10" },
+      categories: {
+        dropbox: true,
+        signin: false,
+        ingest: true,
+        share: true,
+        chores: true,
+      },
+      episodes: { steps: "2026-08-10", chores: "2026-08-18" },
     });
     expect(parsePushConfig(serializePushConfig(source))).toEqual(source);
   });
@@ -114,15 +124,16 @@ describe("parsePushConfig", () => {
   });
 
   it("defaults a category the blob predates to ON", () => {
-    // Exactly the shape a config written before `share` existed has.
+    // Exactly the shape a config written before `chores` existed has.
     const parsed = normalizePushConfig({
-      categories: { dropbox: false, signin: true, ingest: true },
+      categories: { dropbox: false, signin: true, ingest: true, share: true },
     });
     expect(parsed.categories).toEqual({
       dropbox: false,
       signin: true,
       ingest: true,
       share: true,
+      chores: true,
     });
   });
 
@@ -137,11 +148,15 @@ describe("parsePushConfig", () => {
     const parsed = normalizePushConfig({
       episodes: {
         steps: "2026-08-10",
+        chores: "2026-08-18",
         sleep: "yesterday",
         other: "2026-01-01",
       },
     });
-    expect(parsed.episodes).toEqual({ steps: "2026-08-10" });
+    expect(parsed.episodes).toEqual({
+      steps: "2026-08-10",
+      chores: "2026-08-18",
+    });
   });
 
   it("caps the device list", () => {
@@ -236,6 +251,7 @@ describe("category gating", () => {
 
   it("covers every declared category", () => {
     expect([...PUSH_CATEGORIES].sort()).toEqual([
+      "chores",
       "dropbox",
       "ingest",
       "share",
@@ -248,6 +264,13 @@ describe("category gating", () => {
     expect(categoryOn(one, "share")).toBe(true);
     expect(categoryOn(setCategory(one, "share", false), "share")).toBe(false);
     expect(categoryOn(EMPTY_PUSH_CONFIG, "share")).toBe(false);
+  });
+
+  it("gates the upkeep digest like the rest", () => {
+    const one = cfg({ subs: [sub()] });
+    expect(categoryOn(one, "chores")).toBe(true);
+    expect(categoryOn(setCategory(one, "chores", false), "chores")).toBe(false);
+    expect(categoryOn(EMPTY_PUSH_CONFIG, "chores")).toBe(false);
   });
 });
 
@@ -266,6 +289,21 @@ describe("setEpisode", () => {
     );
     expect(setEpisode(both, "steps", undefined).episodes).toEqual({
       sleep: "2026-08-11",
+    });
+  });
+
+  it("carries the digest marker beside the ingest sources", () => {
+    const marked = setEpisode(
+      setEpisode(EMPTY_PUSH_CONFIG, "steps", "2026-08-10"),
+      "chores",
+      "2026-08-18",
+    );
+    expect(marked.episodes).toEqual({
+      steps: "2026-08-10",
+      chores: "2026-08-18",
+    });
+    expect(setEpisode(marked, "chores", undefined).episodes).toEqual({
+      steps: "2026-08-10",
     });
   });
 });
@@ -491,5 +529,85 @@ describe("vapidStatus", () => {
       state: "ok",
       publicKey: pub,
     });
+  });
+});
+
+describe("choresDigestBody", () => {
+  it("names each chore, its age and the thing to run", () => {
+    expect(
+      choresDigestBody([
+        { label: "backup", days: 62, command: "npm run hub-backup" },
+      ]),
+    ).toBe("upkeep overdue — backup 62d (npm run hub-backup)");
+  });
+
+  it("joins the whole set into one line", () => {
+    expect(
+      choresDigestBody([
+        { label: "vault-sync", days: 9, command: "npm run vault-sync" },
+        { label: "backup", days: 62, command: "npm run hub-backup" },
+        { label: "aperture seal", days: 15, command: null },
+      ]),
+    ).toBe(
+      "upkeep overdue — vault-sync 9d (npm run vault-sync) · backup 62d (npm run hub-backup) · aperture seal 15d",
+    );
+  });
+});
+
+describe("checkChoresDigest", () => {
+  const red = (days = 62): OverdueChore[] => [
+    { label: "backup", days, command: "npm run hub-backup" },
+  ];
+
+  it("says nothing when nothing is overdue, and re-arms", () => {
+    const out = checkChoresDigest([], "2026-08-23", "2026-08-20");
+    expect(out).toEqual({
+      send: false,
+      body: "",
+      episode: undefined,
+      reason: "quiet",
+    });
+  });
+
+  it("sends the first time something is overdue", () => {
+    const out = checkChoresDigest(red(), "2026-08-23", undefined);
+    expect(out.send).toBe(true);
+    expect(out.episode).toBe("2026-08-23");
+    expect(out.reason).toBe("overdue");
+    expect(out.body).toContain("backup 62d");
+  });
+
+  it("stays quiet for the rest of the week, keeping the marker", () => {
+    const out = checkChoresDigest(red(), "2026-08-23", "2026-08-18");
+    expect(out).toEqual({
+      send: false,
+      body: "",
+      episode: "2026-08-18",
+      reason: "notified",
+    });
+  });
+
+  it("says it again once the window has passed", () => {
+    // Exactly CHORES_DIGEST_DAYS on: the window is closed, not still open.
+    const out = checkChoresDigest(red(), "2026-08-23", "2026-08-16");
+    expect(daysBetween("2026-08-16", "2026-08-23")).toBe(CHORES_DIGEST_DAYS);
+    expect(out.send).toBe(true);
+    expect(out.episode).toBe("2026-08-23");
+  });
+
+  it("re-arms through a quiet night, so the next episode lands at once", () => {
+    const cleared = checkChoresDigest([], "2026-08-23", "2026-08-22");
+    expect(cleared.episode).toBeUndefined();
+    expect(checkChoresDigest(red(), "2026-08-24", cleared.episode).send).toBe(
+      true,
+    );
+  });
+
+  it("does not restart the window when another chore joins the set", () => {
+    const two: OverdueChore[] = [
+      ...red(),
+      { label: "vault-sync", days: 9, command: "npm run vault-sync" },
+    ];
+    expect(checkChoresDigest(two, "2026-08-23", "2026-08-22").send).toBe(false);
   });
 });
