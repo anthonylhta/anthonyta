@@ -15,20 +15,34 @@
  * never the message). Nothing sealed is ever put in a notification.
  */
 
+import { type OverdueChore } from "./chores";
+
 /** The things the hub is allowed to interrupt the owner for. */
-export type PushCategory = "dropbox" | "signin" | "ingest" | "share";
+export type PushCategory = "dropbox" | "signin" | "ingest" | "share" | "chores";
 
 export const PUSH_CATEGORIES: readonly PushCategory[] = [
   "dropbox",
   "signin",
   "ingest",
   "share",
+  "chores",
 ];
 
 /** The plaintext ingest sources the staleness alarm watches. */
 export type IngestSource = "steps" | "sleep";
 
 export const INGEST_SOURCES: readonly IngestSource[] = ["steps", "sleep"];
+
+/** What the episodes map may be keyed by: one marker per ingest source, plus the
+ *  maintenance digest's own. Two different meanings share the map (see
+ *  `PushConfig.episodes`), but both are a day and both answer "have I said this
+ *  already", so they share the bookkeeping. */
+export type EpisodeKey = IngestSource | "chores";
+
+export const EPISODE_KEYS: readonly EpisodeKey[] = [
+  ...INGEST_SOURCES,
+  "chores",
+];
 
 /** One subscribed device, exactly as the Push API hands it over. */
 export interface PushSub {
@@ -47,11 +61,20 @@ export interface PushConfig {
   subs: PushSub[];
   categories: Record<PushCategory, boolean>;
   /**
-   * Per-source episode bookkeeping for the ingest alarm: the newest recorded day
-   * the owner has ALREADY been told about. Absent = armed (a fresh silence would
-   * notify). See `checkStaleness`.
+   * Episode bookkeeping for the two nightly alarms — a day per key, absent =
+   * armed (the next qualifying night notifies). The key names which alarm, and
+   * the two read their day differently:
+   *
+   *  - an ingest source (`steps`, `sleep`) stores the newest recorded day the
+   *    owner has ALREADY been told about — the episode's identity, so a source
+   *    that starts posting again and stops later is a new episode
+   *    (`checkStaleness`).
+   *  - `chores` stores the day the maintenance digest was last SENT, because
+   *    overdue upkeep has no episode identity — it just stays overdue, and the
+   *    marker is what keeps a nightly job from saying so nightly
+   *    (`checkChoresDigest`).
    */
-  episodes: Partial<Record<IngestSource, string>>;
+  episodes: Partial<Record<EpisodeKey, string>>;
 }
 
 /** Devices kept. A single owner with a phone, a laptop and a spare is the whole
@@ -63,6 +86,9 @@ export const PUSH_MAX_BYTES = 16_384;
 
 /** A device is silent for this many days before the ingest alarm fires. */
 export const STALE_AFTER_DAYS = 2;
+
+/** How long overdue upkeep gets to stay overdue before it is mentioned again. */
+export const CHORES_DIGEST_DAYS = 7;
 
 /** Endpoints are URLs from a browser vendor's push service; bound the length. */
 const MAX_ENDPOINT_CHARS = 1024;
@@ -76,7 +102,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const EMPTY_PUSH_CONFIG: PushConfig = {
   v: 1,
   subs: [],
-  categories: { dropbox: true, signin: true, ingest: true, share: true },
+  categories: {
+    dropbox: true,
+    signin: true,
+    ingest: true,
+    share: true,
+    chores: true,
+  },
   episodes: {},
 };
 
@@ -229,11 +261,11 @@ export function normalizePushConfig(raw: unknown): PushConfig {
   if (typeof o.episodes === "object" && o.episodes !== null) {
     for (const [k, v] of Object.entries(o.episodes as Record<string, unknown>))
       if (
-        INGEST_SOURCES.includes(k as IngestSource) &&
+        EPISODE_KEYS.includes(k as EpisodeKey) &&
         typeof v === "string" &&
         DATE_RE.test(v)
       )
-        episodes[k as IngestSource] = v;
+        episodes[k as EpisodeKey] = v;
   }
 
   return { v: 1, subs: subs.slice(0, MAX_SUBS), categories, episodes };
@@ -296,15 +328,15 @@ export function categoryOn(cfg: PushConfig, category: PushCategory): boolean {
   return cfg.categories[category] === true && cfg.subs.length > 0;
 }
 
-/** Record (or clear, with `undefined`) one source's episode marker. */
+/** Record (or clear, with `undefined`) one alarm's episode marker. */
 export function setEpisode(
   cfg: PushConfig,
-  source: IngestSource,
+  key: EpisodeKey,
   day: string | undefined,
 ): PushConfig {
   const episodes = { ...cfg.episodes };
-  if (day === undefined) delete episodes[source];
-  else episodes[source] = day;
+  if (day === undefined) delete episodes[key];
+  else episodes[key] = day;
   return { ...cfg, episodes };
 }
 
@@ -407,6 +439,69 @@ export function checkStaleness(
 /** The lock-screen line for a silent source — a count, never a diagnosis. */
 export function stalenessBody(source: IngestSource, days: number): string {
   return `${source} last posted ${days}d ago`;
+}
+
+// ---------------------------------------------------------------------------
+// The maintenance digest
+// ---------------------------------------------------------------------------
+
+export interface DigestResult {
+  /** Send the digest? */
+  send: boolean;
+  /** The line to send; empty unless `send`. */
+  body: string;
+  /** The marker the `chores` key should carry after the check; `undefined` = re-armed. */
+  episode: string | undefined;
+  reason: "quiet" | "notified" | "overdue";
+}
+
+/**
+ * One line naming every chore that is currently well behind, with the thing to
+ * run beside it. Deliberately one notification for the set rather than one each:
+ * upkeep tends to slip together (a fortnight away and all three are red), and
+ * three buzzes for one neglected week is how a useful alarm gets muted.
+ */
+export function choresDigestBody(overdue: readonly OverdueChore[]): string {
+  const parts = overdue.map(
+    (c) => `${c.label} ${c.days}d${c.command ? ` (${c.command})` : ""}`,
+  );
+  return `upkeep overdue — ${parts.join(" · ")}`;
+}
+
+/**
+ * Decide whether tonight is a night to mention the overdue upkeep, and keep the
+ * marker that stops it becoming a nightly nag. Three rulings:
+ *
+ *  - `quiet`    — nothing is red. This also RE-ARMS by clearing the marker, so
+ *                 the next time something goes overdue it is said at once
+ *                 instead of waiting out the previous episode's week.
+ *  - `notified` — something is red but it was mentioned inside the window. Stay
+ *                 quiet and keep the existing marker: overdue upkeep has no end
+ *                 of its own, so without this the same line lands every night
+ *                 until it is done, which teaches the owner to ignore it.
+ *  - `overdue`  — say it, and stamp today.
+ *
+ * The set of red chores deliberately does NOT affect the window: a fourth chore
+ * going red mid-week waits for the next digest rather than earning its own buzz.
+ */
+export function checkChoresDigest(
+  overdue: readonly OverdueChore[],
+  today: string,
+  lastSent: string | undefined,
+  everyDays = CHORES_DIGEST_DAYS,
+): DigestResult {
+  if (overdue.length === 0)
+    return { send: false, body: "", episode: undefined, reason: "quiet" };
+
+  if (lastSent !== undefined && daysBetween(lastSent, today) < everyDays)
+    return { send: false, body: "", episode: lastSent, reason: "notified" };
+
+  return {
+    send: true,
+    body: choresDigestBody(overdue),
+    episode: today,
+    reason: "overdue",
+  };
 }
 
 // ---------------------------------------------------------------------------

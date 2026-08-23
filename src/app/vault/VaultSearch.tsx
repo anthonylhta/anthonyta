@@ -2,21 +2,21 @@
 
 import Link from "next/link";
 import { Fragment, useMemo, useRef, useState } from "react";
+import { highlightSegments, type TrigramIndex } from "@/lib/searchidx";
+import { type VaultIndexNote } from "@/lib/vaultblob";
 import {
-  deserializeIndex,
-  highlightSegments,
-  query,
-  type TrigramIndex,
-} from "@/lib/searchidx";
-import { VAULT_SEARCH_INDEX_PATH, type VaultIndexNote } from "@/lib/vaultblob";
+  loadSearchIndex,
+  noteMap,
+  titledHits,
+  type NoteHit,
+  type OpenEnvelope,
+} from "@/lib/vaultquery";
 
 const input =
   "w-full border border-hairline bg-transparent px-3 py-1.5 text-sm text-fg placeholder:text-muted/60 focus:border-amber focus:outline-none";
 
 /** How many notes a query returns. */
 const K = 12;
-
-type OpenItem = (envelope: Uint8Array) => Promise<{ bytes: Uint8Array }>;
 
 // Every non-result outcome is a labelled state, never a blank or a crash — the same
 // absent≠error discipline the rest of the vault reader keeps.
@@ -26,13 +26,7 @@ type State =
   | { kind: "noindex" } // a clean 404 — vault-sync hasn't built the index yet
   | { kind: "unreachable" } // network/store hiccup
   | { kind: "tamper" } // the index fetched but wouldn't decrypt/parse
-  | { kind: "results"; q: string; results: Hit[] };
-
-interface Hit {
-  noteId: string;
-  title: string;
-  preview: string;
-}
+  | { kind: "results"; q: string; results: NoteHit[] };
 
 /**
  * Full-text search over the vault as a client island (unlock-gated by its parent). On
@@ -47,7 +41,7 @@ export function VaultSearch({
   openItem,
   notes,
 }: {
-  openItem: OpenItem;
+  openItem: OpenEnvelope;
   notes: VaultIndexNote[];
 }) {
   const [q, setQ] = useState("");
@@ -55,36 +49,15 @@ export function VaultSearch({
   const indexRef = useRef<TrigramIndex | null>(null);
   const runRef = useRef(0); // drops a stale async resolve when queries overlap
 
-  const byId = useMemo(() => {
-    const map = new Map<string, VaultIndexNote>();
-    for (const n of notes) if (!map.has(n.id)) map.set(n.id, n);
-    return map;
-  }, [notes]);
+  const byId = useMemo(() => noteMap(notes), [notes]);
 
-  // Fetch + decrypt + parse the sealed index once, then serve it from the ref. Returns
-  // a state string on any miss so the caller degrades cleanly.
-  async function loadIndex(): Promise<
-    TrigramIndex | "noindex" | "unreachable" | "tamper"
-  > {
+  // Fetch + decrypt + parse the sealed index once, then serve it from the ref. Any
+  // miss comes back as a state string so the caller degrades cleanly.
+  async function loadIndex() {
     if (indexRef.current) return indexRef.current;
-    let res: Response;
-    try {
-      res = await fetch(
-        "/api/vault/raw?p=" + encodeURIComponent(VAULT_SEARCH_INDEX_PATH),
-      );
-    } catch {
-      return "unreachable";
-    }
-    if (res.status === 404) return "noindex";
-    if (res.status !== 200) return "unreachable";
-    try {
-      const { bytes } = await openItem(new Uint8Array(await res.arrayBuffer()));
-      const parsed = deserializeIndex(bytes);
-      indexRef.current = parsed;
-      return parsed;
-    } catch {
-      return "tamper";
-    }
+    const loaded = await loadSearchIndex(openItem);
+    if (typeof loaded !== "string") indexRef.current = loaded;
+    return loaded;
   }
 
   async function run() {
@@ -103,15 +76,11 @@ export function VaultSearch({
       return;
     }
 
-    const results: Hit[] = query(index, text, K).map((r) => {
-      const note = byId.get(r.id);
-      return {
-        noteId: r.id,
-        title: note?.title ?? r.id,
-        preview: note?.preview ?? "",
-      };
+    setState({
+      kind: "results",
+      q: text,
+      results: titledHits(index, byId, text, K),
     });
-    setState({ kind: "results", q: text, results });
   }
 
   return (

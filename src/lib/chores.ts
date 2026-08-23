@@ -63,3 +63,66 @@ export function choreState(
   if (ageDays >= cadenceDays) return { ageDays, status: "due" };
   return { ageDays, status: "ok" };
 }
+
+// ---------------------------------------------------------------------------
+// The maintenance set — the upkeep the SERVER can see
+// ---------------------------------------------------------------------------
+
+/** The hub's own upkeep, and only the part whose evidence the server holds.
+ *  The gym and CSV cadences are deliberately absent: their evidence is inside
+ *  E2EE envelopes, so nothing server-side can judge them — and a push that
+ *  quietly skipped a chore would be worse than one that names what it watches. */
+export type MaintenanceKey = "vaultSync" | "backup" | "aperture";
+
+/**
+ * Each maintenance chore as data: the name it goes by and the literal thing to
+ * run. The command is carried because forgetting it is half the friction (the
+ * needs-doing lesson) — but `aperture` has none, because its action is the
+ * weekly check-in and the sync is only the last step of one.
+ */
+export const MAINTENANCE_CHORES: readonly {
+  key: MaintenanceKey;
+  label: string;
+  command: string | null;
+}[] = [
+  { key: "vaultSync", label: "vault-sync", command: "npm run vault-sync" },
+  { key: "backup", label: "backup", command: "npm run hub-backup" },
+  { key: "aperture", label: "aperture seal", command: null },
+];
+
+/** One chore that has gone well past its cadence, ready to be named in a line. */
+export interface OverdueChore {
+  label: string;
+  days: number;
+  command: string | null;
+}
+
+/**
+ * The maintenance chores currently in the RED state — twice their cadence or
+ * worse. Deliberately not "due": amber is the board's job, where a glance can
+ * pace against it; an interruption is reserved for well behind.
+ *
+ * `unknown` (no record at all) never qualifies. A stamp the hub cannot read is
+ * as likely to be a store hiccup as neglect, and a nightly job that can't tell
+ * the two apart cries wolf.
+ */
+export function overdueChores(
+  last: Record<MaintenanceKey, string | null>,
+  now: Date,
+): OverdueChore[] {
+  const out: OverdueChore[] = [];
+  for (const chore of MAINTENANCE_CHORES) {
+    const state = choreState(
+      last[chore.key],
+      CHORE_CADENCE_DAYS[chore.key],
+      now,
+    );
+    if (state.status !== "overdue" || state.ageDays === null) continue;
+    out.push({
+      label: chore.label,
+      days: state.ageDays,
+      command: chore.command,
+    });
+  }
+  return out;
+}

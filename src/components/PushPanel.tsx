@@ -37,6 +37,7 @@ const CATEGORY_COPY: Record<PushCategory, string> = {
   signin: "a passkey opens the door",
   ingest: "the phone stops posting steps or sleep",
   share: "someone collects a share link",
+  chores: "the hub's own upkeep goes overdue",
 };
 
 /** A short, human device name — the passkey manager's sniff, same reasoning:
