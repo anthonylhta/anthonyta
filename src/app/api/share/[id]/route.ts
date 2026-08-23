@@ -1,4 +1,5 @@
 import { parseShareSegment } from "@/lib/files";
+import { pushAfter } from "@/lib/pushsend";
 import { readShareStream } from "@/lib/shares";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +36,19 @@ export async function GET(
   // The sole blob touch, and it is share-scoped: `id` → `share/<id>.bin`.
   const stream = await readShareStream(id, Math.floor(Date.now() / 1000));
   if (!stream) return nf();
+
+  // A collection is worth knowing about, and it is only a collection once the
+  // bytes are actually going out — past the segment gate and past expiry, so a
+  // probe can never buzz the phone. AFTER the response for the drop box's
+  // reason: a served share must not be measurably slower than a 404'd one, or
+  // the timing tells a prober which ids exist.
+  //
+  // EVERY collection notifies — deliberately no dedup. One buzz per link would
+  // hide the second collection, and the second collection is the signal: the
+  // recipient already has the file, so someone else walking the link means it
+  // leaked. The line names nothing (no id, no filename); the server can't read
+  // the envelope anyway, and a notification renders on a locked screen.
+  pushAfter("share", "a share link was collected", "/files");
 
   return new Response(stream, {
     headers: {
