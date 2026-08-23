@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import { auth } from "@/auth";
 import { SessionStatusBar } from "@/components/SessionStatusBar";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { matchNovel, novels, type Novel } from "@/lib/novels";
@@ -16,6 +18,12 @@ const RANK: Record<Novel["status"], number> = {
 };
 
 export default async function NovelsPage() {
+  // Pulled from the public face 2026-08-23 (owner call, the /uses pattern):
+  // the page is placeholder-grade until its planned rework — guests 404, the
+  // lobby's reading door now points at the webnovelist profile instead.
+  const session = await auth();
+  if (!session?.user) notFound();
+
   const reads = await getCurrentlyReading();
 
   // Enrich curated novels with a live progress % (the tracker never adds rows —

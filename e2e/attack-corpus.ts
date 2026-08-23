@@ -456,9 +456,9 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
   {
     routeKey: "/novels",
     probe: "/novels",
-    shape: "public-serving",
+    shape: "owner-page",
     methods: ["GET"],
-    note: "Public reading list.",
+    note: "Reading list, pulled from the public face 2026-08-23 (placeholder-grade until its rework; the lobby's reading door links the webnovelist profile instead). Guests 404, the /uses pattern.",
   },
   {
     routeKey: "/offline",
