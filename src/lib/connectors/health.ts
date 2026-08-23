@@ -15,7 +15,13 @@ import {
 
 const PROBE_TIMEOUT_MS = 2500;
 
-async function probe(url: string): Promise<{ ok: boolean; ms: number | null }> {
+/** One probe, exported for the nightly health tripwire, which must probe
+ *  UNCACHED — a five-minute-old answer from someone's page load is not evidence
+ *  about tonight. Everything else about it (the cap, the swallowed failure) is
+ *  what the row uses. */
+export async function probeHealth(
+  url: string,
+): Promise<{ ok: boolean; ms: number | null }> {
   const started = Date.now();
   try {
     const res = await fetch(url, {
@@ -32,7 +38,7 @@ const load = unstable_cache(
   async (): Promise<HealthResult[]> =>
     Promise.all(
       HEALTH_TARGETS.map(async (t) => {
-        const { ok, ms } = await probe(t.url);
+        const { ok, ms } = await probeHealth(t.url);
         return {
           key: t.key,
           label: t.label,

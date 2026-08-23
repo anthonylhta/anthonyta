@@ -1,5 +1,6 @@
 import { overdueChores } from "@/lib/chores";
 import { getChoreReads } from "@/lib/connectors/chores";
+import { probeHealth } from "@/lib/connectors/health";
 import { getTft } from "@/lib/connectors/tft";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { authorizeCron } from "@/lib/cron-auth";
@@ -10,15 +11,18 @@ import {
   type SnapIndex,
 } from "@/lib/fin";
 import { getSnapIndex, putSnapIndex } from "@/lib/finstore";
+import { classifyHealth, HEALTH_TARGETS } from "@/lib/health";
 import {
   categoryOn,
   checkChoresDigest,
+  checkHealthDown,
   checkStaleness,
   INGEST_SOURCES,
   parsePushConfig,
   pruneSubs,
   serializePushConfig,
   setEpisode,
+  setHealth,
   stalenessBody,
   type IngestSource,
   type PushConfig,
@@ -36,7 +40,7 @@ import { getTftHistoryRaw, putTftHistory } from "@/lib/tftstore";
 export const dynamic = "force-dynamic";
 
 /**
- * Nightly cron. Three jobs (the sealed-box net-worth snapshot retired with ADR 0061
+ * Nightly cron. Six jobs (the sealed-box net-worth snapshot retired with ADR 0061
  * — history now reconstructs client-side from the fin envelope's step functions, so
  * the server no longer touches an invested figure, even transiently):
  *
@@ -63,6 +67,10 @@ export const dynamic = "force-dynamic";
  *             only (the finance chip's lives in an envelope), the red state
  *             only, and at most weekly while it stays red (`overdueChores` +
  *             `checkChoresDigest` own the rules).
+ * - `health` — the project-health tripwire: the sibling projects get probed
+ *             uncached, and two CONSECUTIVE failed nights buzz once per
+ *             down-episode. A single failed probe is noise, which is why the
+ *             debounce is the whole feature (`checkHealthDown` owns the rules).
  *
  * Runs late each Sydney evening via Vercel Cron (vercel.json). Vercel sends
  * `Authorization: Bearer <CRON_SECRET>`; required, fail-closed in production
@@ -239,6 +247,44 @@ async function alarmOverdueChores(date: string): Promise<Outcome> {
   return verdict.send ? "written" : "skipped";
 }
 
+/** Notify the owner when a sibling project has failed its probe two nights
+ *  running, once per down-episode. Same refusals as the two jobs above; the one
+ *  difference is that a failing PROBE is not a failure here, it is the data.
+ *  Probing is skipped entirely when nothing would be sent — the tripwire has no
+ *  second purpose, so an off toggle costs the siblings nothing. */
+async function alarmProjectsDown(): Promise<Outcome> {
+  if (!pushConfigured()) return "skipped";
+
+  const read = await getPushRaw();
+  // Same read-modify-write discipline as above: an error must not read as
+  // absent, or the write would drop every enrolled device.
+  if (read.state === "error") return "failed";
+  if (read.state === "absent") return "skipped";
+  const cfg = parsePushConfig(read.value);
+  if (!categoryOn(cfg, "health")) return "skipped";
+
+  const probes = await Promise.all(
+    HEALTH_TARGETS.map(async (t) => {
+      const { ok, ms } = await probeHealth(t.url);
+      return {
+        key: t.key,
+        label: t.label,
+        down: classifyHealth(ok, ms) === "down",
+      };
+    }),
+  );
+  const verdict = checkHealthDown(probes, cfg.health);
+
+  let next = setHealth(cfg, verdict.health);
+  if (verdict.alarm)
+    next = pruneSubs(next, await deliver(next, "health", verdict.body, "/"));
+
+  const serialized = serializePushConfig(next);
+  if (serialized !== serializePushConfig(cfg) && !(await putPush(serialized)))
+    return "failed";
+  return verdict.alarm ? "written" : "skipped";
+}
+
 export async function GET(req: Request) {
   const denied = authorizeCron(req);
   if (denied) return denied;
@@ -258,17 +304,21 @@ export async function GET(req: Request) {
     sweepExpiredShares(Math.floor(Date.now() / 1000)).catch(() => -1),
   ]);
 
-  // The two notification jobs read-modify-write the SAME config blob, so they
-  // run in sequence: side by side, the later write would land on a config read
-  // before the earlier one and quietly undo its episode stamp and its prune.
-  // Neither may sink the jobs above — a courtesy is the last thing allowed to
-  // cost the record.
+  // The notification jobs read-modify-write the SAME config blob, so they run in
+  // sequence: side by side, the later write would land on a config read before
+  // the earlier one and quietly undo its episode stamp and its prune. None of
+  // them may sink the jobs above — a courtesy is the last thing allowed to cost
+  // the record.
   const alarm = await alarmStaleIngests(date).catch((err) => {
     console.error("[cron:snapshot] ingest alarm failed:", err);
     return "failed" as Outcome;
   });
   const upkeep = await alarmOverdueChores(date).catch((err) => {
     console.error("[cron:snapshot] upkeep digest failed:", err);
+    return "failed" as Outcome;
+  });
+  const health = await alarmProjectsDown().catch((err) => {
+    console.error("[cron:snapshot] health tripwire failed:", err);
     return "failed" as Outcome;
   });
 
@@ -279,6 +329,7 @@ export async function GET(req: Request) {
     swept,
     alarm,
     upkeep,
+    health,
     at: new Date().toISOString(),
   });
 }
