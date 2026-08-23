@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseShareSegment } from "@/lib/files";
+import { pushAfter } from "@/lib/pushsend";
 import { readShareStream } from "@/lib/shares";
 import { GET } from "./route";
 
-// The public share route touches exactly two collaborators: `parseShareSegment`
-// (the segment gate) and `readShareStream` (the ONLY, share-scoped, blob touch).
+// The public share route touches three collaborators: `parseShareSegment` (the
+// segment gate), `readShareStream` (the ONLY, share-scoped, blob touch), and
+// `pushAfter` (fire-and-forget, post-response, no bearing on what is served).
 // Neither `@/auth` nor any inbox/meta reader is imported — a guest reaching a valid
 // share is by design, so there is nothing to gate here.
 vi.mock("@/lib/files", () => ({ parseShareSegment: vi.fn() }));
 vi.mock("@/lib/shares", () => ({ readShareStream: vi.fn() }));
+vi.mock("@/lib/pushsend", () => ({ pushAfter: vi.fn() }));
 
 const VALID_ID = "9999999999-e-AAAAAAAAAAAAAAAAAAAAAA";
 
@@ -90,5 +93,38 @@ describe("public share route", () => {
 
     const res = await call(VALID_ID);
     expect(res.status).toBe(404);
+  });
+
+  it("buzzes the owner on a real collection, with a line that names nothing", async () => {
+    vi.mocked(parseShareSegment).mockReturnValue({ expiry: 9999999999 });
+    vi.mocked(readShareStream).mockResolvedValue(streamOf(new Uint8Array([1])));
+
+    await call(VALID_ID);
+    expect(pushAfter).toHaveBeenCalledTimes(1);
+    const [category, body, url] = vi.mocked(pushAfter).mock.calls[0];
+    expect(category).toBe("share");
+    expect(url).toBe("/files");
+    // Contentless: the id (and so the file behind it) never reaches a lock screen.
+    expect(body).not.toContain(VALID_ID);
+  });
+
+  it("buzzes again on a second collection — a repeat IS the leak signal", async () => {
+    vi.mocked(parseShareSegment).mockReturnValue({ expiry: 9999999999 });
+    vi.mocked(readShareStream).mockResolvedValue(streamOf(new Uint8Array([1])));
+
+    await call(VALID_ID);
+    await call(VALID_ID);
+    expect(pushAfter).toHaveBeenCalledTimes(2);
+  });
+
+  it("stays silent on every rejection — a probe must not be able to buzz the phone", async () => {
+    vi.mocked(parseShareSegment).mockReturnValue(null);
+    await call("not-a-share-id");
+
+    vi.mocked(parseShareSegment).mockReturnValue({ expiry: 9999999999 });
+    vi.mocked(readShareStream).mockResolvedValue(null);
+    await call(VALID_ID);
+
+    expect(pushAfter).not.toHaveBeenCalled();
   });
 });

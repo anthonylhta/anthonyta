@@ -15,13 +15,14 @@
  * never the message). Nothing sealed is ever put in a notification.
  */
 
-/** The three things the hub is allowed to interrupt the owner for. */
-export type PushCategory = "dropbox" | "signin" | "ingest";
+/** The things the hub is allowed to interrupt the owner for. */
+export type PushCategory = "dropbox" | "signin" | "ingest" | "share";
 
 export const PUSH_CATEGORIES: readonly PushCategory[] = [
   "dropbox",
   "signin",
   "ingest",
+  "share",
 ];
 
 /** The plaintext ingest sources the staleness alarm watches. */
@@ -75,7 +76,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const EMPTY_PUSH_CONFIG: PushConfig = {
   v: 1,
   subs: [],
-  categories: { dropbox: true, signin: true, ingest: true },
+  categories: { dropbox: true, signin: true, ingest: true, share: true },
   episodes: {},
 };
 
