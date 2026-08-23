@@ -728,9 +728,9 @@ describe("liftChips", () => {
       ],
     });
     expect(liftChips(cfg)).toEqual([
-      { name: "deadlift", e1rm: 140 },
-      { name: "squat", e1rm: 117 },
-      { name: "bench press", e1rm: 76 },
+      { id: "dead", name: "deadlift", e1rm: 140 },
+      { id: "squat", name: "squat", e1rm: 117 },
+      { id: "bench", name: "bench press", e1rm: 76 },
     ]);
   });
 
@@ -757,6 +757,27 @@ describe("liftChips", () => {
       "bench press",
       "deadlift",
     ]);
+  });
+
+  it("carries the catalog id its own series can be read back with", () => {
+    const cfg = base({
+      exercises: catalog,
+      sessions: [
+        session({
+          id: "s2",
+          date: "2026-07-26",
+          entries: [{ exerciseId: "bench", sets: [{ w: 65, r: 6 }] }], // 78
+        }),
+        session({
+          id: "s1",
+          date: "2026-07-20",
+          entries: [{ exerciseId: "bench", sets: [{ w: 60, r: 8 }] }], // 76
+        }),
+      ],
+    });
+    const [chip] = liftChips(cfg);
+    expect(chip.id).toBe("bench");
+    expect(e1rmSeries(cfg, chip.id)).toEqual([76, 78]);
   });
 });
 
