@@ -109,15 +109,11 @@ export default async function BriefingPage() {
                 private
               </span>
             </div>
-            {b.portfolio ? (
-              <p className="text-sm text-fg/90">{b.portfolio}</p>
-            ) : (
-              <div className="rounded border border-dashed border-hairline px-4 py-5 text-sm text-muted">
-                {"No portfolio note in today's briefing yet."}
-              </div>
-            )}
             {/* browser-computed relevance — matches today's briefing against the
-                decrypted holdings; the server never holds both (roadmap item 35B). */}
+                decrypted holdings; the server never holds both (roadmap item 35B).
+                This is the WHOLE section: the server-written note died with the
+                Phase B cutover (the generator has zero portfolio knowledge), so
+                there is no note to wait for and nothing to render in its place. */}
             <BriefingRelevance briefing={b} offline={!r2Enabled()} />
           </div>
         )}

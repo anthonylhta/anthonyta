@@ -16,8 +16,8 @@ import type { Briefing, TapeItem } from "@/lib/sampleBriefing";
 /** The ingest route's pre-parse body cap — the total-size bound (per-field caps are secondary). */
 export const MAX_INGEST_BYTES = 256 * 1024;
 
-// Generous-but-finite per-field caps. Prose fields (summary, bullet points, the
-// portfolio note) run a sentence or two; labels / values / dates / urls are short.
+// Generous-but-finite per-field caps. Prose fields (summary, bullet points) run
+// a sentence or two; labels / values / dates / urls are short.
 export const MAX_TEXT = 4000;
 export const MAX_LABEL = 500;
 // Array-length caps — a valid-SHAPED but huge payload still can't balloon a render.
@@ -87,7 +87,6 @@ export function isBriefing(x: unknown): x is Briefing {
     Array.isArray(b.sections) &&
     b.sections.length <= MAX_LIST &&
     b.sections.every(isSection) &&
-    (b.portfolio === undefined || isText(b.portfolio)) &&
     (b.sources === undefined ||
       (Array.isArray(b.sources) &&
         b.sources.length <= MAX_LIST &&

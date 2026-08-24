@@ -18,8 +18,6 @@ export interface Briefing {
   /** forward catalysts — the one-line "what to watch" strip */
   watch: { date: string; label: string }[];
   sections: { title: string; points: string[] }[];
-  /** PRIVATE — portfolio relevance, gated behind your login (not in the live Doc) */
-  portfolio?: string;
   /** optional citations */
   sources?: { label: string; url: string }[];
 }
@@ -84,8 +82,6 @@ export const sampleBriefing: Briefing = {
       ],
     },
   ],
-  portfolio:
-    "Mildly favourable for an accumulating long-term investor. NDQ had a strong night (semis) but AUD strength trims it in AUD terms; BGBL/VGS ride the US/Europe record run (again currency-diluted); VGE mixed (weak Hang Seng vs supportive China stimulus); IOZ faces a soft resources open but iron-ore support limits the damage; VAF a mild capital headwind from firmer yields, offset by steady income; HISA stays attractive with the RBA at 4.35%. Net: keep dollar-cost-averaging — the firmer AUD makes today a slightly cheaper day to add international exposure.",
   sources: [
     {
       label: "Trading Economics — Australia",
