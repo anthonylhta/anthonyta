@@ -30,6 +30,18 @@ export interface InboxFile {
 /** Text notes above this many bytes stay plain files — never hydrated or inlined. */
 export const TEXT_NOTE_MAX = 4096;
 
+/**
+ * Inbox upload content cap. NOT a plan limit — R2 takes gigabytes per PUT and
+ * the estate sits at a fraction of the free tier — the real ceiling is the
+ * client: a file is read and sealed in ONE in-memory AES-GCM pass, so this is
+ * sized to what a phone browser comfortably holds twice over (plaintext +
+ * envelope), which a 25MB relic of the Blob era undersold by 4×. Enforced
+ * honestly in the picker (named refusal, nothing uploads) and again at the
+ * presign mint with headroom for the envelope overhead.
+ */
+export const UPLOAD_MAX_CONTENT = 100 * 1024 * 1024;
+export const UPLOAD_MAX_ENVELOPE = UPLOAD_MAX_CONTENT + 1024 * 1024;
+
 /** Strip a segment down to the safe `[A-Za-z0-9._-]` set, collapsing dash runs. */
 function scrub(s: string): string {
   return s.replace(/[^A-Za-z0-9._-]/g, "-").replace(/-+/g, "-");

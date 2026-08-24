@@ -18,6 +18,7 @@ import {
   noteName,
   SHARE_PREFIX,
   shareSegment,
+  UPLOAD_MAX_CONTENT,
   viewKind,
   type FileKind,
   type InboxFile,
@@ -235,6 +236,15 @@ export function FilesInbox({
       const errored: string[] = [];
       const noted: string[] = [];
       for (const file of chosen) {
+        // Refuse oversize BEFORE reading a byte, and say why — the mint would
+        // reject it anyway, but as a generic failure with no reason given
+        // (which is how a 30MB video read as "broken" instead of "too big").
+        if (file.size > UPLOAD_MAX_CONTENT) {
+          noted.push(
+            `${file.name} skipped — ${formatSize(file.size)} is over the ${formatSize(UPLOAD_MAX_CONTENT)} cap`,
+          );
+          continue;
+        }
         setProgress({ name: file.name, pct: 0 });
         try {
           let { meta, bytes } = await toEnvelopeInput(file);
