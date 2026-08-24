@@ -1,15 +1,20 @@
 import { auth } from "@/auth";
-import { isEncrypted, isValidPathname, isValidSharePath } from "@/lib/files";
+import {
+  isEncrypted,
+  isValidPathname,
+  isValidSharePath,
+  UPLOAD_MAX_ENVELOPE,
+} from "@/lib/files";
 import { r2Enabled, r2PresignPut } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
 
 const nf = () => new Response("Not found", { status: 404 });
 
-// 25MB of content + headroom for the ~300B E2EE envelope overhead. Enforced on
-// the DECLARED size at mint time — a presigned PUT can't bind a byte count, so
-// the cap is a guard against accidents, not adversaries (the route is owner-only).
-const MAX_BYTES = 26 * 1024 * 1024;
+// The shared cap (lib/files owns the reasoning). Enforced on the DECLARED size
+// at mint time — a presigned PUT can't bind a byte count, so the cap is a guard
+// against accidents, not adversaries (the route is owner-only).
+const MAX_BYTES = UPLOAD_MAX_ENVELOPE;
 
 // Generous window for a big envelope on a slow mobile uplink; R2 checks validity
 // when the request ARRIVES, so an upload that started in-window completes fine.

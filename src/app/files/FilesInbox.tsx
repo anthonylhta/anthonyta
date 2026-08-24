@@ -18,6 +18,7 @@ import {
   noteName,
   SHARE_PREFIX,
   shareSegment,
+  UPLOAD_MAX_CONTENT,
   viewKind,
   type FileKind,
   type InboxFile,
@@ -129,37 +130,65 @@ async function drainSharedCache(): Promise<File[]> {
   }
 }
 
+/** A failure whose message is already written for the owner's eyes — the failed
+ *  line renders it verbatim. Anything NOT this class stays the generic line, so
+ *  an unexpected throw never leaks internals into the UI. */
+class UploadFailure extends Error {}
+
 /**
  * Send one sealed envelope to the store: mint a presigned PUT from the owner-gated
  * route (which validates the pathname shape), then send the bytes straight to R2
  * (ADR 0060). XHR rather than fetch so upload progress can drive the meter. The
  * client-chosen pathname is stored EXACTLY — share links depend on that.
+ *
+ * Each failure names its stage, because they mean different next moves: a mint
+ * refusal usually means the session expired (reload), a drop mid-upload names
+ * the percentage it died at (retry — likely a mobile uplink), and a store
+ * status is the one worth reporting if it persists.
  */
 async function uploadEnvelope(
   pathname: string,
   envelope: Uint8Array,
   onProgress?: (pct: number) => void,
 ): Promise<void> {
-  const mint = await fetch("/api/files/upload", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ pathname, size: envelope.length }),
-  });
-  if (!mint.ok) throw new Error("mint failed");
+  let mint: Response;
+  try {
+    mint = await fetch("/api/files/upload", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pathname, size: envelope.length }),
+    });
+  } catch {
+    throw new UploadFailure(
+      "network dropped before the upload started — retry",
+    );
+  }
+  if (!mint.ok)
+    throw new UploadFailure(
+      "the hub refused the upload — reload and retry (the session may have expired)",
+    );
   const { url } = (await mint.json()) as { url: string };
+  let lastPct = 0;
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
     xhr.setRequestHeader("content-type", "application/octet-stream");
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress)
-        onProgress(Math.round((e.loaded / e.total) * 100));
+      if (e.lengthComputable) {
+        lastPct = Math.round((e.loaded / e.total) * 100);
+        onProgress?.(lastPct);
+      }
     };
     xhr.onload = () =>
       xhr.status >= 200 && xhr.status < 300
         ? resolve()
-        : reject(new Error(`upload failed: HTTP ${xhr.status}`));
-    xhr.onerror = () => reject(new Error("upload failed"));
+        : reject(
+            new UploadFailure(
+              `the store refused the upload (HTTP ${xhr.status}) — retry, and flag it if it keeps happening`,
+            ),
+          );
+    xhr.onerror = () =>
+      reject(new UploadFailure(`connection dropped at ${lastPct}% — retry`));
     xhr.send(new Blob([envelope as BlobPart]));
   });
 }
@@ -204,22 +233,30 @@ export function FilesInbox({
 
   const unlocked = vault.status === "unlocked";
 
+  // Success is null; failure is the line the red row prints. Sealing and
+  // uploading fail for different reasons with different next moves, so they
+  // stop sharing one word.
   const sealAndUpload = useCallback(
     async (
       meta: EnvelopeMeta,
       bytes: Uint8Array,
       label: string,
-    ): Promise<boolean> => {
+    ): Promise<string | null> => {
+      let envelope: Uint8Array;
       try {
-        const envelope = await vault.sealItem(meta, bytes);
+        envelope = await vault.sealItem(meta, bytes);
+      } catch {
+        return "encryption failed — reload, unlock, and retry";
+      }
+      try {
         await uploadEnvelope(
           `${INBOX_PREFIX}e-${randomId()}.bin`,
           envelope,
           (pct) => setProgress({ name: label, pct }),
         );
-        return true;
-      } catch {
-        return false;
+        return null;
+      } catch (err) {
+        return err instanceof UploadFailure ? err.message : "upload failed";
       }
     },
     [vault],
@@ -235,19 +272,38 @@ export function FilesInbox({
       const errored: string[] = [];
       const noted: string[] = [];
       for (const file of chosen) {
+        // Refuse oversize BEFORE reading a byte, and say why — the mint would
+        // reject it anyway, but as a generic failure with no reason given
+        // (which is how a 30MB video read as "broken" instead of "too big").
+        if (file.size > UPLOAD_MAX_CONTENT) {
+          noted.push(
+            `${file.name} skipped — ${formatSize(file.size)} is over the ${formatSize(UPLOAD_MAX_CONTENT)} cap`,
+          );
+          continue;
+        }
         setProgress({ name: file.name, pct: 0 });
+        let input: Awaited<ReturnType<typeof toEnvelopeInput>>;
         try {
-          let { meta, bytes } = await toEnvelopeInput(file);
+          input = await toEnvelopeInput(file);
+        } catch {
+          // A cloud-placeholder file (synced but not local) is the usual cause.
+          errored.push(
+            `${file.name} — couldn't read the file from this device`,
+          );
+          continue;
+        }
+        try {
+          let { meta, bytes } = input;
           if (stripMeta && isImageMeta(meta)) {
             const r = stripForUpload(meta, bytes);
             meta = r.meta;
             bytes = r.bytes;
             noted.push(r.notice);
           }
-          if (!(await sealAndUpload(meta, bytes, file.name)))
-            errored.push(file.name);
+          const failure = await sealAndUpload(meta, bytes, file.name);
+          if (failure !== null) errored.push(`${file.name} — ${failure}`);
         } catch {
-          errored.push(file.name);
+          errored.push(`${file.name} — upload failed`);
         }
       }
       setProgress(null);
@@ -267,18 +323,18 @@ export function FilesInbox({
     setFailed([]);
     setProgress({ name: "note", pct: 0 });
     const bytes = new TextEncoder().encode(text);
-    const ok = await sealAndUpload(
+    const failure = await sealAndUpload(
       { n: noteName(text), t: "text/plain", s: bytes.length },
       bytes,
       "note",
     );
     setProgress(null);
     setBusy(false);
-    if (ok) {
+    if (failure === null) {
       setNote("");
       router.refresh();
     } else {
-      setFailed(["note"]);
+      setFailed([`note — ${failure}`]);
     }
   }
 
@@ -388,9 +444,9 @@ export function FilesInbox({
             </p>
           )}
 
-          {failed.map((name, i) => (
-            <p key={`${i}-${name}`} className="mt-2 text-xs text-down">
-              upload failed — {name}
+          {failed.map((line, i) => (
+            <p key={`${i}-${line}`} className="mt-2 text-xs text-down">
+              {line}
             </p>
           ))}
         </div>

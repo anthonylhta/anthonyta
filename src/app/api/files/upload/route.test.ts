@@ -1,3 +1,4 @@
+import { UPLOAD_MAX_ENVELOPE } from "@/lib/files";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { auth } from "@/auth";
 import { r2Enabled, r2PresignPut } from "@/lib/r2";
@@ -75,13 +76,20 @@ describe("upload mint route", () => {
   });
 
   it("404s a missing, non-integer, zero, or over-cap size", async () => {
-    for (const size of [undefined, "100", 1.5, 0, -1, 26 * 1024 * 1024 + 1]) {
+    for (const size of [
+      undefined,
+      "100",
+      1.5,
+      0,
+      -1,
+      UPLOAD_MAX_ENVELOPE + 1,
+    ]) {
       expect((await mint({ pathname: ENC, size })).status).toBe(404);
     }
     // the cap itself is allowed
-    expect((await mint({ pathname: ENC, size: 26 * 1024 * 1024 })).status).toBe(
-      200,
-    );
+    expect(
+      (await mint({ pathname: ENC, size: UPLOAD_MAX_ENVELOPE })).status,
+    ).toBe(200);
   });
 
   it("404s when the store is off and on a malformed body", async () => {
