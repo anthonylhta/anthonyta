@@ -160,3 +160,58 @@ describe("matchBriefing — snippet truncation", () => {
     expect(matchBriefing(b, ["BTC"])[0].hits[0].text).toBe("BTC firmed");
   });
 });
+
+describe("matchBriefing — ETF topic phrases", () => {
+  it("matches an index-ETF code on the index name the prose actually uses", () => {
+    const b = mkBriefing({ driver: "Nasdaq futures rally on chip strength" });
+    expect(matchBriefing(b, ["NDQ"])).toEqual([
+      {
+        code: "NDQ",
+        hits: [
+          { where: "driver", text: "Nasdaq futures rally on chip strength" },
+        ],
+      },
+    ]);
+  });
+
+  it("multi-token phrases need the whole contiguous run", () => {
+    const hit = mkBriefing({ summary: "ASX 200 futures slip at the open" });
+    const miss = mkBriefing({ summary: "ASX volumes thin, 200 stocks lower" });
+    expect(matchBriefing(hit, ["IOZ"])).toHaveLength(1);
+    expect(matchBriefing(miss, ["IOZ"])).toHaveLength(0);
+  });
+
+  it("phrases with punctuation tokenize like the prose does", () => {
+    const b = mkBriefing({ summary: "S&P 500 closes at a record" });
+    expect(matchBriefing(b, ["IVV"])).toHaveLength(1);
+  });
+
+  it("matches phrases case-insensitively", () => {
+    const b = mkBriefing({ summary: "NASDAQ pares early gains" });
+    expect(matchBriefing(b, ["NDQ"])).toHaveLength(1);
+  });
+
+  it("a line naming both the code and its topic counts once", () => {
+    const b = mkBriefing({ driver: "NDQ tracks the Nasdaq higher" });
+    expect(matchBriefing(b, ["NDQ"])[0].hits).toHaveLength(1);
+  });
+
+  it("a code with no topic row still matches on its own token only", () => {
+    const named = mkBriefing({ driver: "ZZZZ rallies" });
+    const topical = mkBriefing({ driver: "Nasdaq rallies" });
+    expect(matchBriefing(named, ["ZZZZ"])).toHaveLength(1);
+    expect(matchBriefing(topical, ["ZZZZ"])).toHaveLength(0);
+  });
+
+  it("holding-code lookup into the topic table is case-insensitive", () => {
+    const b = mkBriefing({ driver: "Nasdaq firms" });
+    expect(matchBriefing(b, ["ndq"])).toHaveLength(1);
+  });
+
+  it("bond ETFs light up on yields and the RBA, not on equities prose", () => {
+    const yes = mkBriefing({ summary: "yields firmed after the RBA held" });
+    const no = mkBriefing({ summary: "Wall Street pushed higher" });
+    expect(matchBriefing(yes, ["VAF"])[0].hits).toHaveLength(1);
+    expect(matchBriefing(no, ["VAF"])).toHaveLength(0);
+  });
+});
