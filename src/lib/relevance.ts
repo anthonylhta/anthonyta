@@ -53,6 +53,86 @@ function matches(tokens: string[], code: string): boolean {
   return tokens.some((t) => t === code);
 }
 
+/**
+ * What an index ETF is ABOUT, because a briefing never says the ticker: prose
+ * talks "Nasdaq", "ASX 200", "Hang Seng" — vocabulary a token-matched code can
+ * never reach, which left the relevance section blank almost every day for an
+ * index-ETF portfolio. Each entry maps a code to the topic phrases whose
+ * appearance in a line means that line concerns the holding.
+ *
+ * DELIBERATELY GENERIC, and that is a privacy constraint, not padding: this
+ * table lives in a public repo, so it enumerates COMMON ASX/US-listed ETFs —
+ * public knowledge of what each fund tracks — never one person's portfolio.
+ * Which rows matter is decided in the browser, after the holdings decrypt.
+ *
+ * Phrases err specific over broad ("ASX 200", never bare "ASX") so a holding
+ * doesn't light up on every line that names the exchange.
+ */
+const ETF_TOPICS: Record<string, readonly string[]> = {
+  // Nasdaq-100 trackers
+  NDQ: ["Nasdaq"],
+  HNDQ: ["Nasdaq"],
+  QQQ: ["Nasdaq"],
+  // S&P 500 trackers
+  IVV: ["S&P 500"],
+  SPY: ["S&P 500"],
+  VOO: ["S&P 500"],
+  IHVV: ["S&P 500"],
+  // broad developed-world (majority-US, so Wall Street lines concern them)
+  VGS: ["MSCI World", "S&P 500", "Wall Street"],
+  BGBL: ["MSCI World", "S&P 500", "Wall Street"],
+  IWLD: ["MSCI World", "S&P 500", "Wall Street"],
+  HGBL: ["MSCI World", "S&P 500", "Wall Street"],
+  VTS: ["Wall Street", "S&P 500"],
+  // Australian equity
+  IOZ: ["ASX 200"],
+  A200: ["ASX 200"],
+  STW: ["ASX 200"],
+  VAS: ["ASX 300", "ASX 200"],
+  VHY: ["ASX 200"],
+  // emerging markets / Asia
+  VGE: ["emerging markets", "Hang Seng"],
+  IEM: ["emerging markets", "Hang Seng"],
+  VAE: ["Hang Seng", "Nikkei"],
+  IAA: ["Hang Seng", "Nikkei"],
+  // fixed income — moved by rates, so yield/RBA lines concern them
+  VAF: ["bond", "yields", "RBA"],
+  VGB: ["bond", "yields", "RBA"],
+  IAF: ["bond", "yields", "RBA"],
+  VBND: ["bond", "yields"],
+  // commodities
+  GOLD: ["gold"],
+  QAU: ["gold"],
+  // crypto trackers
+  VBTC: ["Bitcoin", "BTC"],
+  EBTC: ["Bitcoin", "BTC"],
+};
+
+/**
+ * A topic phrase matches when its token sequence appears contiguously in the
+ * line's tokens, case-insensitively — "S&P 500" tokenizes to S·P·500 and finds
+ * the same run in "S&P 500 futures", but "ASX 200" never fires on plain "ASX".
+ * Case-insensitive even for short tokens: inside a phrase the neighbours
+ * disambiguate, which is the ambiguity the bare-code rule guards against.
+ */
+function phraseMatches(tokens: string[], phrase: string): boolean {
+  const want = tokenize(phrase).map((t) => t.toUpperCase());
+  if (want.length === 0) return false;
+  const have = tokens.map((t) => t.toUpperCase());
+  for (let i = 0; i + want.length <= have.length; i++) {
+    if (want.every((w, j) => have[i + j] === w)) return true;
+  }
+  return false;
+}
+
+/** A line concerns a holding when it names the code itself (a briefing might
+ *  literally say "NDQ") or any of the code's topic phrases. */
+function concernsHolding(tokens: string[], code: string): boolean {
+  if (matches(tokens, code)) return true;
+  const topics = ETF_TOPICS[code.toUpperCase()];
+  return topics !== undefined && topics.some((p) => phraseMatches(tokens, p));
+}
+
 /** Every scannable line of the briefing, in a fixed source order. Skips the prose
  *  `portfolio` note (the thing this replaces) and the `sources` citations. */
 function sourcesOf(b: Briefing): Source[] {
@@ -85,7 +165,7 @@ export function matchBriefing(b: Briefing, codes: string[]): RelevanceHit[] {
     if (!code) continue;
     const hits: RelevanceHit["hits"] = [];
     for (const s of sources) {
-      if (matches(s.tokens, code)) {
+      if (concernsHolding(s.tokens, code)) {
         hits.push({ where: s.where, text: truncate(s.text) });
       }
     }
