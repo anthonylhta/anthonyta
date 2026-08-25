@@ -4,7 +4,10 @@ import { Bar } from "@/components/terminal/Bar";
 import { Prompt } from "@/components/terminal/Prompt";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
-import { MiniHand } from "@/components/terminal/PuzzleCard";
+import {
+  HAND_OF_THE_DAY_URL,
+  MiniHand,
+} from "@/components/terminal/PuzzleCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { GithubModule } from "@/components/GithubModule";
@@ -177,12 +180,14 @@ export async function Lobby() {
             label="riichi"
             className="border-0"
             action={
-              <Link
-                href="/riichi"
+              <a
+                href={HAND_OF_THE_DAY_URL}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="text-xs text-amber hover:underline"
               >
-                [solve]
-              </Link>
+                [solve ↗]
+              </a>
             }
           >
             <div className="space-y-2">
