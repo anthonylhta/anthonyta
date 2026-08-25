@@ -19,7 +19,7 @@ export default function ResumePage() {
     >
       <div className="border border-hairline bg-surface/20 print:border-0">
         <div className="print:hidden">
-          <StatusBar user="anthony ta" />
+          <StatusBar />
         </div>
 
         <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-xs print:hidden">
