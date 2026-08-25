@@ -179,7 +179,7 @@ export default async function IshinPage() {
             {stats.recentDays.map((d) => (
               <div
                 key={d.date}
-                className="flex-1"
+                className="flex h-full flex-1 flex-col justify-end"
                 title={`${d.date}: ${d.count}`}
               >
                 <div
