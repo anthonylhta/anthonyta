@@ -16,6 +16,10 @@ const eslintConfig = defineConfig([
     "**/*.cjs",
     // pdf.js runtime assets copied from node_modules on postinstall — vendor code.
     "public/pdfjs/**",
+    // Local-only tooling (never app code). Agent worktrees are checked out under
+    // .claude/worktrees/, and the root-anchored patterns above don't reach their
+    // nested .next/ and public/pdfjs/ copies.
+    ".claude/**",
   ]),
 ]);
 
