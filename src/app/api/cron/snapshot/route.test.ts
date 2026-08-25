@@ -1,17 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getStoredBriefing } from "@/lib/briefingstore";
+import { getChoreReads } from "@/lib/connectors/chores";
+import { probeHealth } from "@/lib/connectors/health";
 import { getTft } from "@/lib/connectors/tft";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { authorizeCron } from "@/lib/cron-auth";
-import { isSnapIndex, sydneyToday } from "@/lib/fin";
+import { isSnapIndex, sydneyDaysAgo, sydneyToday } from "@/lib/fin";
 import { getSnapIndex, putSnapIndex } from "@/lib/finstore";
+import {
+  EMPTY_PUSH_CONFIG,
+  serializePushConfig,
+  utcToday,
+  type PushConfig,
+} from "@/lib/push";
+import { deliver, pushConfigured } from "@/lib/pushsend";
+import { getPushRaw, putPush } from "@/lib/pushstore";
+import { sampleBriefing } from "@/lib/sampleBriefing";
 import { sweepExpiredShares } from "@/lib/shares";
+import { getSleepRaw } from "@/lib/sleepstore";
+import { getStepsRaw } from "@/lib/stepsstore";
 import { isTftHistory, sampleTft, type TftStats } from "@/lib/tft";
 import { getTftHistoryRaw, putTftHistory } from "@/lib/tftstore";
 import { GET } from "./route";
 
 // The cron gates on `authorizeCron`, never `auth` — mock the gate to open (null) or
 // short-circuit with a 401. The finstore, the tft connector + store, the reading
-// connector, and the share sweep are the route's only collaborators.
+// connector, and the share sweep are the route's snapshot collaborators; the push
+// send path, its config store, and the three ingest stores are the alarm's.
 vi.mock("@/lib/cron-auth", () => ({ authorizeCron: vi.fn() }));
 vi.mock("@/lib/finstore", () => ({
   getSnapIndex: vi.fn(),
@@ -24,6 +39,16 @@ vi.mock("@/lib/tftstore", () => ({
   putTftHistory: vi.fn(),
 }));
 vi.mock("@/lib/shares", () => ({ sweepExpiredShares: vi.fn() }));
+vi.mock("@/lib/pushsend", () => ({
+  deliver: vi.fn(),
+  pushConfigured: vi.fn(),
+}));
+vi.mock("@/lib/pushstore", () => ({ getPushRaw: vi.fn(), putPush: vi.fn() }));
+vi.mock("@/lib/stepsstore", () => ({ getStepsRaw: vi.fn() }));
+vi.mock("@/lib/sleepstore", () => ({ getSleepRaw: vi.fn() }));
+vi.mock("@/lib/briefingstore", () => ({ getStoredBriefing: vi.fn() }));
+vi.mock("@/lib/connectors/chores", () => ({ getChoreReads: vi.fn() }));
+vi.mock("@/lib/connectors/health", () => ({ probeHealth: vi.fn() }));
 
 const req = () => new Request("http://localhost/api/cron/snapshot");
 
@@ -47,6 +72,31 @@ function liveTft(): TftStats {
   };
 }
 
+/** A stored push config with one device enrolled and every category on. */
+function storedPush(episodes: PushConfig["episodes"] = {}): string {
+  return serializePushConfig({
+    ...EMPTY_PUSH_CONFIG,
+    subs: [
+      {
+        id: "id-1",
+        endpoint: "https://push.example/abc",
+        keys: { p256dh: "p256dh-key", auth: "auth-key" },
+        label: "android",
+        created: "2026-08-20T09:00:00.000Z",
+      },
+    ],
+    episodes,
+  });
+}
+
+/** A stored briefing FOR the given Sydney day. */
+const briefingFor = (date: string) =>
+  ({ state: "ok", value: { ...sampleBriefing, date } }) as const;
+
+/** The UTC calendar day `n` days back — the briefing's own reckoning. */
+const utcDaysAgo = (n: number) =>
+  new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+
 describe("snapshot cron route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -58,6 +108,21 @@ describe("snapshot cron route", () => {
     vi.mocked(getTftHistoryRaw).mockResolvedValue({ state: "absent" });
     vi.mocked(putTftHistory).mockResolvedValue(true);
     vi.mocked(sweepExpiredShares).mockResolvedValue(0);
+    // The notification jobs are OFF by default (no VAPID in CI), which is what
+    // every snapshot test above assumes; the alarm block below turns them on.
+    vi.mocked(pushConfigured).mockReturnValue(false);
+    vi.mocked(deliver).mockResolvedValue([]);
+    vi.mocked(getPushRaw).mockResolvedValue({ state: "absent" });
+    vi.mocked(putPush).mockResolvedValue(true);
+    vi.mocked(getStepsRaw).mockResolvedValue({ state: "absent" });
+    vi.mocked(getSleepRaw).mockResolvedValue({ state: "absent" });
+    vi.mocked(getStoredBriefing).mockResolvedValue({ state: "absent" });
+    vi.mocked(getChoreReads).mockResolvedValue({
+      vaultSyncedAt: null,
+      backupAt: null,
+      apertureSealedAt: null,
+    });
+    vi.mocked(probeHealth).mockResolvedValue({ ok: true, ms: 12 });
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -232,5 +297,122 @@ describe("snapshot cron route", () => {
     const body = await (await GET(req())).json();
     expect(body.tft).toBe("failed");
     expect(putTftHistory).not.toHaveBeenCalled();
+  });
+
+  describe("the ingest-staleness alarm", () => {
+    beforeEach(() => {
+      vi.mocked(pushConfigured).mockReturnValue(true);
+      vi.mocked(getPushRaw).mockResolvedValue({
+        state: "ok",
+        value: storedPush(),
+      });
+    });
+
+    /** The lines the cron actually pushed under the "ingest" category. */
+    const ingestBodies = () =>
+      vi
+        .mocked(deliver)
+        .mock.calls.filter((c) => c[1] === "ingest")
+        .map((c) => c[2]);
+
+    it("buzzes the night a morning briefing does not land", async () => {
+      vi.mocked(getStoredBriefing).mockResolvedValue(
+        briefingFor(utcDaysAgo(1)),
+      );
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("written");
+      expect(ingestBodies()).toEqual(["briefing last posted 1d ago"]);
+    });
+
+    it("stays quiet on a morning the briefing landed", async () => {
+      vi.mocked(getStoredBriefing).mockResolvedValue(briefingFor(utcToday()));
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("skipped");
+      expect(ingestBodies()).toEqual([]);
+    });
+
+    it("says it once, not once a night, while the routine stays quiet", async () => {
+      const quiet = utcDaysAgo(2);
+      vi.mocked(getStoredBriefing).mockResolvedValue(briefingFor(quiet));
+      vi.mocked(getPushRaw).mockResolvedValue({
+        state: "ok",
+        value: storedPush({ briefing: quiet }),
+      });
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("skipped");
+      expect(ingestBodies()).toEqual([]);
+    });
+
+    it("never alarms off a briefing store it could not read", async () => {
+      vi.mocked(getStoredBriefing).mockResolvedValue({ state: "error" });
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("skipped");
+      expect(ingestBodies()).toEqual([]);
+    });
+
+    it("never alarms for a briefing that has never been ingested", async () => {
+      vi.mocked(getStoredBriefing).mockResolvedValue({ state: "absent" });
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("skipped");
+      expect(ingestBodies()).toEqual([]);
+    });
+
+    it("never alarms off a briefing stamp that is not a day", async () => {
+      vi.mocked(getStoredBriefing).mockResolvedValue({
+        state: "ok",
+        value: { ...sampleBriefing, date: "tue 25 aug" },
+      });
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("skipped");
+      expect(ingestBodies()).toEqual([]);
+    });
+
+    it("keeps the phone's feeds on the Sydney day and their own two-day window", async () => {
+      // Yesterday for steps is inside the window; for the briefing it would not be.
+      vi.mocked(getStepsRaw).mockResolvedValue({
+        state: "ok",
+        value: JSON.stringify({ v: 1, days: { [sydneyDaysAgo(1)]: 8423 } }),
+      });
+      vi.mocked(getStoredBriefing).mockResolvedValue(briefingFor(utcToday()));
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("skipped");
+      expect(ingestBodies()).toEqual([]);
+    });
+
+    it("still buzzes for a phone that has gone quiet past its window", async () => {
+      vi.mocked(getStepsRaw).mockResolvedValue({
+        state: "ok",
+        value: JSON.stringify({ v: 1, days: { [sydneyDaysAgo(3)]: 8423 } }),
+      });
+      vi.mocked(getStoredBriefing).mockResolvedValue(briefingFor(utcToday()));
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("written");
+      expect(ingestBodies()).toEqual(["steps last posted 3d ago"]);
+    });
+
+    it("names every source that has gone quiet, one line each", async () => {
+      vi.mocked(getSleepRaw).mockResolvedValue({
+        state: "ok",
+        value: JSON.stringify({ v: 1, nights: { [sydneyDaysAgo(4)]: 450 } }),
+      });
+      vi.mocked(getStoredBriefing).mockResolvedValue(
+        briefingFor(utcDaysAgo(1)),
+      );
+
+      const body = await (await GET(req())).json();
+      expect(body.alarm).toBe("written");
+      expect(ingestBodies()).toEqual([
+        "sleep last posted 4d ago",
+        "briefing last posted 1d ago",
+      ]);
+    });
   });
 });

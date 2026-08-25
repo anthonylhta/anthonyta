@@ -36,10 +36,16 @@ export const PUSH_CATEGORIES: readonly PushCategory[] = [
   "health",
 ];
 
-/** The plaintext ingest sources the staleness alarm watches. */
-export type IngestSource = "steps" | "sleep";
+/** The ingest sources the staleness alarm watches — everything the hub is fed by
+ *  something outside it on a schedule. `steps` and `sleep` come off the phone,
+ *  `briefing` off the daily markets routine. */
+export type IngestSource = "steps" | "sleep" | "briefing";
 
-export const INGEST_SOURCES: readonly IngestSource[] = ["steps", "sleep"];
+export const INGEST_SOURCES: readonly IngestSource[] = [
+  "steps",
+  "sleep",
+  "briefing",
+];
 
 /** What the episodes map may be keyed by: one marker per ingest source, plus the
  *  maintenance digest's own. Two different meanings share the map (see
@@ -82,9 +88,9 @@ export interface PushConfig {
    * armed (the next qualifying night notifies). The key names which alarm, and
    * the two read their day differently:
    *
-   *  - an ingest source (`steps`, `sleep`) stores the newest recorded day the
-   *    owner has ALREADY been told about — the episode's identity, so a source
-   *    that starts posting again and stops later is a new episode
+   *  - an ingest source (`steps`, `sleep`, `briefing`) stores the newest recorded
+   *    day the owner has ALREADY been told about — the episode's identity, so a
+   *    source that starts posting again and stops later is a new episode
    *    (`checkStaleness`).
    *  - `chores` stores the day the maintenance digest was last SENT, because
    *    overdue upkeep has no episode identity — it just stays overdue, and the
@@ -112,6 +118,26 @@ export const PUSH_MAX_BYTES = 16_384;
 
 /** A device is silent for this many days before the ingest alarm fires. */
 export const STALE_AFTER_DAYS = 2;
+
+/**
+ * The silence each source is allowed before it is worth saying out loud.
+ *
+ * The phone's two feeds get `STALE_AFTER_DAYS`: a single missed day is ordinary
+ * life (a flat battery, a night without the watch, a phone left at home), so
+ * alarming on one would be noise. The briefing is a scheduled routine that
+ * either POSTs its morning or does not — one skipped morning IS the event, so
+ * its threshold is 0.
+ */
+const STALE_AFTER: Readonly<Record<IngestSource, number>> = Object.freeze({
+  steps: STALE_AFTER_DAYS,
+  sleep: STALE_AFTER_DAYS,
+  briefing: 0,
+});
+
+/** How many days of quiet this source gets before the alarm fires. */
+export function staleAfterDays(source: IngestSource): number {
+  return STALE_AFTER[source];
+}
 
 /** How long overdue upkeep gets to stay overdue before it is mentioned again. */
 export const CHORES_DIGEST_DAYS = 7;
@@ -438,6 +464,48 @@ export function daysBetween(from: string, to: string): number {
   const b = Date.parse(`${to}T00:00:00Z`);
   if (Number.isNaN(a) || Number.isNaN(b)) return 0;
   return Math.round((b - a) / 86_400_000);
+}
+
+/** Today's UTC calendar day. The hub reckons in the Sydney day nearly
+ *  everywhere (lib/fin's `sydneyToday`), so this exists for the one place that
+ *  must not: a source whose schedule is written in UTC has to be judged against
+ *  the UTC day, or the comparison drifts by one every southern summer. The
+ *  cron's `anchorDay` carries the full reasoning. */
+export function utcToday(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/** The three-state read `briefingRecordedDays` judges. Deliberately loose in
+ *  `value` — this module stays free of the Briefing type (and of every store),
+ *  and the only field that matters is a date stamp. */
+export type BriefingRead =
+  | { state: "ok"; value: { date: unknown } }
+  | { state: "absent" }
+  | { state: "error" };
+
+/**
+ * Turn the stored briefing into the recorded-day map `checkStaleness` reads. The
+ * briefing is a single latest-only record rather than a map of days, so its one
+ * `date` — the Sydney day the briefing is FOR — becomes the sole entry.
+ *
+ * Every not-ok case folds to silence rather than an alarm:
+ *  - error   → `null`, the unread ruling: the store being off or flaky says
+ *              nothing about whether the routine posted.
+ *  - absent  → `{}`, unarmed: nothing has ever been ingested, so there is no
+ *              silence to notice yet.
+ *  - a `date` that isn't a day → `{}` as well. `isBriefing` only checks that
+ *              field is a short label, so a malformed stamp can reach the store;
+ *              treating it as unarmed keeps a bad write from manufacturing an
+ *              alarm about a briefing that may well have landed.
+ */
+export function briefingRecordedDays(
+  read: BriefingRead,
+): Record<string, number> | null {
+  if (read.state === "error") return null;
+  if (read.state === "absent") return {};
+  const { date } = read.value;
+  if (typeof date !== "string" || !DATE_RE.test(date)) return {};
+  return { [date]: 1 };
 }
 
 export interface StalenessResult {
