@@ -89,10 +89,9 @@ export default function IshinCaseStudy() {
         <Section title="what I built">
           <ul className="space-y-2">
             <Bullet>
-              Translate in <strong className="text-fg">four registers</strong> —
-              casual (the default; it&apos;s how you talk to friends), polite,
-              formal, blunt — and it explains its own slang and politeness
-              choices inline.
+              Translate in <strong className="text-fg">two registers</strong> —
+              casual (the default; it&apos;s how you talk to friends) and polite
+              — and it explains its own slang and politeness choices inline.
             </Bullet>
             <Bullet>
               A <strong className="text-fg">&ldquo;check&rdquo; mode</strong>: a
