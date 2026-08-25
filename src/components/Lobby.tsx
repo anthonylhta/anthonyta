@@ -4,6 +4,7 @@ import { Bar } from "@/components/terminal/Bar";
 import { Prompt } from "@/components/terminal/Prompt";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { Module } from "@/components/terminal/Module";
+import { MiniHand } from "@/components/terminal/PuzzleCard";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { GithubModule } from "@/components/GithubModule";
@@ -184,13 +185,17 @@ export async function Lobby() {
               </Link>
             }
           >
-            <div className="space-y-1">
+            <div className="space-y-2">
               <p className="text-fg">{handTeaser}</p>
-              <p className="text-xs text-muted">
-                <span lang="ja" className="font-[family-name:var(--font-jp)]">
-                  本日の一手
-                </span>
-              </p>
+              {hand ? (
+                <MiniHand puzzle={hand} />
+              ) : (
+                <p className="text-xs text-muted">
+                  <span lang="ja" className="font-[family-name:var(--font-jp)]">
+                    本日の一手
+                  </span>
+                </p>
+              )}
             </div>
           </Module>
         )}
