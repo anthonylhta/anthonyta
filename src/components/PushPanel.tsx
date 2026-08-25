@@ -35,7 +35,8 @@ type Enroll = "idle" | "busy" | "done" | "denied" | "failed";
 const CATEGORY_COPY: Record<PushCategory, string> = {
   dropbox: "sealed mail arrives in the drop box",
   signin: "a passkey opens the door",
-  ingest: "the phone stops posting steps or sleep",
+  ingest:
+    "the phone stops posting steps or sleep, or the morning briefing doesn't land",
   share: "someone collects a share link",
   chores: "the hub's own upkeep goes overdue",
   health: "one of the projects goes down",

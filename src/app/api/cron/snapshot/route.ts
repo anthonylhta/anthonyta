@@ -1,3 +1,4 @@
+import { getStoredBriefing } from "@/lib/briefingstore";
 import { overdueChores } from "@/lib/chores";
 import { getChoreReads } from "@/lib/connectors/chores";
 import { probeHealth } from "@/lib/connectors/health";
@@ -13,6 +14,7 @@ import {
 import { getSnapIndex, putSnapIndex } from "@/lib/finstore";
 import { classifyHealth, HEALTH_TARGETS } from "@/lib/health";
 import {
+  briefingRecordedDays,
   categoryOn,
   checkChoresDigest,
   checkHealthDown,
@@ -23,7 +25,9 @@ import {
   serializePushConfig,
   setEpisode,
   setHealth,
+  staleAfterDays,
   stalenessBody,
+  utcToday,
   type IngestSource,
   type PushConfig,
 } from "@/lib/push";
@@ -58,10 +62,13 @@ export const dynamic = "force-dynamic";
  *             It piggybacks on this already-authorized nightly run;
  *             `sweepExpiredShares` never throws, but a defensive `catch → -1`
  *             keeps a sweep hiccup from sinking the snapshot.
- * - `alarm` — the ingest-staleness push: the phone pushes steps and sleep, and
- *             nothing else notices when it quietly stops. Once per silence
- *             episode, never off a read error, and never for a store that has
- *             had no data yet (lib/push's `checkStaleness` owns the rules).
+ * - `alarm` — the ingest-staleness push: the phone pushes steps and sleep, the
+ *             daily routine posts the markets briefing, and nothing else notices
+ *             when one of them quietly stops. Once per silence episode, never off
+ *             a read error, and never for a store that has had no data yet
+ *             (lib/push's `checkStaleness` owns the rules). Each source brings
+ *             its own threshold (`staleAfterDays`) and its own calendar day
+ *             (`anchorDay`).
  * - `upkeep`— the maintenance digest: one line naming the chores that have gone
  *             WELL overdue and the command each needs. Server-visible evidence
  *             only (the finance chip's lives in an envelope), the red state
@@ -151,9 +158,12 @@ async function writeTftHistory(
   return (await putTftHistory(JSON.stringify(next))) ? "written" : "failed";
 }
 
-/** The recorded-day map for one plaintext ingest source; `null` when the store
- *  couldn't be read, which `checkStaleness` turns into silence rather than an
- *  alarm — "I can't see it" is not "it stopped". */
+/** The recorded-day map for one ingest source; `null` when the store couldn't be
+ *  read, which `checkStaleness` turns into silence rather than an alarm — "I
+ *  can't see it" is not "it stopped". The briefing is read through its STORE and
+ *  not through `getBriefing`: the connector is `unstable_cache`d (a stale verdict
+ *  from a cache the alarm doesn't control) and folds absent and error into one
+ *  `null`, collapsing the very distinction the three rulings rest on. */
 async function recordedDays(
   source: IngestSource,
 ): Promise<Record<string, number> | null> {
@@ -163,13 +173,35 @@ async function recordedDays(
       if (read.state === "error") return null;
       return read.state === "absent" ? {} : parseStepsStore(read.value).days;
     }
-    const read = await getSleepRaw();
-    if (read.state === "error") return null;
-    return read.state === "absent" ? {} : parseSleepStore(read.value).nights;
+    if (source === "sleep") {
+      const read = await getSleepRaw();
+      if (read.state === "error") return null;
+      return read.state === "absent" ? {} : parseSleepStore(read.value).nights;
+    }
+    return briefingRecordedDays(await getStoredBriefing());
   } catch (err) {
     console.error(`[cron:snapshot] ${source} read failed:`, err);
     return null;
   }
+}
+
+/**
+ * The calendar day a source's freshness is measured against.
+ *
+ * Steps and sleep are pushed by the phone about the owner's own day, so they are
+ * judged on the Sydney day like everything else here. The briefing is the one
+ * thing in the hub reckoned in UTC, and it has to be: both the routine that
+ * writes it (22:00 UTC) and this cron (13:00 UTC) are UTC schedules. The briefing
+ * FOR Sydney day D is posted at 22:00Z on D−1 and carries `date = D`, so at
+ * 13:00Z on UTC day D the newest stored date should be exactly D, year-round.
+ *
+ * Anchoring it on the Sydney day instead would false-alarm EVERY night through
+ * AEDT: 13:00Z is already 00:00 of D+1 in Sydney, so the freshest briefing that
+ * can possibly exist reads as a day behind — and at a threshold of 0, a day
+ * behind is an alarm.
+ */
+function anchorDay(source: IngestSource, sydneyDate: string): string {
+  return source === "briefing" ? utcToday() : sydneyDate;
 }
 
 /** Notify the owner about ingests that have gone quiet, at most once per silence.
@@ -191,8 +223,9 @@ async function alarmStaleIngests(date: string): Promise<Outcome> {
   for (const source of INGEST_SOURCES) {
     const verdict = checkStaleness(
       await recordedDays(source),
-      date,
+      anchorDay(source, date),
       cfg.episodes[source],
+      staleAfterDays(source),
     );
     next = setEpisode(next, source, verdict.episode);
     if (verdict.alarm) alarms.push(stalenessBody(source, verdict.days));

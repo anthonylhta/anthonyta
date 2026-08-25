@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type OverdueChore } from "./chores";
 import {
   addSub,
+  briefingRecordedDays,
   categoryOn,
   checkChoresDigest,
   checkHealthDown,
@@ -26,8 +27,10 @@ import {
   setCategory,
   setEpisode,
   setHealth,
+  staleAfterDays,
   stalenessBody,
   STALE_AFTER_DAYS,
+  utcToday,
   vapidStatus,
   type HealthProbe,
   type PushConfig,
@@ -165,6 +168,31 @@ describe("parsePushConfig", () => {
       steps: "2026-08-10",
       chores: "2026-08-18",
     });
+  });
+
+  it("parses a config written before the briefing was watched, unchanged", () => {
+    // The blob already in R2 has no `briefing` marker — absent must read as
+    // armed, not as a broken config.
+    const parsed = normalizePushConfig({
+      v: 1,
+      subs: [sub()],
+      categories: { ingest: true },
+      episodes: { steps: "2026-08-10", sleep: "2026-08-10" },
+      health: {},
+    });
+    expect(parsed.episodes).toEqual({
+      steps: "2026-08-10",
+      sleep: "2026-08-10",
+    });
+    expect(parsed.episodes.briefing).toBeUndefined();
+    expect(parsed.subs).toHaveLength(1);
+  });
+
+  it("keeps a briefing episode marker now that it is a watched source", () => {
+    const parsed = normalizePushConfig({
+      episodes: { briefing: "2026-08-24" },
+    });
+    expect(parsed.episodes).toEqual({ briefing: "2026-08-24" });
   });
 
   it("keeps only live health entries for projects the hub still probes", () => {
@@ -512,10 +540,136 @@ describe("checkStaleness", () => {
   });
 });
 
+describe("staleAfterDays", () => {
+  it("gives the phone's feeds room for one missed day", () => {
+    expect(staleAfterDays("steps")).toBe(STALE_AFTER_DAYS);
+    expect(staleAfterDays("sleep")).toBe(STALE_AFTER_DAYS);
+  });
+
+  it("gives the briefing none — one skipped morning is the event", () => {
+    expect(staleAfterDays("briefing")).toBe(0);
+  });
+});
+
+describe("utcToday", () => {
+  it("reads the UTC calendar day, not the local one", () => {
+    // 13:00Z is already the next day in Sydney under AEDT; the UTC day is not.
+    expect(utcToday(new Date("2026-01-15T13:00:00.000Z"))).toBe("2026-01-15");
+    expect(utcToday(new Date("2026-01-15T23:59:59.000Z"))).toBe("2026-01-15");
+    expect(utcToday(new Date("2026-01-16T00:00:00.000Z"))).toBe("2026-01-16");
+  });
+});
+
+describe("briefingRecordedDays", () => {
+  it("reports unread on a store error, never an empty map", () => {
+    expect(briefingRecordedDays({ state: "error" })).toBeNull();
+  });
+
+  it("reports an empty map when nothing has ever been ingested", () => {
+    expect(briefingRecordedDays({ state: "absent" })).toEqual({});
+  });
+
+  it("turns the stored day into the single recorded day", () => {
+    expect(
+      briefingRecordedDays({ state: "ok", value: { date: "2026-08-25" } }),
+    ).toEqual({ "2026-08-25": 1 });
+  });
+
+  it("stays unarmed on a stamp that is not a day", () => {
+    // `isBriefing` only checks `date` is a short label, so junk can be stored —
+    // and a malformed stamp must never manufacture an alarm.
+    for (const date of [
+      "mon 25 aug",
+      "",
+      "2026-8-5",
+      20260825,
+      null,
+      undefined,
+    ])
+      expect(briefingRecordedDays({ state: "ok", value: { date } })).toEqual(
+        {},
+      );
+  });
+});
+
+describe("checkStaleness — the briefing's zero-day window", () => {
+  const window = staleAfterDays("briefing");
+
+  it("is fresh on the morning it lands", () => {
+    const out = checkStaleness(
+      { "2026-08-25": 1 },
+      "2026-08-25",
+      undefined,
+      window,
+    );
+    expect(out.reason).toBe("fresh");
+    expect(out.alarm).toBe(false);
+  });
+
+  it("alarms the same night a morning is skipped", () => {
+    const out = checkStaleness(
+      { "2026-08-24": 1 },
+      "2026-08-25",
+      undefined,
+      window,
+    );
+    expect(out).toEqual({
+      alarm: true,
+      days: 1,
+      episode: "2026-08-24",
+      reason: "stale",
+    });
+    expect(stalenessBody("briefing", out.days)).toBe(
+      "briefing last posted 1d ago",
+    );
+  });
+
+  it("says it once, not once a night, while the routine stays quiet", () => {
+    const quiet = { "2026-08-24": 1 };
+    const first = checkStaleness(quiet, "2026-08-25", undefined, window);
+    expect(first.alarm).toBe(true);
+
+    const second = checkStaleness(quiet, "2026-08-26", first.episode, window);
+    expect(second.alarm).toBe(false);
+    expect(second.reason).toBe("notified");
+    expect(second.episode).toBe("2026-08-24");
+  });
+
+  it("re-arms the moment a briefing lands again", () => {
+    const notified = checkStaleness(
+      { "2026-08-24": 1 },
+      "2026-08-26",
+      "2026-08-24",
+      window,
+    );
+    expect(notified.reason).toBe("notified");
+
+    const landed = checkStaleness(
+      { "2026-08-27": 1 },
+      "2026-08-27",
+      notified.episode,
+      window,
+    );
+    expect(landed.reason).toBe("fresh");
+    expect(landed.episode).toBeUndefined();
+
+    // …and the next skipped morning is a new episode, so it buzzes again.
+    const again = checkStaleness(
+      { "2026-08-27": 1 },
+      "2026-08-28",
+      landed.episode,
+      window,
+    );
+    expect(again.alarm).toBe(true);
+    expect(again.episode).toBe("2026-08-27");
+  });
+});
+
 describe("copy and payload", () => {
   it("names the source and the gap, nothing else", () => {
     expect(stalenessBody("steps", 3)).toBe("steps last posted 3d ago");
     expect(stalenessBody("sleep", 11)).toBe("sleep last posted 11d ago");
+    expect(stalenessBody("briefing", 1)).toBe("briefing last posted 1d ago");
   });
 
   it("carries only a tag, a line and a destination", () => {
