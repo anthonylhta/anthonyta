@@ -1,6 +1,12 @@
 import type { HandPuzzle } from "@/lib/connectors/riichi";
 import { doraFromIndicator, tileLabel, type TileCode } from "@/lib/tiles";
 
+/** Where a guest goes to actually play today's hand — the riichi app, which
+ *  holds the answer and tracks the streak (ADR 0047). One constant so the page
+ *  and the lobby tile can't point different ways. */
+export const HAND_OF_THE_DAY_URL =
+  "https://riichi.anthonyta.dev/hand-of-the-day";
+
 /**
  * Renders today's hand natively, read-only. Display-only (ADR 0047): the answer
  * lives in the riichi app, so the hub shows the situation and links out to solve —
@@ -21,7 +27,7 @@ export function PuzzleCard({ puzzle }: { puzzle: HandPuzzle }) {
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-hairline pt-4">
         <a
-          href="https://riichi.anthonyta.dev/hand-of-the-day"
+          href={HAND_OF_THE_DAY_URL}
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs text-amber hover:underline"
