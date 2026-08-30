@@ -106,6 +106,11 @@ function isName(x: unknown): x is string {
   return typeof x === "string" && x.length > 0 && x.length <= MAX_NAME;
 }
 
+/** A rest-clock stamp: epoch ms, and nothing a clock could not have produced. */
+function isRestAt(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x) && x >= 0;
+}
+
 function isSet(x: unknown): x is GymSet {
   return (
     isObj(x) &&
@@ -487,6 +492,11 @@ export interface GymDraft {
   templateId?: string;
   entries: GymEntry[];
   note: string;
+  /** When the sets last changed, epoch ms — what the rest clock counts from. It
+   *  rides in the draft rather than in component state for the same reason the
+   *  sets do: a phone tab killed between exercises must come back to the workout
+   *  it left, clock included, and this is the mirror that survives that. */
+  restAt?: number;
 }
 
 export const GYM_DRAFT_KEY = "gym-draft";
@@ -508,6 +518,7 @@ export function parseDraft(json: string): GymDraft | null {
   if (!isObj(x)) return null;
   if (x.templateId !== undefined && !isId(x.templateId)) return null;
   if (typeof x.note !== "string" || x.note.length > MAX_NOTE) return null;
+  if (x.restAt !== undefined && !isRestAt(x.restAt)) return null;
   if (
     !Array.isArray(x.entries) ||
     x.entries.length > MAX_ENTRIES ||
@@ -518,6 +529,7 @@ export function parseDraft(json: string): GymDraft | null {
     ...(x.templateId !== undefined ? { templateId: x.templateId } : {}),
     entries: x.entries,
     note: x.note,
+    ...(x.restAt !== undefined ? { restAt: x.restAt } : {}),
   };
 }
 
@@ -541,6 +553,20 @@ export function draftToSession(
 /** Whether a draft holds anything worth saving (a card with no sets doesn't). */
 export function draftHasSets(draft: GymDraft): boolean {
   return draft.entries.some((e) => e.sets.length > 0);
+}
+
+/** Seconds elapsed since the last set change, whole and never negative — a
+ *  device clock nudged backwards mid-workout reads 0, not a countdown. */
+export function restSeconds(restAt: number, now: number): number {
+  return Math.max(0, Math.floor((now - restAt) / 1000));
+}
+
+/** `m:ss`, capped at `59:59`. Past an hour the number has stopped being a rest
+ *  timer and become a note that the tab was left open, so it stops climbing. */
+export function formatRest(sec: number): string {
+  const capped = Math.min(sec, 3599);
+  const m = Math.floor(capped / 60);
+  return `${m}:${String(capped - m * 60).padStart(2, "0")}`;
 }
 
 /**
@@ -660,6 +686,56 @@ export function e1rmSeries(cfg: GymConfig, exerciseId: string): number[] {
     out.push(Math.max(...entry.sets.map((set) => epley(set.w, set.r))));
   }
   return out.reverse();
+}
+
+/** How long a best estimate must stand before the stall is worth naming — three
+ *  weeks of the same ceiling is a training block, not a bad night's sleep. */
+export const PLATEAU_MIN_DAYS = 21;
+
+/** And how many sessions must have gone into it. A lift not trained since its
+ *  best is not plateaued, it is neglected, and the two want opposite answers. */
+export const PLATEAU_MIN_SESSIONS = 3;
+
+/**
+ * Whole weeks since the lift's best estimate, once the stall is real: the best
+ * `bestE1rm` knows is at least `PLATEAU_MIN_DAYS` old AND at least
+ * `PLATEAU_MIN_SESSIONS` sessions have trained the exercise since. Null
+ * otherwise — including for a lift with no sets at all.
+ *
+ * The session condition is the whole point. Days alone would flag every lift
+ * dropped from the split, which is the one case where "plateau" is exactly the
+ * wrong word: nothing stalled, it simply stopped being trained.
+ *
+ * Matching the best RESETS the clock, and that falls out of `bestE1rm` keeping
+ * the most recent of equal estimates: repeating the ceiling today re-dates it to
+ * today. Holding a hard-won number is not stalling.
+ *
+ * Days are counted by walking `prevDay` back from `today`, so the same calendar
+ * arithmetic the strips use decides this too, and a best dated ahead of today
+ * (a device clock behind the log) simply counts zero rather than going negative.
+ */
+export function plateauWeeks(
+  cfg: GymConfig,
+  exerciseId: string,
+  today: string,
+): number | null {
+  const best = bestE1rm(cfg, exerciseId);
+  if (best === null) return null;
+  let days = 0;
+  let cursor = today;
+  // `YYYY-MM-DD` sorts as it dates, so a string compare is the day compare.
+  while (cursor > best.date) {
+    cursor = prevDay(cursor);
+    days++;
+  }
+  if (days < PLATEAU_MIN_DAYS) return null;
+  const since = cfg.sessions.filter(
+    (s) =>
+      s.date > best.date &&
+      s.entries.some((e) => e.exerciseId === exerciseId && e.sets.length > 0),
+  ).length;
+  if (since < PLATEAU_MIN_SESSIONS) return null;
+  return Math.floor(days / 7);
 }
 
 /**

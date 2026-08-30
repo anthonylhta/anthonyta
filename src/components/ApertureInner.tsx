@@ -73,6 +73,7 @@ import {
   GYM_WEEKLY_TARGET,
   liftChips,
   normalizeGymConfig,
+  plateauWeeks,
   sessionCounts,
   sessionsThisWeek,
   type GymConfig,
@@ -586,10 +587,15 @@ export function ApertureInner({
     weightNow && weightNow.deltaPerWeek !== null
       ? driftLabel(weightNow.deltaPerWeek)
       : null;
-  // Each chip's figure, and the progression behind it — the same series /gym
-  // plots per exercise, taken off the log already open here.
+  // Each chip's figure, the progression behind it, and how long that figure has
+  // stood — the same series /gym plots per exercise, taken off the log already
+  // open here.
   const lifts = gymCfg
-    ? liftChips(gymCfg).map((l) => ({ ...l, series: e1rmSeries(gymCfg, l.id) }))
+    ? liftChips(gymCfg).map((l) => ({
+        ...l,
+        series: e1rmSeries(gymCfg, l.id),
+        plateau: plateauWeeks(gymCfg, l.id, today),
+      }))
     : [];
   const fed = mealsCfg ? trailingAverage(mealsCfg, today, 7) : null;
   // What the two logs say together, when both are kept well enough to be asked:
@@ -1165,6 +1171,11 @@ export function ApertureInner({
                   className="border border-hairline px-1.5 py-px tabular-nums text-muted"
                 >
                   <span className="text-fg/90">{l.name}</span> {l.e1rm}
+                  {/* Trained since, and no higher for it (`plateauWeeks`) — the
+                      one thing a chip can say that the number can't. */}
+                  {l.plateau !== null && (
+                    <span className="text-amber"> · {l.plateau}wk</span>
+                  )}
                   {/* Where the figure came from, at chip scale — two points is
                       the least a line can mean anything with. The shared
                       sparkline sizes itself (`h-12 w-full`), so the wrapper
