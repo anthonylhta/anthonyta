@@ -18,7 +18,9 @@ import { isValidSeq } from "./seqrule";
 export const TODO_MAX_BYTES = 65536;
 
 export const MAX_ITEMS = 500;
-const MAX_TEXT = 500;
+/** Per-capture text cap. Exported because a capture composed elsewhere — a
+ *  /reader headline — has to be built to fit it before it is ever offered. */
+export const MAX_TEXT = 500;
 
 export interface TodoItem {
   id: string;
@@ -143,4 +145,47 @@ export function openItems(cfg: TodoConfig): TodoItem[] {
 
 export function doneCount(cfg: TodoConfig): number {
   return cfg.items.filter((i) => i.done).length;
+}
+
+/* --- captures as rendered text ---------------------------------------------
+ *
+ * Captures increasingly arrive carrying a URL — a /reader headline saves as
+ * `title — link` — and a link you can't open is just noise in the middle of the
+ * line. Splitting is done here, in the pure spine, so the rendering component
+ * stays a map over parts.
+ */
+
+/** One run of a capture's text. `href` present means this part IS a link, and
+ *  its `text` is what to show for it. */
+export interface TextPart {
+  text: string;
+  href?: string;
+}
+
+/** Trailing sentence punctuation a URL almost never really ends in — "see
+ *  https://x.dev." must link `https://x.dev` and leave the stop as text. The
+ *  closing paren goes back too: parenthesised links are far commoner than
+ *  paths that end in one. */
+const TRAILING_PUNCT = /[.,;:!?)]+$/;
+
+/**
+ * Split a capture into its plain runs and the http(s) links inside it. Only an
+ * explicit scheme counts: a bare `example.com` is as likely to be prose, and
+ * guessing a scheme is how a link ends up pointing somewhere it shouldn't.
+ * Nothing here parses markup — the parts are text either way, and only the
+ * href gains meaning.
+ */
+export function linkParts(text: string): TextPart[] {
+  const parts: TextPart[] = [];
+  let at = 0;
+  for (const m of text.matchAll(/https?:\/\/\S+/gi)) {
+    const href = m[0].replace(TRAILING_PUNCT, "");
+    // Nothing but a scheme survived the trim — not a link, leave it as text.
+    if (!/^https?:\/\/\S/i.test(href)) continue;
+    if (m.index > at) parts.push({ text: text.slice(at, m.index) });
+    parts.push({ text: href, href });
+    at = m.index + href.length;
+  }
+  if (at < text.length) parts.push({ text: text.slice(at) });
+  return parts;
 }

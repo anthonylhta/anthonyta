@@ -18,6 +18,8 @@
  * Dexerto for Riot/esports, Reactor (Tor) for serialized/genre fiction.
  */
 
+import { MAX_TEXT } from "./todo";
+
 export interface Feed {
   key: string;
   label: string;
@@ -226,4 +228,20 @@ export function parseVisit(json: string | null): ReaderVisit | null {
  *  would be a guess, and the age column already says "—". */
 export function isNew(item: FeedItem, visit: ReaderVisit): boolean {
   return item.ts !== null && item.ts > visit.last;
+}
+
+/* --- saving a headline (roadmap 54 → the capture list) ---------------------- */
+
+/**
+ * A headline as one capture line: `title — link`. Over the capture cap the
+ * TITLE is what gives, never the link — a cut link is a dead capture, and the
+ * whole point of saving the row is being able to open it later. (A link long
+ * enough to blow the cap on its own would still be clipped by `addItem`; no
+ * feed has ever come close.)
+ */
+export function captureText(title: string, link: string): string {
+  const tail = ` — ${link}`;
+  const room = MAX_TEXT - tail.length;
+  if (title.length <= room) return `${title}${tail}`;
+  return `${title.slice(0, Math.max(0, room - 1))}…${tail}`;
 }

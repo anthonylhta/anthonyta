@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { MAX_TEXT } from "./todo";
 import {
+  captureText,
   decodeEntities,
   isNew,
   mergeItems,
@@ -209,5 +211,22 @@ describe("isNew", () => {
     const first = rollVisit(null, now);
     expect(isNew(item(now - 1000), first)).toBe(false);
     expect(isNew(item(now), first)).toBe(false);
+  });
+});
+
+describe("captureText", () => {
+  it("leaves a headline that fits alone", () => {
+    expect(captureText("Rust 2.0 lands", "https://x.dev/rust")).toBe(
+      "Rust 2.0 lands — https://x.dev/rust",
+    );
+  });
+
+  it("truncates the title, never the link, over the capture cap", () => {
+    const link = "https://x.dev/a-fairly-long-path/with-a-slug";
+    const out = captureText("t".repeat(600), link);
+    expect(out.length).toBeLessThanOrEqual(MAX_TEXT);
+    expect(out.endsWith(`… — ${link}`)).toBe(true);
+    // The whole link survives, which is the point of cutting the title.
+    expect(out).toContain(link);
   });
 });
