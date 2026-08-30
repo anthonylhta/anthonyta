@@ -109,6 +109,17 @@ export interface DayStats {
   date: string;
   visitors_hll_b64: string;
   paths: Record<string, PathStat>;
+  /**
+   * Views per handed-out link, keyed `${path}?s=${tag}`. Optional: absent on every
+   * day nobody arrived from a tagged link (and on every record written before the
+   * feature existed), so a day without one looks exactly as it always did.
+   *
+   * Views ONLY, deliberately no sketch — a source line never claims uniques. These
+   * buckets are small by nature (one link handed to one employer), and a unique
+   * estimate over a handful of hits would read like watching a named recipient
+   * rather than counting traffic.
+   */
+  sources?: Record<string, number>;
 }
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -130,6 +141,14 @@ export function isDayStats(x: unknown): x is DayStats {
       typeof s.hll_b64 !== "string"
     )
       return false;
+  }
+  // `sources` is optional (see DayStats) — present, it must be a plain tally of
+  // non-negative view counts.
+  if (d.sources !== undefined) {
+    if (typeof d.sources !== "object" || d.sources === null) return false;
+    for (const views of Object.values(d.sources as Record<string, unknown>)) {
+      if (!Number.isSafeInteger(views) || (views as number) < 0) return false;
+    }
   }
   return true;
 }
@@ -179,6 +198,53 @@ export function topPaths(
       uniques: hllEstimate(b64ToBytes(s.hll_b64)),
     }))
     .sort((a, b) => b.views - a.views);
+}
+
+// --- source tags (which handed-out link brought the view) ---------------------
+
+/**
+ * The shape of a `?s=` tag: lowercase letters, digits and hyphens, at most 16
+ * characters. Deliberately narrow — the tags are minted by hand when a link goes out
+ * (`/resume?s=seek`, `?s=linkedin`, `?s=pdf`), so anything else is a stranger's junk
+ * and is dropped. The query string itself is never stored or transmitted: only a tag
+ * matching this shape travels with the beacon, and only as part of a bucket key.
+ */
+export const SOURCE_TAG_RE = /^[a-z0-9-]{1,16}$/;
+
+/** Guard for a well-formed source tag — used client-side before the beacon sends it
+ *  and again server-side before it is recorded. */
+export function isSourceTag(x: unknown): x is string {
+  return typeof x === "string" && SOURCE_TAG_RE.test(x);
+}
+
+/**
+ * Cap on distinct source buckets in one day's record. Far tighter than the path cap:
+ * the owner mints a handful of tags by hand, so anything approaching this is invented
+ * traffic. Past the cap a new key folds into OVERFLOW_PATH, exactly as a new path
+ * does — the day's total views are unaffected either way.
+ */
+export const MAX_TRACKED_SOURCES = 20;
+
+/**
+ * The bucket a `${path}?s=${tag}` key should land in given the sources already
+ * tallied today. The path cap's rule at a tighter cap, so the two breakdowns can't
+ * drift apart. Pure.
+ */
+export function sourceBucket(
+  sources: Record<string, unknown>,
+  key: string,
+  cap: number = MAX_TRACKED_SOURCES,
+): string {
+  return pathBucket(sources, key, cap);
+}
+
+/** A day's source buckets by views, most-viewed first (ties broken by key so the
+ *  panel's order is stable) — for the dashboard. Views only: there is no unique
+ *  estimate to report here, by design. */
+export function topSources(day: DayStats): { key: string; views: number }[] {
+  return Object.entries(day.sources ?? {})
+    .map(([key, views]) => ({ key, views }))
+    .sort((a, b) => b.views - a.views || (a.key < b.key ? -1 : 1));
 }
 
 // --- base64 for the packed sketches (Node + browser) --------------------------

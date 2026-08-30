@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "vault-sync": "node --dns-result-order=ipv4first --no-network-family-autoselection --env-file=.env.local --import tsx scripts/vault-sync.ts",
     "hub-backup": "node --dns-result-order=ipv4first --no-network-family-autoselection --env-file=.env.local --import tsx scripts/hub-backup.ts",
+    "hub-decrypt": "node --import tsx scripts/hub-decrypt.ts",
     "aperture-sync": "node --dns-result-order=ipv4first --no-network-family-autoselection --env-file=.env.local --import tsx scripts/aperture-sync.ts"
   },
   "dependencies": {

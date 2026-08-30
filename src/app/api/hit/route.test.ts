@@ -59,6 +59,21 @@ describe("POST /api/hit", () => {
     expect(mockRecord.mock.calls[0][1]).toBe("/projects");
   });
 
+  it("records the source of a tagged link alongside the view", async () => {
+    await expect204(await hit({ path: "/resume", s: "seek" }));
+    expect(mockRecord).toHaveBeenCalledTimes(1);
+    expect(mockRecord.mock.calls[0][1]).toBe("/resume");
+    expect(mockRecord.mock.calls[0][3]).toBe("seek");
+  });
+
+  it("counts the view but drops a junk tag", async () => {
+    for (const s of ["Seek", "a b", "x".repeat(17), "", 42, null]) {
+      await expect204(await hit({ path: "/resume", s }));
+    }
+    expect(mockRecord).toHaveBeenCalledTimes(6);
+    for (const call of mockRecord.mock.calls) expect(call[3]).toBeUndefined();
+  });
+
   it("no-ops when the store is off", async () => {
     mockEnabled.mockReturnValue(false);
     await expect204(await hit());

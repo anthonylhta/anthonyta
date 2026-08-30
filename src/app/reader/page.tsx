@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { ReaderList } from "@/components/ReaderList";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { getReaderItems } from "@/lib/connectors/reader";
+import { r2Enabled } from "@/lib/r2";
 import { FEEDS } from "@/lib/reader";
 
 export const metadata = { title: "reader" };
@@ -52,7 +53,7 @@ export default async function ReaderPage() {
           <span className="ml-auto">refreshes every 30 min</span>
         </div>
 
-        <ReaderList items={items} now={now} />
+        <ReaderList items={items} now={now} offline={!r2Enabled()} />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>

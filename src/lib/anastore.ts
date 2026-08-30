@@ -7,6 +7,7 @@ import {
   newDaySalt,
   newHll,
   pathBucket,
+  sourceBucket,
   visitorHash,
   type DayStats,
 } from "./analytics";
@@ -148,16 +149,19 @@ export async function readDays(today: string, n: number): Promise<DayStats[]> {
 
 /**
  * Fold one visitor hash into today's record: `views++` for `path` and an `hllAdd`
- * into both that path's sketch and the site-wide sketch, then write. `true` on a
- * successful write. No-ops (returns false) when the store is off or the read errored
- * — an "error" never clobbers the day. Concurrency is last-writer-wins: two hits
- * racing the same second's record may drop one view/one sketch update, the accepted
- * tradeoff at this volume against locking an aggregate that's already approximate.
+ * into both that path's sketch and the site-wide sketch, then write. A `tag` (from a
+ * handed-out `?s=` link) additionally tallies a view under `${path}?s=${tag}`.
+ * `true` on a successful write. No-ops (returns false) when the store is off or the
+ * read errored — an "error" never clobbers the day. Concurrency is last-writer-wins:
+ * two hits racing the same second's record may drop one view/one sketch update, the
+ * accepted tradeoff at this volume against locking an aggregate that's already
+ * approximate.
  */
 export async function recordHit(
   today: string,
   path: string,
   hash: Uint8Array,
+  tag?: string,
 ): Promise<boolean> {
   if (!r2Enabled()) return false;
   const read = await readDay(today);
@@ -185,6 +189,15 @@ export async function recordHit(
   stat.hll_b64 = bytesToB64(preg);
   day.paths[key] = stat;
 
+  // A tagged arrival also tallies under its source key — views only, no sketch (see
+  // DayStats.sources), capped like the path breakdown. The record gains a `sources`
+  // object only once a tagged link is actually hit.
+  if (tag) {
+    const sources = (day.sources ??= {});
+    const skey = sourceBucket(sources, `${path}?s=${tag}`);
+    sources[skey] = (sources[skey] ?? 0) + 1;
+  }
+
   const wrote = await writeKey(dayPath(today), JSON.stringify(day), {
     overwrite: true,
     contentType: "application/json",
@@ -202,11 +215,13 @@ export async function recordHit(
 /**
  * Merge day records into one combined `DayStats` — summed views, register-max HLLs —
  * so the dashboard can total a week's uniques and paths without the server ever
- * reconstructing an identity. Pure. `date` is the latest in the set ("" if empty).
+ * reconstructing an identity. Source tallies simply sum (days without any contribute
+ * nothing). Pure. `date` is the latest in the set ("" if empty).
  */
 export function mergeDays(days: DayStats[]): DayStats {
   let visitors = newHll();
   const paths: Record<string, { views: number; reg: Uint8Array }> = {};
+  const sources: Record<string, number> = {};
   let date = "";
   for (const d of days) {
     if (d.date > date) date = d.date;
@@ -218,6 +233,8 @@ export function mergeDays(days: DayStats[]): DayStats {
       if (s.hll_b64) cur.reg = hllMerge(cur.reg, b64ToBytes(s.hll_b64));
       paths[p] = cur;
     }
+    for (const [k, views] of Object.entries(d.sources ?? {}))
+      sources[k] = (sources[k] ?? 0) + views;
   }
   return {
     v: 1,
@@ -229,6 +246,9 @@ export function mergeDays(days: DayStats[]): DayStats {
         { views: s.views, hll_b64: bytesToB64(s.reg) },
       ]),
     ),
+    // Absent rather than empty when no day carried a tagged hit, so a merged week
+    // reads exactly like a record from before the feature.
+    ...(Object.keys(sources).length > 0 ? { sources } : {}),
   };
 }
 

@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useRef, useSyncExternalStore } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import { useTodo } from "@/components/useTodo";
 import {
+  captureText,
   isNew,
   parseVisit,
   READER_VISIT_KEY,
@@ -21,6 +23,9 @@ import {
  * wears, plus a count above the list. `now` still comes from the server render,
  * so the ages read the same whether or not the memory is available.
  */
+
+/** How long a saved/failed row keeps saying so before returning to `+`. */
+const FLASH_MS = 2000;
 
 /** Read, roll, write — best effort. A blocked or full store just means this
  *  device shows no markers, which is exactly what the page did before. */
@@ -63,10 +68,38 @@ function useVisit(): ReaderVisit | null {
   );
 }
 
-export function ReaderList({ items, now }: { items: FeedItem[]; now: number }) {
+export function ReaderList({
+  items,
+  now,
+  offline,
+}: {
+  items: FeedItem[];
+  now: number;
+  offline: boolean;
+}) {
   const visit = useVisit();
   const fresh =
     visit === null ? 0 : items.filter((i) => isNew(i, visit)).length;
+
+  // "Read later" — a headline into the E2EE capture list, through the same hook
+  // the homepage board writes with. Only offered once the vault is open: locked
+  // (and offline, which is locked's cause), the page is exactly what it was, with
+  // nothing sealed-looking to explain.
+  const todo = useTodo(offline);
+  const [flash, setFlash] = useState<{ link: string; ok: boolean } | null>(
+    null,
+  );
+
+  async function saveItem(item: FeedItem) {
+    const ok = await todo.capture(captureText(item.title, item.link));
+    setFlash({ link: item.link, ok });
+    // The row says what happened for a beat, then goes back to offering. A
+    // newer tap has its own say — don't clear someone else's.
+    setTimeout(
+      () => setFlash((f) => (f?.link === item.link ? null : f)),
+      FLASH_MS,
+    );
+  }
 
   return (
     <>
@@ -78,29 +111,47 @@ export function ReaderList({ items, now }: { items: FeedItem[]; now: number }) {
 
       <div className="flex flex-col">
         {items.map((item) => (
-          <a
+          // The row is the wrapper, not the link: a button inside an anchor is
+          // invalid, so the two sit side by side and the anchor takes the rest.
+          <div
             key={item.link}
-            href={item.link}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-baseline gap-3 border-t border-hairline/60 px-4 py-2 transition-colors first:border-t-0 hover:bg-surface/30"
+            className="flex items-baseline border-t border-hairline/60 transition-colors first:border-t-0 hover:bg-surface/30"
           >
-            <span
-              className={`w-10 shrink-0 tabular-nums text-xs ${
-                visit !== null && isNew(item, visit)
-                  ? "text-amber"
-                  : "text-muted"
-              }`}
+            <a
+              href={item.link}
+              target="_blank"
+              rel="noreferrer"
+              className="flex min-w-0 flex-1 items-baseline gap-3 px-4 py-2"
             >
-              {timeAgo(item.ts, now)}
-            </span>
-            <span className="w-24 shrink-0 truncate text-[10px] uppercase tracking-[0.12em] text-muted">
-              {item.source}
-            </span>
-            <span className="min-w-0 flex-1 text-sm text-fg/90">
-              {item.title}
-            </span>
-          </a>
+              <span
+                className={`w-10 shrink-0 tabular-nums text-xs ${
+                  visit !== null && isNew(item, visit)
+                    ? "text-amber"
+                    : "text-muted"
+                }`}
+              >
+                {timeAgo(item.ts, now)}
+              </span>
+              <span className="w-24 shrink-0 truncate text-[10px] uppercase tracking-[0.12em] text-muted">
+                {item.source}
+              </span>
+              <span className="min-w-0 flex-1 text-sm text-fg/90">
+                {item.title}
+              </span>
+            </a>
+            {/* Fixed width so "saved" doesn't shove the headline sideways. */}
+            {todo.unlocked && (
+              <button
+                type="button"
+                aria-label="save to needs doing"
+                disabled={todo.busy}
+                onClick={() => void saveItem(item)}
+                className="w-16 shrink-0 py-2 pl-2 pr-4 text-right text-xs text-muted/60 transition-colors hover:text-amber disabled:opacity-40"
+              >
+                {flash?.link === item.link ? (flash.ok ? "saved" : "!") : "+"}
+              </button>
+            )}
+          </div>
         ))}
       </div>
     </>

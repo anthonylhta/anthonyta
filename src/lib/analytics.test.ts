@@ -8,12 +8,16 @@ import {
   hllMerge,
   HLL_REGISTERS,
   isDayStats,
+  isSourceTag,
   MAX_TRACKED_PATHS,
+  MAX_TRACKED_SOURCES,
   newDaySalt,
   newHll,
   OVERFLOW_PATH,
   pathBucket,
+  sourceBucket,
   topPaths,
+  topSources,
   visitorHash,
 } from "./analytics";
 
@@ -133,6 +137,22 @@ describe("isDayStats", () => {
     ).toBe(false);
     expect(isDayStats(null)).toBe(false);
   });
+  it("accepts a source tally, present or absent", () => {
+    expect(isDayStats(good)).toBe(true); // absent — every record before the feature
+    expect(isDayStats({ ...good, sources: {} })).toBe(true);
+    expect(isDayStats({ ...good, sources: { "/resume?s=seek": 3 } })).toBe(
+      true,
+    );
+  });
+  it("rejects a malformed source tally", () => {
+    for (const views of [-1, 1.5, "3", null]) {
+      expect(
+        isDayStats({ ...good, sources: { "/resume?s=seek": views } }),
+      ).toBe(false);
+    }
+    expect(isDayStats({ ...good, sources: null })).toBe(false);
+    expect(isDayStats({ ...good, sources: "seek" })).toBe(false);
+  });
 });
 
 describe("pathBucket (distinct-path cap)", () => {
@@ -193,5 +213,109 @@ describe("topPaths", () => {
     const ranked = topPaths(day);
     expect(ranked.map((r) => r.path)).toEqual(["/", "/projects", "/contact"]);
     expect(ranked[0].uniques).toBeGreaterThan(ranked[2].uniques);
+  });
+});
+
+describe("isSourceTag", () => {
+  it("accepts the hand-minted tag shape", () => {
+    for (const tag of [
+      "seek",
+      "linkedin",
+      "linked-in2",
+      "pdf",
+      "a",
+      "x".repeat(16),
+    ])
+      expect(isSourceTag(tag)).toBe(true);
+  });
+
+  it("rejects anything else — case, length, spaces, punctuation, non-strings", () => {
+    for (const junk of [
+      "Seek",
+      "",
+      "x".repeat(17),
+      "a b",
+      "a?b",
+      "a/b",
+      "seek\n", // a trailing newline must not slip into a stored key
+      "sé",
+      42,
+      null,
+      undefined,
+      { tag: "seek" },
+    ])
+      expect(isSourceTag(junk)).toBe(false);
+  });
+});
+
+describe("sourceBucket (distinct-source cap)", () => {
+  /** A tally already holding `n` distinct source keys. */
+  const withSources = (n: number): Record<string, unknown> =>
+    Object.fromEntries(
+      Array.from({ length: n }, (_, i) => [`/resume?s=t${i}`, 1]),
+    );
+
+  it("returns the key itself when it is already tallied", () => {
+    expect(sourceBucket({ "/resume?s=seek": 4 }, "/resume?s=seek")).toBe(
+      "/resume?s=seek",
+    );
+  });
+
+  it("returns the key itself while there is room under the cap", () => {
+    expect(
+      sourceBucket(withSources(MAX_TRACKED_SOURCES - 1), "/resume?s=fresh"),
+    ).toBe("/resume?s=fresh");
+  });
+
+  it("folds a new key into the overflow bucket once the cap is reached", () => {
+    expect(
+      sourceBucket(withSources(MAX_TRACKED_SOURCES), "/resume?s=fresh"),
+    ).toBe(OVERFLOW_PATH);
+  });
+
+  it("keeps absorbing into the overflow bucket once it exists", () => {
+    const sources = { ...withSources(MAX_TRACKED_SOURCES), [OVERFLOW_PATH]: 2 };
+    // an already-tallied key stays itself past the cap…
+    expect(sourceBucket(sources, "/resume?s=t0")).toBe("/resume?s=t0");
+    // …and the overflow bucket, being tracked, absorbs without further growth.
+    expect(sourceBucket(sources, OVERFLOW_PATH)).toBe(OVERFLOW_PATH);
+    expect(sourceBucket(sources, "/resume?s=brand-new")).toBe(OVERFLOW_PATH);
+  });
+
+  it("honors a smaller explicit cap", () => {
+    expect(sourceBucket({ "/a?s=x": 1, "/a?s=y": 1 }, "/a?s=z", 2)).toBe(
+      OVERFLOW_PATH,
+    );
+    expect(sourceBucket({ "/a?s=x": 1 }, "/a?s=z", 2)).toBe("/a?s=z");
+  });
+});
+
+describe("topSources", () => {
+  const day = (sources?: Record<string, number>): DayStats => ({
+    v: 1,
+    date: "2026-08-30",
+    visitors_hll_b64: bytesToB64(sketchOf(10)),
+    paths: { "/resume": { views: 13, hll_b64: bytesToB64(sketchOf(9)) } },
+    ...(sources ? { sources } : {}),
+  });
+
+  it("orders buckets by views, ties broken by key", () => {
+    const ranked = topSources(
+      day({
+        "/resume?s=linkedin": 2,
+        "/resume?s=seek": 9,
+        "/resume?s=pdf": 2,
+      }),
+    );
+    expect(ranked.map((r) => r.key)).toEqual([
+      "/resume?s=seek",
+      "/resume?s=linkedin",
+      "/resume?s=pdf",
+    ]);
+    expect(ranked[0].views).toBe(9);
+  });
+
+  it("is empty for a day nobody reached through a tagged link", () => {
+    expect(topSources(day())).toEqual([]);
   });
 });
