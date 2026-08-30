@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { isSourceTag } from "@/lib/analytics";
 import { recordHit, todayVisitorHash } from "@/lib/anastore";
 import { sydneyToday } from "@/lib/fin";
 import { r2Enabled } from "@/lib/r2";
@@ -7,11 +8,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * Cookieless pageview recorder (ADR: privacy-preserving analytics). Deliberately
- * PUBLIC — the public site's <Beacon/> POSTs `{ path }` here — but it never returns
- * anything readable: every branch answers an empty 204, so it can't be turned into a
- * counter or an oracle. Nothing identifying is stored: the (ip, ua) signal is hashed
- * once under a daily-rotating salt (anastore) and folded into an HLL sketch; the raw
- * ip and hash are dropped.
+ * PUBLIC — the public site's <Beacon/> POSTs `{ path, s? }` here — but it never
+ * returns anything readable: every branch answers an empty 204, so it can't be turned
+ * into a counter or an oracle. Nothing identifying is stored: the (ip, ua) signal is
+ * hashed once under a daily-rotating salt (anastore) and folded into an HLL sketch;
+ * the raw ip and hash are dropped.
  *
  * Skipped (204, no write) when: the store is off, the UA looks like a crawler, `DNT`/
  * `Sec-GPC` opt-out is sent, or the request carries the OWNER's own session — the
@@ -64,9 +65,11 @@ export async function POST(req: Request) {
     if (session?.user) return noContent();
 
     let path: unknown;
+    let source: unknown;
     try {
       const body: unknown = await req.json();
       path = (body as { path?: unknown })?.path;
+      source = (body as { s?: unknown })?.s;
     } catch {
       return noContent();
     }
@@ -77,7 +80,15 @@ export async function POST(req: Request) {
     const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim();
     const today = sydneyToday();
     const hash = await todayVisitorHash(today, ip, ua);
-    if (hash) await recordHit(today, path, hash);
+    // A junk `?s=` tag is simply dropped: the pageview still counts, it just lands in
+    // no source bucket. Only the tag itself is passed on — never the query string.
+    if (hash)
+      await recordHit(
+        today,
+        path,
+        hash,
+        isSourceTag(source) ? source : undefined,
+      );
   } catch {
     // Recording is best-effort; a store/parse failure must never surface to the
     // client — the beacon gets its 204 regardless.

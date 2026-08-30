@@ -5,6 +5,7 @@ import {
   addItem,
   clearDone,
   doneCount,
+  linkParts,
   normalizeTodoConfig,
   openItems,
   removeItem,
@@ -152,5 +153,52 @@ describe("openItems", () => {
       "new",
       "old",
     ]);
+  });
+});
+
+describe("linkParts", () => {
+  it("leaves text with no link as one plain part", () => {
+    expect(linkParts("buy milk")).toEqual([{ text: "buy milk" }]);
+  });
+
+  it("splits a link out of the middle of a line", () => {
+    expect(linkParts("read https://x.dev/post later")).toEqual([
+      { text: "read " },
+      { text: "https://x.dev/post", href: "https://x.dev/post" },
+      { text: " later" },
+    ]);
+  });
+
+  it("gives trailing sentence punctuation back to the text", () => {
+    expect(linkParts("see https://x.dev.")).toEqual([
+      { text: "see " },
+      { text: "https://x.dev", href: "https://x.dev" },
+      { text: "." },
+    ]);
+  });
+
+  it("unwraps a parenthesised link", () => {
+    expect(linkParts("(https://x.dev)")).toEqual([
+      { text: "(" },
+      { text: "https://x.dev", href: "https://x.dev" },
+      { text: ")" },
+    ]);
+  });
+
+  it("finds every link on the line", () => {
+    expect(linkParts("https://a.dev and https://b.dev")).toEqual([
+      { text: "https://a.dev", href: "https://a.dev" },
+      { text: " and " },
+      { text: "https://b.dev", href: "https://b.dev" },
+    ]);
+  });
+
+  it("only follows an explicit http(s) scheme", () => {
+    expect(linkParts("ftp://x.dev")).toEqual([{ text: "ftp://x.dev" }]);
+    expect(linkParts("example.com/post")).toEqual([
+      { text: "example.com/post" },
+    ]);
+    // A scheme with nothing after it is not a destination.
+    expect(linkParts("https://.")).toEqual([{ text: "https://." }]);
   });
 });
