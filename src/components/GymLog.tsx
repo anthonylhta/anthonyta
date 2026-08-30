@@ -24,6 +24,7 @@ import {
   exerciseName,
   findExerciseByName,
   fitsGymCap,
+  formatRest,
   GYM_DRAFT_KEY,
   GYM_MAX_BYTES,
   gymPayloadBytes,
@@ -33,10 +34,12 @@ import {
   normalizeGymConfig,
   parseDraft,
   parseSetInput,
+  plateauWeeks,
   prefillSet,
   removeSession,
   removeTemplate,
   renameExercise,
+  restSeconds,
   sessionVolume,
   templateName,
   upsertTemplate,
@@ -71,6 +74,13 @@ function sydneyToday(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Australia/Sydney",
   }).format(new Date());
+}
+
+/** The moment a set changed, for the rest clock. It sits beside `sydneyToday`
+ *  because this is where the file reads clocks — `setEntrySets` only ever runs
+ *  off a tap, so this is an event-time reading, never a render-time one. */
+function restStamp(): number {
+  return Date.now();
 }
 
 /** `60×8 · 60×8` — how a set list reads everywhere on the page. */
@@ -382,8 +392,20 @@ function LogView({
    *  real use: without this, a fresh install could never log anything. Not
    *  persisted on purpose — an empty begun-ness has nothing to lose with the tab. */
   const [begun, setBegun] = useState(false);
+  /** The clock the rest line reads against, re-stamped once a second while there
+   *  is a rest to count — a `m:ss` readout can't show finer than that, and no
+   *  interval runs when the draft carries no stamp. A stamp newer than this
+   *  reading (the tick a set was just logged on) reads 0, which is the truth. */
+  const [now, setNow] = useState(restStamp);
 
   const started = begun || draft.entries.length > 0 || draft.note !== "";
+  const restAt = draft.restAt;
+
+  useEffect(() => {
+    if (restAt === undefined) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [restAt]);
 
   /** Start a session from a template — one empty-ish set per exercise, prefilled
    *  from last time so a repeat workout is a few taps of confirmation. */
@@ -400,12 +422,20 @@ function LogView({
     });
   }
 
+  /** A set added or removed is a set boundary — the closest honest proxy the
+   *  log has for "that set is done" — so that is what the rest clock counts
+   *  from. Editing a number is a correction, not a boundary: fixing last set's
+   *  reps or dialling in the next weight mid-rest must not zero the clock (the
+   *  rest line's tap is there when it really should). Nothing to press start on. */
   function setEntrySets(exerciseId: string, sets: GymSet[]) {
+    const before = draft.entries.find((e) => e.exerciseId === exerciseId);
+    const boundary = before === undefined || before.sets.length !== sets.length;
     writeDraft({
       ...draft,
       entries: draft.entries.map((e) =>
         e.exerciseId === exerciseId ? { ...e, sets } : e,
       ),
+      ...(boundary ? { restAt: restStamp() } : {}),
     });
   }
 
@@ -471,8 +501,24 @@ function LogView({
     );
   }
 
+  const rest = restAt === undefined ? 0 : restSeconds(restAt, now);
+
   return (
     <div className="flex flex-col">
+      {/* How long since the last set was touched. Tapping it starts the count
+          again, for the rest that began before the phone came out. */}
+      {restAt !== undefined && (
+        <button
+          type="button"
+          aria-label="reset rest timer"
+          onClick={() => writeDraft({ ...draft, restAt: restStamp() })}
+          className={`border-b border-hairline px-4 py-2 text-left text-xs tabular-nums ${
+            rest >= 180 ? "text-amber" : "text-muted"
+          }`}
+        >
+          rest {formatRest(rest)}
+        </button>
+      )}
       {draft.entries.map((entry) => {
         const name = exerciseName(cfg, entry.exerciseId);
         const last = lastSetsFor(cfg, entry.exerciseId);
@@ -916,6 +962,8 @@ function ExercisesView({
       </p>
     );
 
+  const today = sydneyToday();
+
   return (
     <div className="flex flex-col">
       {cfg.exercises.map((e) => {
@@ -923,6 +971,7 @@ function ExercisesView({
         const top = bestE1rm(cfg, e.id);
         const series = e1rmSeries(cfg, e.id);
         const done = lastDoneFor(cfg, e.id);
+        const stalled = plateauWeeks(cfg, e.id, today);
         return (
           <div key={e.id} className="border-b border-hairline px-4 py-2.5">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -963,6 +1012,11 @@ function ExercisesView({
                       top.e1rm > 0 &&
                       ` · e1rm ~${Math.round(top.e1rm)}kg`}
                     {done && ` · last ${done}`}
+                    {/* Trained since, and still no better than it was — see
+                        `plateauWeeks` for what earns the word. */}
+                    {stalled !== null && (
+                      <span className="text-amber"> · plateau {stalled}wk</span>
+                    )}
                   </span>
                   <button
                     type="button"

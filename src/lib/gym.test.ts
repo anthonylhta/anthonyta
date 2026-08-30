@@ -16,11 +16,13 @@ import {
   exerciseName,
   findExerciseByName,
   fitsGymCap,
+  formatRest,
   gymPayloadBytes,
   isPr,
   liftChips,
   parseDraft,
   parseSetInput,
+  plateauWeeks,
   prefillSet,
   lastDoneFor,
   lastSessionDate,
@@ -29,6 +31,7 @@ import {
   removeSession,
   removeTemplate,
   renameExercise,
+  restSeconds,
   sessionCounts,
   sessionDays,
   sessionVolume,
@@ -502,6 +505,17 @@ describe("parseDraft", () => {
     );
   });
 
+  it("carries the rest stamp through, and drops a draft with a bad one", () => {
+    const resting = { ...EMPTY_GYM_DRAFT, restAt: 1_770_000_000_000 };
+    expect(parseDraft(JSON.stringify(resting))).toEqual(resting);
+    expect(
+      parseDraft(JSON.stringify({ ...EMPTY_GYM_DRAFT, restAt: -1 })),
+    ).toBeNull();
+    expect(
+      parseDraft(JSON.stringify({ ...EMPTY_GYM_DRAFT, restAt: "soon" })),
+    ).toBeNull();
+  });
+
   it("drops an unparseable or foreign-shaped draft (a deploy mid-workout)", () => {
     expect(parseDraft("not json")).toBeNull();
     expect(parseDraft("null")).toBeNull();
@@ -586,6 +600,29 @@ describe("draftToSession / draftHasSets", () => {
         note: "",
       }),
     ).toBe(true);
+  });
+});
+
+describe("restSeconds / formatRest", () => {
+  it("counts whole seconds since the last set change", () => {
+    expect(restSeconds(1_000, 1_000)).toBe(0);
+    expect(restSeconds(1_000, 92_999)).toBe(91);
+  });
+
+  it("reads zero when the clock moved backwards under it", () => {
+    expect(restSeconds(92_000, 1_000)).toBe(0);
+  });
+
+  it("formats m:ss, padding the seconds", () => {
+    expect(formatRest(0)).toBe("0:00");
+    expect(formatRest(9)).toBe("0:09");
+    expect(formatRest(92)).toBe("1:32");
+    expect(formatRest(600)).toBe("10:00");
+  });
+
+  it("stops climbing at 59:59 — an hour in, it is not a rest any more", () => {
+    expect(formatRest(3599)).toBe("59:59");
+    expect(formatRest(86_400)).toBe("59:59");
   });
 });
 
@@ -821,6 +858,90 @@ describe("e1rmSeries", () => {
     // contributes nothing at all.
     expect(e1rmSeries(cfg, "bench")).toEqual([78, 84]);
     expect(e1rmSeries(cfg, "squat")).toEqual([]);
+  });
+});
+
+describe("plateauWeeks", () => {
+  /** A bench day: one working set, the exercise the plateau tests read. */
+  const bench = (id: string, date: string, w: number, r: number): GymSession =>
+    session({ id, date, entries: [{ exerciseId: "bench", sets: [{ w, r }] }] });
+
+  /** The best is the 100×5 on the 1st; three lighter days follow it. */
+  const stalled = base({
+    sessions: [
+      bench("s4", "2026-07-25", 60, 8),
+      bench("s3", "2026-07-18", 60, 8),
+      bench("s2", "2026-07-10", 60, 8),
+      bench("s1", "2026-07-01", 100, 5),
+    ],
+  });
+
+  it("is null for a lift with no sets at all", () => {
+    expect(plateauWeeks(stalled, "row", "2026-07-31")).toBeNull();
+    expect(plateauWeeks(EMPTY_GYM_CONFIG, "bench", "2026-07-31")).toBeNull();
+  });
+
+  it("counts whole weeks since the best, once both conditions hold", () => {
+    // 30 days since the 1st, and three sessions have trained it since.
+    expect(plateauWeeks(stalled, "bench", "2026-07-31")).toBe(4);
+  });
+
+  it("stays silent when the lift simply hasn't been trained since", () => {
+    const untrained = base({
+      sessions: [
+        bench("s4", "2026-07-25", 60, 8),
+        // The exercise is in the session, but with nothing done: no training.
+        session({
+          id: "s3",
+          date: "2026-07-18",
+          entries: [{ exerciseId: "bench", sets: [] }],
+        }),
+        session({
+          id: "s2",
+          date: "2026-07-10",
+          entries: [{ exerciseId: "row", sets: [{ w: 40, r: 10 }] }],
+        }),
+        bench("s1", "2026-07-01", 100, 5),
+      ],
+    });
+    expect(plateauWeeks(untrained, "bench", "2026-07-31")).toBeNull();
+  });
+
+  it("stays silent inside the three-week window, however hard it is trained", () => {
+    const recent = base({
+      sessions: [
+        bench("s6", "2026-07-21", 60, 8),
+        bench("s5", "2026-07-19", 60, 8),
+        bench("s4", "2026-07-17", 60, 8),
+        bench("s3", "2026-07-15", 60, 8),
+        bench("s2", "2026-07-13", 60, 8),
+        bench("s1", "2026-07-11", 100, 5),
+      ],
+    });
+    expect(plateauWeeks(recent, "bench", "2026-07-31")).toBeNull();
+  });
+
+  it("resets the clock when the best is matched again", () => {
+    // `bestE1rm` keeps the most recent of equal estimates, so repeating the
+    // ceiling re-dates it — holding a hard-won number is not stalling.
+    const matched = base({
+      sessions: [bench("s5", "2026-07-26", 100, 5), ...stalled.sessions],
+    });
+    expect(plateauWeeks(matched, "bench", "2026-07-31")).toBeNull();
+  });
+
+  it("counts only sessions dated strictly after the best", () => {
+    const before = base({
+      sessions: [
+        bench("s4", "2026-07-25", 60, 8),
+        bench("s3", "2026-07-10", 60, 8),
+        // Same day as the best, and one before it — neither is "since".
+        bench("s2", "2026-07-01", 60, 8),
+        bench("s1", "2026-07-01", 100, 5),
+        bench("s0", "2026-06-28", 60, 8),
+      ],
+    });
+    expect(plateauWeeks(before, "bench", "2026-07-31")).toBeNull();
   });
 });
 
