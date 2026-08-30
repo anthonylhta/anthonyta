@@ -3,6 +3,7 @@ import {
   b64ToBytes,
   hllEstimate,
   topPaths,
+  topSources,
   type DayStats,
 } from "@/lib/analytics";
 import { mergeDays } from "@/lib/anastore";
@@ -108,6 +109,7 @@ export function AnalyticsPanel({
   const weekViews = viewsOf(weekAgg);
   const weekUniques = uniquesOf(weekAgg);
   const top = topPaths(weekAgg).slice(0, 5);
+  const sources = topSources(weekAgg);
 
   const spark = days.map(uniquesOf);
   const delta = spark.length >= 2 ? spark[spark.length - 1] - spark[0] : 0;
@@ -145,6 +147,32 @@ export function AnalyticsPanel({
                 <span className="shrink-0 tabular-nums text-muted">
                   <span className="text-amber">{p.views}</span> · {p.uniques}{" "}
                   uniq
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Which handed-out link brought the views (`/resume?s=seek`). Views only —
+          no unique estimate, by design (see DayStats.sources) — and the whole block
+          is absent until a tagged link is actually opened. */}
+      {sources.length > 0 && (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted">
+            sources
+          </div>
+          <ul className="space-y-0.5">
+            {sources.map((s) => (
+              <li
+                key={s.key}
+                className="flex items-baseline justify-between gap-3 text-sm"
+              >
+                <span className="truncate font-[family-name:var(--font-geist-mono)] text-fg/90">
+                  {s.key}
+                </span>
+                <span className="shrink-0 tabular-nums text-amber">
+                  {s.views}
                 </span>
               </li>
             ))}
