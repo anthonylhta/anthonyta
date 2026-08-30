@@ -3,6 +3,7 @@ import {
   bytesToB64,
   isDayStats,
   MAX_TRACKED_PATHS,
+  MAX_TRACKED_SOURCES,
   newHll,
   OVERFLOW_PATH,
   type DayStats,
@@ -225,6 +226,54 @@ describe("recordHit fold", () => {
     expect(Object.keys(body.paths).length).toBe(MAX_TRACKED_PATHS);
   });
 
+  it("tallies a source bucket when the hit carries a tag", async () => {
+    mockRead.mockResolvedValue({ state: "absent" });
+    expect(await recordHit(TODAY, "/resume", hashA, "seek")).toBe(true);
+    const body = lastWriteBody(
+      "meta/analytics/day/2026-07-12.json",
+    ) as DayStats;
+    expect(body.paths["/resume"].views).toBe(1);
+    expect(body.sources).toEqual({ "/resume?s=seek": 1 });
+    // views only — a source bucket never carries a sketch.
+    expect(isDayStats(body)).toBe(true);
+  });
+
+  it("leaves `sources` absent on an untagged hit", async () => {
+    mockRead.mockResolvedValue({ state: "absent" });
+    await recordHit(TODAY, "/resume", hashA);
+    const body = lastWriteBody(
+      "meta/analytics/day/2026-07-12.json",
+    ) as DayStats;
+    expect(body.sources).toBeUndefined();
+  });
+
+  it("folds an invented tag past the cap into the overflow bucket", async () => {
+    const saturated: DayStats = {
+      v: 1,
+      date: TODAY,
+      visitors_hll_b64: bytesToB64(newHll()),
+      paths: { "/resume": { views: 1, hll_b64: bytesToB64(newHll()) } },
+      sources: Object.fromEntries(
+        Array.from({ length: MAX_TRACKED_SOURCES }, (_, i) => [
+          `/resume?s=t${i}`,
+          1,
+        ]),
+      ),
+    };
+    mockRead.mockResolvedValue(okRead(saturated));
+    await recordHit(TODAY, "/resume", hashB, "invented");
+    const body = lastWriteBody(
+      "meta/analytics/day/2026-07-12.json",
+    ) as DayStats;
+    expect(body.sources?.["/resume?s=invented"]).toBeUndefined();
+    expect(body.sources?.[OVERFLOW_PATH]).toBe(1);
+    expect(Object.keys(body.sources ?? {}).length).toBe(
+      MAX_TRACKED_SOURCES + 1,
+    );
+    // the view itself still counted, invented tag or not.
+    expect(body.paths["/resume"].views).toBe(2);
+  });
+
   it("never clobbers a day on a flaky read", async () => {
     mockRead.mockResolvedValue({ state: "error" });
     expect(await recordHit(TODAY, "/", hashA)).toBe(false);
@@ -278,6 +327,38 @@ describe("mergeDays (pure)", () => {
     const merged = mergeDays([]);
     expect(merged.date).toBe("");
     expect(merged.paths).toEqual({});
+  });
+
+  it("sums source tallies and tolerates days without any", () => {
+    const mk = (date: string, sources?: Record<string, number>): DayStats => ({
+      v: 1,
+      date,
+      visitors_hll_b64: bytesToB64(newHll()),
+      paths: { "/resume": { views: 1, hll_b64: bytesToB64(newHll()) } },
+      ...(sources ? { sources } : {}),
+    });
+    const merged = mergeDays([
+      mk("2026-07-10", { "/resume?s=seek": 2 }),
+      mk("2026-07-11"), // nobody arrived through a tagged link that day
+      mk("2026-07-12", { "/resume?s=seek": 1, "/resume?s=pdf": 4 }),
+    ]);
+    expect(merged.sources).toEqual({
+      "/resume?s=seek": 3,
+      "/resume?s=pdf": 4,
+    });
+    expect(isDayStats(merged)).toBe(true);
+  });
+
+  it("omits `sources` entirely when no day carried a tagged hit", () => {
+    const merged = mergeDays([
+      {
+        v: 1,
+        date: "2026-07-12",
+        visitors_hll_b64: bytesToB64(newHll()),
+        paths: { "/": { views: 1, hll_b64: bytesToB64(newHll()) } },
+      },
+    ]);
+    expect(merged.sources).toBeUndefined();
   });
 });
 
