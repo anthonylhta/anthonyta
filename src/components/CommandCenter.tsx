@@ -38,7 +38,12 @@ import {
   type Zone as CenterZone,
 } from "@/lib/layout";
 import { quoteForDay } from "@/lib/quotes";
-import { rainLabel, uvLabel, weatherCodeText } from "@/lib/weather";
+import {
+  rainLabelFor,
+  sydneyHour,
+  uvLabel,
+  weatherCodeText,
+} from "@/lib/weather";
 import { getSnapIndex } from "@/lib/finstore";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { r2Enabled } from "@/lib/r2";
@@ -153,8 +158,10 @@ export async function CommandCenter({ userName }: { userName: string }) {
       : null;
 
   // The weather row's rain flag — exception-weighted, so it's null on a
-  // day the sky isn't worth mentioning.
-  const rain = rainLabel(wx.rainChance);
+  // day the sky isn't worth mentioning. Read against the hour here at render
+  // rather than inside the 15-minute cached Weather: which hours are still
+  // ahead of us is the one part of it that goes stale by the minute.
+  const rain = rainLabelFor(wx, sydneyHour());
 
   // Each command-center module keyed by its layout UNIT key so the zones can
   // render in the owner's configured order (roadmap 59). The values are the
