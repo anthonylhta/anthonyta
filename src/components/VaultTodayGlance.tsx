@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LabelDoor } from "@/components/terminal/LabelDoor";
 import { Module } from "@/components/terminal/Module";
+import { TodoText } from "@/components/TodoText";
 import { useVault } from "@/app/files/useVault";
 import { isVaultIndex, noteBlob, VAULT_INDEX_PATH } from "@/lib/vaultblob";
 import { parseDaily, type TodayDigest } from "@/lib/today";
@@ -150,7 +151,9 @@ function DigestView({ digest }: { digest: TodayDigest }) {
                       {item.time}
                     </span>
                   )}
-                  <span className="text-fg">{item.text}</span>
+                  <span className="text-fg">
+                    <TodoText text={item.text} />
+                  </span>
                 </li>
               ))}
             </ul>
