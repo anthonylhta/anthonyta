@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cleanRiotName,
+  compTable,
   isTftHistory,
   ladderValue,
   placementBucket,
@@ -10,6 +11,7 @@ import {
   upsertHistoryDay,
   type RawLeagueEntry,
   type RawMatch,
+  type TftGame,
   type TftHistory,
   type TftHistoryDay,
 } from "./tft";
@@ -293,6 +295,107 @@ describe("summarizeTft", () => {
     const s = summarizeTft(entry, matches, ctx);
     expect(s.recent).toHaveLength(1);
     expect(s.recent[0].placement).toBe(2);
+  });
+});
+
+describe("compTable", () => {
+  /** A game with a dominant trait, optional lead unit, in one line. */
+  const game = (
+    placement: number,
+    trait: string | null,
+    unit?: { name: string; rarity: number },
+  ): TftGame => ({
+    placement,
+    at: "2026-08-30T00:00:00.000Z",
+    traits: trait ? [{ name: trait, count: 6, style: 3 }] : [],
+    units: unit ? [{ name: unit.name, stars: 2, rarity: unit.rarity }] : [],
+  });
+
+  it("groups by the dominant trait, placements in game order", () => {
+    const t = compTable([
+      game(3, "Star Guardian"),
+      game(6, "Soul Fighter"),
+      game(1, "Star Guardian"),
+      game(5, "Soul Fighter"),
+    ]);
+    expect(t.rows.map((r) => r.name)).toEqual([
+      "Star Guardian",
+      "Soul Fighter",
+    ]);
+    expect(t.rows[0].placements).toEqual([3, 1]); // oldest → newest, not sorted
+    expect(t.oneOffs).toEqual([]);
+  });
+
+  it("folds single plays into oneOffs, name asc", () => {
+    const t = compTable([
+      game(7, "Luchador"),
+      game(2, "The Crew"),
+      game(4, "The Crew"),
+      game(1, "Duelist"),
+    ]);
+    expect(t.rows).toHaveLength(1);
+    expect(t.oneOffs).toEqual([
+      { name: "Duelist", placement: 1 },
+      { name: "Luchador", placement: 7 },
+    ]);
+  });
+
+  it("sorts rows most-played first, then best average, then name", () => {
+    const t = compTable([
+      game(5, "Wraith"),
+      game(6, "Wraith"),
+      game(1, "Mighty Mech"),
+      game(3, "Mighty Mech"),
+      game(4, "Star Guardian"),
+      game(2, "Star Guardian"),
+      game(1, "Star Guardian"),
+      game(2, "Bruiser"),
+      game(2, "Bruiser"),
+    ]);
+    // Star Guardian 3g first; Bruiser/Mighty Mech both 2g avg 2.0 → name asc; Wraith 5.5 last
+    expect(t.rows.map((r) => r.name)).toEqual([
+      "Star Guardian",
+      "Bruiser",
+      "Mighty Mech",
+      "Wraith",
+    ]);
+  });
+
+  it("rounds the average to 1 decimal", () => {
+    const t = compTable([
+      game(3, "Soul Fighter"),
+      game(5, "Soul Fighter"),
+      game(6, "Soul Fighter"),
+      game(7, "Soul Fighter"),
+    ]);
+    expect(t.rows[0].avg).toBe(5.3); // 21/4 = 5.25 → 5.3
+  });
+
+  it("groups a traitless game under 'unknown'", () => {
+    const t = compTable([game(4, null), game(8, null)]);
+    expect(t.rows[0].name).toBe("unknown");
+    expect(t.rows[0].placements).toEqual([4, 8]);
+  });
+
+  it("hints the most frequent lead unit, ties to the rarer", () => {
+    const t = compTable([
+      game(1, "Star Guardian", { name: "Seraphine", rarity: 6 }),
+      game(2, "Star Guardian", { name: "Seraphine", rarity: 6 }),
+      game(3, "Star Guardian", { name: "Jinx", rarity: 4 }),
+      game(2, "Wraith", { name: "Kayn", rarity: 4 }),
+      game(5, "Wraith", { name: "Aatrox", rarity: 6 }),
+    ]);
+    expect(t.rows[0].hint).toBe("Seraphine"); // 2 of 3 boards
+    expect(t.rows[1].hint).toBe("Aatrox"); // 1–1 tie → rarer wins
+  });
+
+  it("hint is null when no board in the comp had units", () => {
+    const t = compTable([game(1, "Duelist"), game(2, "Duelist")]);
+    expect(t.rows[0].hint).toBeNull();
+  });
+
+  it("is empty for no games (sample mode renders nothing)", () => {
+    expect(compTable([])).toEqual({ rows: [], oneOffs: [] });
   });
 });
 
