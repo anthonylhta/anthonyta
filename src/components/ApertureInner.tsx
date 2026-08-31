@@ -13,6 +13,7 @@ import {
   apertureHistPath,
   FIN_CONTEXT,
   GYM_CONTEXT,
+  JOBS_CONTEXT,
   MEALS_CONTEXT,
 } from "@/lib/aevcontext";
 import {
@@ -91,6 +92,7 @@ import {
   weightTrend,
   type MealsConfig,
 } from "@/lib/meals";
+import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
 import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
@@ -287,6 +289,29 @@ async function gymConfig(
 }
 
 /**
+ * The application ledger, for the sect-search line under the trials band —
+ * derived client-side off the sealed `meta/jobs` envelope (the dot-rider
+ * pattern; never check-in-emitted). Best-effort like every rider: any miss
+ * (including an empty first-run 404) returns null and the line isn't there.
+ */
+async function jobsApps(
+  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
+): Promise<JobApp[] | null> {
+  try {
+    const res = await fetch("/api/jobs");
+    if (res.status !== 200) return null;
+    const { bytes } = await openItem(
+      new Uint8Array(await res.arrayBuffer()),
+      JOBS_CONTEXT,
+    );
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return normalizeJobsConfig(parsed)?.apps ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The meal log itself, opened ONCE for the two readings it feeds: the meals
  * path's evidence strip (protein, when a path asks for it) and the vessel's
  * weight trend (which no declaration gates — the body is read whether or not a
@@ -353,6 +378,8 @@ export function ApertureInner({
   const [pending, setPending] = useState(false);
   /** The soul's raw count off the same index read — null renders the grade alone. */
   const [soulDays, setSoulDays] = useState<number | null>(null);
+  /** The application ledger, for the sect-search line — null = no line. */
+  const [jobs, setJobs] = useState<JobApp[] | null>(null);
   const [showResolved, setShowResolved] = useState(false);
   /** Which harvest entries are open, keyed by day + title — every one starts
    *  closed, so the band reads as a list of what was yielded, not a wall of it. */
@@ -376,6 +403,7 @@ export function ApertureInner({
       setRecord(null);
       setPending(false);
       setSoulDays(null);
+      setJobs(null);
       setShowResolved(false);
       setOpenHarvest(new Set());
       setShowRulings(false);
@@ -456,6 +484,10 @@ export function ApertureInner({
 
         const gymLog = await gymConfig(openItem);
         if (gymLog && !cancelled) setGymCfg(gymLog);
+
+        // The sect-search rider — same best-effort terms.
+        const apps = await jobsApps(openItem);
+        if (apps && !cancelled) setJobs(apps);
 
         // The seal history — a listing plus up to a dozen fetches and decrypts.
         const rec = await recordSeries(openItem);
@@ -888,6 +920,24 @@ export function ApertureInner({
                   </p>
                 );
               })}
+            {/* The sect search — the job-search trial's evidence, derived off the
+                sealed application ledger (ADR 0166). A line beneath the trial,
+                never a claim about it: the check-in still owns the trial's state. */}
+            {jobs !== null &&
+              jobs.length > 0 &&
+              (() => {
+                const s = sectSearch(jobs);
+                return (
+                  <p className="text-[11px] tabular-nums text-muted">
+                    sect search ·{" "}
+                    <span className="text-fg/80">{s.underway}</span> audience
+                    {s.underway === 1 ? "" : "s"} underway ·{" "}
+                    <span className="text-fg/80">{s.inTrial}</span> in trial ·{" "}
+                    <span className="text-fg/80">{s.turnedAway}</span> turned
+                    away
+                  </p>
+                );
+              })()}
           </div>
         </>
       )}

@@ -28,6 +28,7 @@ export const TOTP_CONTEXT = "meta/totp";
 export const GYM_CONTEXT = "meta/gym";
 export const MEALS_CONTEXT = "meta/meals";
 export const AGENDA_CONTEXT = "meta/agenda";
+export const JOBS_CONTEXT = "meta/jobs";
 /** The MK-rotation journal (ADR 0090/0103) — AEV2 from birth; no AEV1 legacy. */
 export const ROTATION_CONTEXT = "meta/rotation";
 /** The aperture status envelope — AEV2 from birth; its single writer is the
