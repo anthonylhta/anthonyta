@@ -387,6 +387,8 @@ test.describe("guest gating", () => {
     "the foundation", // the inward page's invested reading
     "gu held", // the inward page's paths band
     "竅", // the aperture glyph — /aperture's sea band
+    "man soul", // the soul band's grade words, on /aperture
+    "魂", // the soul band's glyph ("the soul"/"strained" are too common to pin)
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {

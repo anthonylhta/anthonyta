@@ -22,6 +22,7 @@ import {
   type AperturePath,
   type ApertureDoc,
   type ApertureGu,
+  type ApertureSoul,
   type ApertureVitalGu,
 } from "@/lib/aperture";
 import {
@@ -48,6 +49,7 @@ import {
   latestDailyDay,
   pathAnchor,
   pathEvidence,
+  recordedDays,
   signedCount,
   splitLead,
   splitTrials,
@@ -175,27 +177,29 @@ async function fetchRaw(p: string): Promise<Uint8Array> {
 }
 
 /**
- * Whether the sealed reading is behind the raw journal — the adjudication line.
- * Needs the newest raw day, which lives in the sealed vault index, so it is a SECOND
- * fetch and decrypt. Best-effort by construction: any miss returns false, because a
- * line that can't be computed is a line that shouldn't be shown.
+ * The two facts the sealed vault index holds for this page — whether the reading
+ * is behind the raw journal (the adjudication line) and how many distinct days
+ * the journal records (the soul band's count: one recorded day is one man soul).
+ * One SECOND fetch and decrypt serves both. Best-effort by construction: any miss
+ * returns the say-nothing pair, because a line that can't be computed is a line
+ * that shouldn't be shown.
  */
-async function adjudicationPending(
+async function indexReading(
   sealedAt: string,
   today: string,
   openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
-): Promise<boolean> {
+): Promise<{ pending: boolean; soulDays: number | null }> {
   try {
     const { bytes } = await openItem(await fetchRaw(VAULT_INDEX_PATH));
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    if (!isVaultIndex(parsed)) return false;
-    const latest = latestDailyDay(
-      parsed.notes.map((n) => n.title),
-      today,
-    );
-    return isAdjudicationPending(sealedAt, latest);
+    if (!isVaultIndex(parsed)) return { pending: false, soulDays: null };
+    const titles = parsed.notes.map((n) => n.title);
+    return {
+      pending: isAdjudicationPending(sealedAt, latestDailyDay(titles, today)),
+      soulDays: recordedDays(titles, today),
+    };
   } catch {
-    return false;
+    return { pending: false, soulDays: null };
   }
 }
 
@@ -347,6 +351,8 @@ export function ApertureInner({
   const [record, setRecord] = useState<RecordState | null>(null);
   /** Raw journal days have run ≥2 days past the seal — flag, never resolve. */
   const [pending, setPending] = useState(false);
+  /** The soul's raw count off the same index read — null renders the grade alone. */
+  const [soulDays, setSoulDays] = useState<number | null>(null);
   const [showResolved, setShowResolved] = useState(false);
   /** Which harvest entries are open, keyed by day + title — every one starts
    *  closed, so the band reads as a list of what was yielded, not a wall of it. */
@@ -369,6 +375,7 @@ export function ApertureInner({
       setMealsCfg(null);
       setRecord(null);
       setPending(false);
+      setSoulDays(null);
       setShowResolved(false);
       setOpenHarvest(new Set());
       setShowRulings(false);
@@ -431,15 +438,14 @@ export function ApertureInner({
           if (!cancelled) setFin(null);
         }
 
-        // The adjudication rider — one line at the head of the reading, so it goes
-        // early; like every rider here it can only ADD, never hold the page back
-        // and never fail it.
-        const behind = await adjudicationPending(
-          next.sealedAt,
-          today,
-          openItem,
-        );
-        if (behind && !cancelled) setPending(true);
+        // The index rider — the adjudication line at the head of the reading and
+        // the soul's day count, off one fetch; like every rider here it can only
+        // ADD, never hold the page back and never fail it.
+        const idx = await indexReading(next.sealedAt, today, openItem);
+        if (!cancelled) {
+          if (idx.pending) setPending(true);
+          setSoulDays(idx.soulDays);
+        }
 
         // Both sealed logs — one request and one decrypt each, unconditionally:
         // the vessel band reads a body, which no path has to have been declared
@@ -531,7 +537,7 @@ export function ApertureInner({
 
   // `ready` — narrowed by the switch above, but TS can't see it through the helper.
   if (!doc) return null;
-  const { conditions, paths, vitalGu, trials, breakthrough, rented } =
+  const { conditions, paths, vitalGu, trials, breakthrough, rented, soul } =
     doc.sealed;
   const { open, resolved } = splitTrials(trials);
   const harden = hardenLines(doc.sealed.streaks);
@@ -1268,6 +1274,11 @@ export function ApertureInner({
         </Section>
       )}
 
+      {/* 魂 — the second axis beside rank, directly after the vessel: body, then
+          soul, the two facets of the one being. Absent on every document sealed
+          before the axis existed. */}
+      {soul && <SoulBand soul={soul} days={soulDays} />}
+
       <Section label="vital gu">
         <VitalGuSlot gu={vitalGu} />
       </Section>
@@ -1286,6 +1297,68 @@ export function ApertureInner({
         </p>
       )}
     </>
+  );
+}
+
+/**
+ * 魂 — the soul band (ADR 0165): the second axis beside rank, a facet and never a
+ * path. Every word here is ADJUDICATED — grade, next band, the gate's state all
+ * print off the seal verbatim, because the gate (a band cannot be crossed
+ * unrefined; refusal is the strained state) is a check-in ruling the site must
+ * never recompute. The page's one computation is the raw day count beside the
+ * grade, off the vault index (one recorded day is one man soul) — a count that
+ * has touched the floor while the seal still reads the old grade is not a
+ * mismatch, it is the pre-adjudication state between a crossing and its check-in.
+ * Mid-band "unrefined" stays muted (normal, for most of a band's years); amber
+ * belongs to strained alone.
+ */
+function SoulBand({ soul, days }: { soul: ApertureSoul; days: number | null }) {
+  return (
+    <div className="border-t border-hairline">
+      <ZoneHeader label="the soul" seal="魂" right={soul.grade} />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        <p className="text-xs">
+          <span className="text-fg/90">{soul.grade}</span>
+          {days !== null && (
+            <span className="tabular-nums text-muted">
+              {" · "}
+              {days.toLocaleString("en-AU")} days recorded
+            </span>
+          )}
+          {soul.strained && (
+            <span className="ml-2 border border-amber/50 px-1 text-[10px] tracking-[0.08em] text-amber">
+              strained
+            </span>
+          )}
+        </p>
+        {soul.strained ? (
+          <p className="text-[11px] tabular-nums text-muted">
+            <span className="text-amber">{soul.next} held</span>
+            <span className="text-muted/60">
+              {" — "}
+              {soul.harvested === 0
+                ? "no harvest this band"
+                : `${soul.harvested} harvested`}
+              {" · refine to cross"}
+            </span>
+          </p>
+        ) : (
+          <p className="text-[11px] tabular-nums text-muted">
+            next · {soul.next} at {soul.at.toLocaleString("en-AU")}
+            <span className="text-muted/60"> — </span>
+            {soul.refined ? (
+              <span className="text-(--essence)">refined ✓</span>
+            ) : (
+              <span>unrefined</span>
+            )}
+            <span className="text-muted/60">
+              {" · "}
+              {soul.harvested} harvested this band
+            </span>
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
