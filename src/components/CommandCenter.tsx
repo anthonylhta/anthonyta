@@ -11,6 +11,7 @@ import { CommandK } from "@/components/terminal/CommandPalette";
 import { LabelDoor } from "@/components/terminal/LabelDoor";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
+import { TftModule } from "@/components/TftModule";
 import { TransitGlance } from "@/components/TransitGlance";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
 import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
@@ -20,7 +21,7 @@ import { getChoreReads } from "@/lib/connectors/chores";
 import { getHealth } from "@/lib/connectors/health";
 import { getLayout } from "@/lib/connectors/layout";
 import { getRiichiStats } from "@/lib/connectors/riichi";
-import { getTft } from "@/lib/connectors/tft";
+import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getWeather } from "@/lib/connectors/weather";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { listDrops } from "@/lib/dropstore";
@@ -114,6 +115,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     indexRead,
     riichi,
     tft,
+    tftHistory,
     layout,
     wx,
     choreReads,
@@ -126,6 +128,7 @@ export async function CommandCenter({ userName }: { userName: string }) {
     getSnapIndex(),
     getRiichiStats(),
     getTft(),
+    getTftHistory(),
     getLayout(),
     getWeather(),
     getChoreReads(),
@@ -364,6 +367,14 @@ export async function CommandCenter({ userName }: { userName: string }) {
           <JournalPulse offline={!r2Enabled()} />
         </span>
       </div>
+    ) : null,
+
+    /* arena — the full tft band, same module the lobby renders (rank, comps
+       fold, ladder trend), back on the center as an owner call so the comps
+       table is reachable signed in. The mortal pulse keeps its one-number
+       glance; this is the detail. */
+    arena: !hidden.has("arena") ? (
+      <TftModule tft={tft} history={tftHistory} edge="b" />
     ) : null,
 
     /* health — is the estate up (roadmap 55): one capped probe per sibling

@@ -19,14 +19,20 @@ import {
 export function TftModule({
   tft,
   history = [],
+  edge = "t",
 }: {
   tft: TftStats;
   history?: TftHistoryDay[];
+  /** Which hairline the band draws: the lobby stacks border-t bands; the
+   *  command center's today rows carry border-b. */
+  edge?: "t" | "b";
 }) {
   // One comparable number per day so the line reads as a single climb across tiers.
   const ladder = history.map((d) => ladderValue(d.tier, d.division, d.lp));
   return (
-    <div className="block border-t border-hairline px-4 py-4">
+    <div
+      className={`block ${edge === "t" ? "border-t" : "border-b"} border-hairline px-4 py-4`}
+    >
       {/* header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5 text-[11px] uppercase tracking-[0.2em] text-muted">

@@ -33,6 +33,7 @@ const TODAY_DEFAULT = [
   "briefing",
   "hand",
   "mortal",
+  "arena",
   "health",
 ];
 
@@ -121,6 +122,21 @@ describe("normalizeLayout", () => {
         centerOrder: ["briefing-hand", "aperture", "chores", "totp", "mortal"],
       }),
     ).toEqual(cfg({ center: ["briefing"], centerOrder: ["mortal"] }));
+  });
+
+  it("keeps the resurrected arena band out of the old tft key's reach", () => {
+    // The center band came back under a NEW key (`arena`): a config that hid
+    // `tft` before the minimal-center cut must not hide today's unit — the
+    // whole point of not reusing a retired key.
+    const c = normalizeLayout({
+      v: 2,
+      lobby: [],
+      center: ["tft"],
+      lobbyOrder: [],
+      centerOrder: [],
+    });
+    expect(c).toEqual(cfg({}));
+    expect(hiddenSet(c!, "center").has("arena")).toBe(false);
   });
 
   it("degrades a pre-summary config — the reading left for /aperture", () => {

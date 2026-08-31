@@ -146,6 +146,17 @@ export const CENTER_UNITS: UnitDef[] = [
       { key: "mortal", label: "mortal pulse (riichi / tft / reading)" },
     ],
   },
+  // The arena band, back on the center as an owner call (it was cut in the
+  // minimal-center pass) — now a unit, so hiding it again is a toggle, not a
+  // code change. Deliberately NOT the old `tft` key: that key is retired here,
+  // and a stored config from before the cut may still hide it — a NEW key can't
+  // be named by any stale hidden list, so the band ships visible.
+  {
+    key: "arena",
+    zone: "today",
+    label: "arena (tft ladder + comps)",
+    modules: [{ key: "arena", label: "arena (tft ladder + comps)" }],
+  },
   // The exception row, last: it says nothing at all until something is down.
   {
     key: "health",
