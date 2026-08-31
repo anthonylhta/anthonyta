@@ -390,6 +390,9 @@ test.describe("guest gating", () => {
     "man soul", // the soul band's grade words, on /aperture
     "魂", // the soul band's glyph ("the soul"/"strained" are too common to pin)
     "sect search", // the trials band's job-ledger line, on /aperture
+    "the dao", // the dao-mark band's divider, on /aperture (bare 道 too collision-prone to pin)
+    "the night ledger", // a formation's name, on /aperture
+    "the walking tally", // a formation's name, on /aperture
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
