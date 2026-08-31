@@ -232,6 +232,104 @@ export function summarizeTft(
   };
 }
 
+// ── comp table (the drill-down games folded into per-comp rows — ADR 0163) ───
+
+/** A comps-table row: one comp played ≥2 times in the last-20 window. */
+export interface TftCompRow {
+  /** dominant-trait display name — the comp key. */
+  name: string;
+  /** carry hint: the unit that most often headlined the comp's boards; null when
+   *  no board had units. A label heuristic, not a claim about the carry. */
+  hint: string | null;
+  /** the comp's placements, oldest → newest (the strip's chronology). */
+  placements: number[];
+  /** mean placement, 1 decimal. */
+  avg: number;
+}
+/** A comp played once, folded into the "+ n one-offs" line. */
+export interface TftCompOneOff {
+  name: string;
+  placement: number;
+}
+export interface TftCompTable {
+  rows: TftCompRow[];
+  oneOffs: TftCompOneOff[];
+}
+
+/** The comp's most frequent board-headline unit (`units[0]` per game — rarest
+ *  first after gameUnits' sort); ties go to the rarer unit, then name order for
+ *  determinism. Null when no game in the comp had units. */
+function headlineUnit(played: TftGame[]): string | null {
+  const seen = new Map<string, { count: number; rarity: number }>();
+  for (const g of played) {
+    const lead = g.units[0];
+    if (!lead) continue;
+    const cur = seen.get(lead.name);
+    if (cur) {
+      cur.count += 1;
+      cur.rarity = Math.max(cur.rarity, lead.rarity);
+    } else {
+      seen.set(lead.name, { count: 1, rarity: lead.rarity });
+    }
+  }
+  let best: { name: string; count: number; rarity: number } | null = null;
+  for (const [name, s] of seen) {
+    if (
+      !best ||
+      s.count > best.count ||
+      (s.count === best.count && s.rarity > best.rarity) ||
+      (s.count === best.count &&
+        s.rarity === best.rarity &&
+        name.localeCompare(best.name) < 0)
+    ) {
+      best = { name, ...s };
+    }
+  }
+  return best ? best.name : null;
+}
+
+/**
+ * Games → the comps summary behind the band's toggle (ADR 0163). A game's comp
+ * is its strongest active trait — `traits[0].name` after gameTraits' sort (style
+ * desc, then breadth); a game with no trait data (older cached payload) groups
+ * under "unknown". Comps played once fold into `oneOffs` (name asc); the rest
+ * become rows sorted most-played first, then best average, then name.
+ */
+export function compTable(games: TftGame[]): TftCompTable {
+  const groups = new Map<string, TftGame[]>();
+  for (const g of games) {
+    const key = g.traits[0]?.name ?? "unknown";
+    const list = groups.get(key);
+    if (list) list.push(g);
+    else groups.set(key, [g]);
+  }
+
+  const rows: TftCompRow[] = [];
+  const oneOffs: TftCompOneOff[] = [];
+  for (const [name, played] of groups) {
+    if (played.length === 1) {
+      oneOffs.push({ name, placement: played[0].placement });
+      continue;
+    }
+    const placements = played.map((g) => g.placement);
+    const sum = placements.reduce((a, b) => a + b, 0);
+    rows.push({
+      name,
+      hint: headlineUnit(played),
+      placements,
+      avg: Math.round((sum / placements.length) * 10) / 10,
+    });
+  }
+  rows.sort(
+    (a, b) =>
+      b.placements.length - a.placements.length ||
+      a.avg - b.avg ||
+      a.name.localeCompare(b.name),
+  );
+  oneOffs.sort((a, b) => a.name.localeCompare(b.name));
+  return { rows, oneOffs };
+}
+
 // ── LP history (self-recorded; Riot exposes no LP-history endpoint) ──────────
 
 /** One day's ladder standing, snapshotted nightly by the cron (ADR 0082). `games`
