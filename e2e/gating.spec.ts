@@ -389,6 +389,7 @@ test.describe("guest gating", () => {
     "竅", // the aperture glyph — /aperture's sea band
     "man soul", // the soul band's grade words, on /aperture
     "魂", // the soul band's glyph ("the soul"/"strained" are too common to pin)
+    "sect search", // the trials band's job-ledger line, on /aperture
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
