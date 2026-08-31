@@ -833,3 +833,17 @@ export function latestDailyDay(titles: string[], today: string): string | null {
       latest = title;
   return latest;
 }
+
+/**
+ * The soul's raw count: how many DISTINCT journal days the vault holds — one
+ * recorded day is one man soul (the soul band's evidence figure). Same discipline
+ * as `latestDailyDay`: only exact-day titles are days, and days past `today` are
+ * plans (pre-created day-planner notes), not lived days a soul could hold.
+ * Distinctness guards a duplicated title ever counting twice.
+ */
+export function recordedDays(titles: string[], today: string): number {
+  const days = new Set<string>();
+  for (const title of titles)
+    if (DAILY_TITLE.test(title) && title <= today) days.add(title);
+  return days.size;
+}

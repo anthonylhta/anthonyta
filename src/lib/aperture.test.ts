@@ -500,6 +500,62 @@ describe("aperture — the sealed profile", () => {
   });
 });
 
+describe("aperture — the soul", () => {
+  // The second axis beside rank: every field adjudicated, the site printing them
+  // verbatim (the raw day count beside the grade is the page's only computation).
+  const soul = {
+    grade: "hundred man soul",
+    next: "thousand man soul",
+    at: 1000,
+    refined: true,
+    harvested: 1,
+    strained: false,
+  };
+
+  it("accepts a well-formed soul", () => {
+    const souled = withSealed({ soul });
+    expect(normalizeAperture(souled)).toEqual(souled);
+  });
+
+  it("accepts the strained state — the gate refusing, not a fault", () => {
+    const strained = withSealed({
+      soul: { ...soul, refined: false, harvested: 0, strained: true },
+    });
+    expect(normalizeAperture(strained)).toEqual(strained);
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("soul");
+  });
+
+  it("drops an unknown key inside the soul", () => {
+    const out = normalizeAperture(
+      withSealed({ soul: { ...soul, mutated: 1 } }),
+    );
+    expect(out?.sealed.soul).toEqual(soul);
+  });
+
+  it("hard-rejects a present-but-malformed soul", () => {
+    const bad = (patch: Record<string, unknown> | string) =>
+      expect(
+        normalizeAperture(
+          withSealed({
+            soul: typeof patch === "string" ? patch : { ...soul, ...patch },
+          }),
+        ),
+      ).toBeNull();
+    bad("hundred man soul"); // a word where a record should be
+    bad({ grade: "" }); // a grade either names a band or is absent
+    bad({ at: 0 }); // no band opens at day zero
+    bad({ at: 999.5 }); // a day count is an integer
+    bad({ refined: "yes" }); // the gate is a fact, not prose
+    bad({ harvested: -1 }); // a harvest can be empty, never negative
+    bad({ strained: 1 }); // same discipline as refined
+  });
+});
+
 describe("aperture — path peaks", () => {
   // How high a path goes, printed at the head of its card. Optional, and shared
   // with sub-paths by construction — `normPath` normalizes both.
