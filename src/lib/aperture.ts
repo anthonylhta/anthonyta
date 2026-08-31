@@ -272,6 +272,29 @@ export interface ApertureProfile {
   born?: string;
 }
 
+/**
+ * The soul — the second axis beside rank (a facet, never a path). Everything here
+ * is ADJUDICATED: the check-in rules the grade and the gate, the site prints the
+ * words verbatim and only ever computes the raw day count beside them (from the
+ * vault index, client-side). The gate: a band cannot be crossed unrefined — count
+ * touching `at` with `refined` false is the strained state, the detonation
+ * gentled into refusal-to-advance.
+ */
+export interface ApertureSoul {
+  /** The adjudicated grade word — "hundred man soul". */
+  grade: string;
+  /** The next grade word — "thousand man soul". */
+  next: string;
+  /** The recorded-day count at which the next band opens. */
+  at: number;
+  /** The gate's state: refinement seen this band. */
+  refined: boolean;
+  /** Enlightenments harvested this band — the refinement evidence count. */
+  harvested: number;
+  /** The crossing refused: the count touched `at` unrefined. */
+  strained: boolean;
+}
+
 /** Everything behind the unlock. `streaks` is an open record keyed by streak name
  *  for the same reason as the strike counters: the names are data. */
 export interface ApertureSealed {
@@ -302,6 +325,9 @@ export interface ApertureSealed {
   rented?: string[];
   /** Who the sheet is about — absent on every document sealed before it existed. */
   profile?: ApertureProfile;
+  /** The soul's standing — absent on every document sealed before the axis
+   *  existed, and the band simply doesn't render. */
+  soul?: ApertureSoul;
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -558,6 +584,27 @@ function normBreakthrough(x: unknown): ApertureBreakthrough | null {
   return { wall: x.wall, event: x.event, routes, recentStrikes };
 }
 
+/** A safe integer ≥ 0 — harvested can honestly be zero. */
+function isNonNegInt(x: unknown): x is number {
+  return typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
+}
+
+function normSoul(x: unknown): ApertureSoul | null {
+  if (!isObj(x)) return null;
+  if (!isNonEmptyStr(x.grade) || !isNonEmptyStr(x.next)) return null;
+  if (!isPosInt(x.at) || !isNonNegInt(x.harvested)) return null;
+  if (typeof x.refined !== "boolean" || typeof x.strained !== "boolean")
+    return null;
+  return {
+    grade: x.grade,
+    next: x.next,
+    at: x.at,
+    refined: x.refined,
+    harvested: x.harvested,
+    strained: x.strained,
+  };
+}
+
 function normSealed(x: unknown): ApertureSealed | null {
   if (!isObj(x)) return null;
   const streaks = normRecord(x.streaks, normStreak);
@@ -590,6 +637,8 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (rulings !== undefined && rulings.length > MAX_RULINGS) return null;
   const profile = x.profile === undefined ? undefined : normProfile(x.profile);
   if (profile === null) return null;
+  const soul = x.soul === undefined ? undefined : normSoul(x.soul);
+  if (soul === null) return null;
   // An EMPTY next line is malformed rather than absent: a seal either says what
   // it waits on or says nothing, and a blank string would render as bare chrome.
   const { next } = x;
@@ -606,6 +655,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(rulings !== undefined ? { rulings } : {}),
     ...(rented !== undefined ? { rented } : {}),
     ...(profile !== undefined ? { profile } : {}),
+    ...(soul !== undefined ? { soul } : {}),
   };
 }
 

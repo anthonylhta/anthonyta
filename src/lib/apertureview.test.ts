@@ -35,6 +35,7 @@ import {
   imminentMajorTrial,
   isImminent,
   latestDailyDay,
+  recordedDays,
   membraneOf,
   mortalSegments,
   pathAnchor,
@@ -790,6 +791,37 @@ describe("apertureview — latestDailyDay", () => {
     expect(
       latestDailyDay(["2026-03-10", "2026-03-19"], "2026-03-05"),
     ).toBeNull();
+  });
+});
+
+describe("apertureview — recordedDays", () => {
+  it("counts distinct day-titled notes, ignoring every other title", () => {
+    expect(
+      recordedDays(
+        ["2026-03-01", "Harbour survey notes", "2026-03-04", "2026-02-28"],
+        "2026-03-05",
+      ),
+    ).toBe(3);
+  });
+
+  it("counts a duplicated day once — one lived day is one man soul", () => {
+    expect(
+      recordedDays(["2026-03-01", "2026-03-01", "2026-03-02"], "2026-03-05"),
+    ).toBe(2);
+  });
+
+  it("never counts pre-created day-planner notes for days ahead", () => {
+    expect(
+      recordedDays(["2026-03-01", "2026-03-10", "2026-03-19"], "2026-03-05"),
+    ).toBe(1);
+    expect(recordedDays(["2026-03-05"], "2026-03-05")).toBe(1);
+  });
+
+  it("is zero on an empty or day-free vault", () => {
+    expect(recordedDays([], "2026-03-05")).toBe(0);
+    expect(
+      recordedDays(["Harbour survey notes", "2026-3-4"], "2026-03-05"),
+    ).toBe(0);
   });
 });
 
