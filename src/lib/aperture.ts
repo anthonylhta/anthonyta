@@ -169,6 +169,20 @@ export interface ApertureGu {
 
 /** One path. Sub-paths reuse the same shape — `role` only appears on top-level
  *  paths in practice, but the type deliberately doesn't forbid it on a sub. */
+/**
+ * A path's dao marks (ADR 0167): an ADJUDICATED cumulative total in the path's
+ * OWN unit — commit days, sessions, days logged — never converted and never
+ * compared across paths (different paths' marks are different substances; the
+ * rev-1 uniform unit was rejected for weighing a passive walking day the same
+ * as a day of craft). The check-in adds each week's evidence at the seal; the
+ * site prints both fields verbatim.
+ */
+export interface ApertureMarks {
+  count: number;
+  /** What one mark IS for this path, in the check-in's words — "commit days". */
+  unit: string;
+}
+
 export interface AperturePath {
   name: string;
   role?: string;
@@ -183,6 +197,9 @@ export interface AperturePath {
   gu?: ApertureGu[];
   /** What the next rung asks for, in the emitter's own words. */
   next?: string;
+  /** The path's dao marks — absent on a path the check-in hasn't opened a
+   *  ledger for (and on every document sealed before the band existed). */
+  marks?: ApertureMarks;
   sub?: AperturePath[];
 }
 
@@ -463,6 +480,13 @@ function normStrings(x: unknown): string[] | null {
   return normArray(x, (v) => (isStr(v) ? v : null));
 }
 
+function normMarks(x: unknown): ApertureMarks | null {
+  if (!isObj(x)) return null;
+  // Zero is a real ledger ("beginning to cultivate the dao"), so ≥ 0.
+  if (!isNonNegInt(x.count) || !isNonEmptyStr(x.unit)) return null;
+  return { count: x.count, unit: x.unit };
+}
+
 function normPath(x: unknown): AperturePath | null {
   if (!isObj(x)) return null;
   if (!isStr(x.name)) return null;
@@ -479,6 +503,8 @@ function normPath(x: unknown): AperturePath | null {
   if (next !== undefined && !isStr(next)) return null;
   const gus = gu === undefined ? undefined : normArray(gu, normGu);
   if (gus === null) return null;
+  const marks = x.marks === undefined ? undefined : normMarks(x.marks);
+  if (marks === null) return null;
   const subs = sub === undefined ? undefined : normArray(sub, normPath);
   if (subs === null) return null;
   return {
@@ -491,6 +517,7 @@ function normPath(x: unknown): AperturePath | null {
     ...(peak !== undefined ? { peak } : {}),
     ...(gus !== undefined ? { gu: gus } : {}),
     ...(next !== undefined ? { next } : {}),
+    ...(marks !== undefined ? { marks } : {}),
     ...(subs !== undefined ? { sub: subs } : {}),
   };
 }
