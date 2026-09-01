@@ -27,7 +27,8 @@ import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
  * Every cadence is DERIVED from evidence, never self-reported: a note titled
  * with today's date, a session in the gym envelope, an import date in the fin
  * envelope, R2 modified-times for the sync and the seal. Nothing is tappable
- * but the todos — there is no checkbox here to lie to.
+ * but the todos and the copy on a due command — there is no checkbox here to
+ * lie to, and a copy claims no state.
  *
  * The three life cadences read sealed stores, so they show sealed dots until
  * the vault key is in hand and drop their readings the moment it locks; the
@@ -156,11 +157,7 @@ export function NeedsDoing({
         </Row>
         <Row name="finance">
           {unlocked ? (
-            <ChoreStatus
-              state={csv}
-              prefix="csv"
-              command="export → /portfolio"
-            />
+            <ChoreStatus state={csv} prefix="csv" hint="export → /portfolio" />
           ) : (
             <Sealed />
           )}
@@ -208,18 +205,22 @@ function Sealed() {
  * An evidence-aged line: the age, then either the tick or — only once it has
  * gone due — the literal thing to run, dimmer than the verdict carrying it. A
  * quiet line has nothing to run, so it says nothing. `prefix` names the evidence
- * where an age alone would be ambiguous ("csv 2d", "seal 2d").
+ * where an age alone would be ambiguous ("csv 2d", "seal 2d"). A `command` is a
+ * real shell command and copies on tap; a `hint` is a pointer that isn't one
+ * ("export → /portfolio") and stays plain text.
  */
 function ChoreStatus({
   state,
   prefix,
   note,
+  hint,
   command,
 }: {
   state: ChoreState;
   prefix?: string;
   note?: string;
-  command: string;
+  hint?: string;
+  command?: string;
 }) {
   if (state.status === "unknown")
     return <span className="text-muted/50">no record</span>;
@@ -233,8 +234,40 @@ function ChoreStatus({
   return (
     <span className={state.status === "due" ? "text-amber" : "text-down"}>
       {age} · {note && `${note} · `}
-      <span className="opacity-60">{command}</span>
+      {hint && <span className="opacity-60">{hint}</span>}
+      {command && <CopyCommand command={command} />}
     </span>
+  );
+}
+
+/**
+ * The due line's command, tap-to-copy: the line already names what to run (the
+ * commands-in-the-line rule) — the tap only removes the retyping, and the
+ * terminal stays the only place a ritual is actually cast. Feedback appears
+ * solely on a copy that landed; a clipboard the browser withholds leaves the
+ * plain label.
+ */
+function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      aria-label={`copy ${command}`}
+      onClick={() =>
+        navigator.clipboard?.writeText(command).then(
+          () => setCopied(true),
+          () => {},
+        )
+      }
+      className="opacity-60 transition-opacity hover:opacity-100"
+    >
+      {copied ? <span className="text-up">copied ✓</span> : command}
+    </button>
   );
 }
 
