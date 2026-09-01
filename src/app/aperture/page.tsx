@@ -14,12 +14,21 @@ import {
   sealedAgo,
   type PathSeries,
 } from "@/lib/apertureview";
+import { getStoredBriefing } from "@/lib/briefingstore";
 import { getApertureGlance } from "@/lib/connectors/aperture";
 import { getGithub } from "@/lib/connectors/github";
 import { getSleep } from "@/lib/connectors/sleep";
 import { getSteps } from "@/lib/connectors/steps";
 import { getLanguageStats } from "@/lib/connectors/translator";
-import { sydneyToday } from "@/lib/fin";
+import { isSnapIndex, sydneyToday } from "@/lib/fin";
+import { getSnapIndex } from "@/lib/finstore";
+import { formationRows } from "@/lib/formations";
+import {
+  briefingRecordedDays,
+  newestRecordedDay,
+  vapidStatus,
+  type BriefingRead,
+} from "@/lib/push";
 import { r2Enabled } from "@/lib/r2";
 import {
   weekAverage as sleepWeekAverage,
@@ -64,13 +73,16 @@ export default async function AperturePage() {
 
   const who = session.user.name ?? "anthony";
   const today = sydneyToday();
-  const [glance, gh, lang, steps, sleep] = await Promise.all([
-    getApertureGlance(),
-    getGithub(),
-    getLanguageStats(),
-    getSteps(today),
-    getSleep(today),
-  ]);
+  const [glance, gh, lang, steps, sleep, briefingRead, indexRead] =
+    await Promise.all([
+      getApertureGlance(),
+      getGithub(),
+      getLanguageStats(),
+      getSteps(today),
+      getSleep(today),
+      getStoredBriefing(),
+      getSnapIndex(),
+    ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
   const membrane = glance ? membraneOf(glance.stage) : null;
   const phrase = glance ? gutterPhrase(glance.rank) : null;
@@ -92,6 +104,36 @@ export default async function AperturePage() {
       value: stepsForDay(steps, today),
     },
   };
+
+  // The formations band's evidence (ADR 0167) — every read is plaintext hub
+  // state the server already holds, so the band needs no key. Any miss reads as
+  // its own honest state ("no record"), never as freshness.
+  let cronDay: string | null = null;
+  if (indexRead.state === "ok") {
+    try {
+      const parsed: unknown = JSON.parse(indexRead.value);
+      if (isSnapIndex(parsed))
+        cronDay = parsed.days[parsed.days.length - 1]?.date ?? null;
+    } catch {
+      // malformed index → no record
+    }
+  }
+  const formations = formationRows(
+    {
+      briefingDay: newestRecordedDay(
+        briefingRecordedDays(briefingRead as BriefingRead) ?? {},
+      ),
+      cronDay,
+      stepsDay: newestRecordedDay(steps.days),
+      sleepDay: newestRecordedDay(sleep.nights),
+      vapid: vapidStatus(
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY,
+        process.env.VAPID_SUBJECT,
+      ).state,
+    },
+    today,
+  );
 
   return (
     // The cultivation skin (ADR 0118) rides the container, unconditionally here
@@ -183,6 +225,7 @@ export default async function AperturePage() {
 
         <ApertureInner
           offline={!r2Enabled()}
+          formations={formations}
           series={series}
           sleepWeekAvg={sleepWeekAverage(sleep, today)}
           sleepWeeks={sleepWeeklyAverages(sleep, today)}

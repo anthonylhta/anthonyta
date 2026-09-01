@@ -41,9 +41,11 @@ import {
   conditionChipPrefix,
   conditionStatusWord,
   conditionsSummary,
+  daoRows,
   daysOpen,
   declaredSeriesKeys,
   detailStatus,
+  evidenceDaysThisWeek,
   hardenLines,
   imminentMajorTrial,
   isImminent,
@@ -92,6 +94,7 @@ import {
   weightTrend,
   type MealsConfig,
 } from "@/lib/meals";
+import type { FormationRow, FormationStatus } from "@/lib/formations";
 import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
@@ -338,6 +341,7 @@ async function mealsConfig(
 
 export function ApertureInner({
   offline,
+  formations,
   series,
   sleepWeekAvg,
   sleepWeeks,
@@ -345,6 +349,9 @@ export function ApertureInner({
   today,
 }: {
   offline: boolean;
+  /** The formations band's rows, judged on the server off plaintext evidence
+   *  (ADR 0167) — the island renders them verbatim. */
+  formations: FormationRow[];
   /** The server-assembled path evidence — commits, languages, steps. */
   series: PathSeries;
   /** The week's mean minutes asleep, read on the server off the same plaintext
@@ -533,6 +540,33 @@ export function ApertureInner({
     () => (fin ? weeklyFlow(fin, today) : { recovered: [], rate: [] }),
     [fin, today],
   );
+
+  // The dao band's rows (ADR 0167): the sealed ledgers off the paths tree, each
+  // with its live weekly accrual where the node's OWN activity has a computable
+  // series — the sealed count and the live week side by side, never derived
+  // from each other. A node without a series just prints without the column.
+  const dao = useMemo(() => {
+    if (!doc) return [];
+    const accrual = (activity: string | null): number | null => {
+      if (activity === null) return null;
+      if (activity === "gym")
+        return gymCfg ? sessionsThisWeek(gymCfg, today) : null;
+      if (activity === "meals")
+        return mealsCfg
+          ? evidenceDaysThisWeek(
+              trailingProtein(mealsCfg, today, ACTIVITY_DAYS),
+            )
+          : null;
+      const s = (series as Record<string, EvidenceSeries | undefined>)[
+        activity
+      ];
+      return s ? evidenceDaysThisWeek(s.levels) : null;
+    };
+    return daoRows(doc.sealed.paths).map((r) => ({
+      ...r,
+      wk: accrual(r.activity),
+    }));
+  }, [doc, gymCfg, mealsCfg, series, today]);
 
   switch (detailStatus(status, dataErr, doc)) {
     case "offline":
@@ -1113,6 +1147,11 @@ export function ApertureInner({
         </>
       )}
 
+      {/* 阵 — what the aperture sustains without its owner (ADR 0167). Always
+          all five rows, unconditionally: this band's whole point is that an
+          absent row can't go amber (the briefing-skip lesson). */}
+      <FormationsBand rows={formations} />
+
       <Section label="primeval stones">
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           <Stat
@@ -1341,6 +1380,10 @@ export function ApertureInner({
         </div>
       </Section>
 
+      {/* 道 — the dao-mark composition (ADR 0167), directly under the paths it
+          reads from. Absent until a seal opens a ledger on some path. */}
+      {dao.length > 0 && <DaoBand rows={dao} />}
+
       {rented && rented.length > 0 && (
         <p className="px-4 pb-4 text-[11px] text-muted">
           rented · {rented.join(" · ")}
@@ -1407,6 +1450,128 @@ function SoulBand({ soul, days }: { soul: ApertureSoul; days: number | null }) {
             </span>
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Formation-status dots and label tints: green turning, amber a missed turn,
+ *  red stopped/broken, muted for the honest nothing-states. */
+const FORMATION_DOT: Record<FormationStatus, string> = {
+  ok: "text-up",
+  armed: "text-up",
+  due: "text-amber",
+  overdue: "text-down",
+  broken: "text-down",
+  unknown: "text-muted",
+  off: "text-muted",
+};
+const FORMATION_LAST: Record<FormationStatus, string> = {
+  ok: "text-muted",
+  armed: "text-muted",
+  due: "text-amber",
+  overdue: "text-down",
+  broken: "text-down",
+  unknown: "text-muted",
+  off: "text-muted",
+};
+
+/**
+ * 阵 — the formations band (ADR 0167): everything autonomous, one row each,
+ * judged on the server from evidence the machinery itself wrote (never
+ * self-reported). Rendered verbatim; the rows are props because every read is
+ * plaintext hub state needing no key.
+ */
+function FormationsBand({ rows }: { rows: FormationRow[] }) {
+  const allTurning = rows.every(
+    (r) => r.status === "ok" || r.status === "armed",
+  );
+  return (
+    <>
+      <ZoneHeader
+        label="formations"
+        seal="阵"
+        right={`${rows.length} standing${allTurning ? " · all turning" : ""}`}
+      />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        {rows.map((r) => (
+          <p key={r.key} className="flex items-baseline gap-2 text-xs">
+            <span
+              aria-hidden
+              className={`shrink-0 text-[11px] ${FORMATION_DOT[r.status]}`}
+            >
+              ●
+            </span>
+            <span className="w-[132px] shrink-0 text-fg/90">{r.name}</span>
+            <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted sm:block">
+              {r.what}
+            </span>
+            <span
+              className={`ml-auto shrink-0 text-[11px] tabular-nums ${FORMATION_LAST[r.status]}`}
+            >
+              {r.last}
+            </span>
+          </p>
+        ))}
+        <p className="mt-1 text-[11px] italic text-muted/60">
+          a formation needs attention only when it stops — amber is one missed
+          turn.
+        </p>
+      </div>
+    </>
+  );
+}
+
+/**
+ * 道 — the dao-mark composition (ADR 0167): every marks-bearing path in its OWN
+ * unit, the sealed count with the live week beside it. No bars and no total —
+ * different substances don't share an axis, and re-summing across units would
+ * sneak the comparison back in. The only comparison the units permit is each
+ * path against its own past (the record's job, seal by seal).
+ */
+function DaoBand({
+  rows,
+}: {
+  rows: { name: string; count: number; unit: string; wk: number | null }[];
+}) {
+  return (
+    <div className="border-t border-hairline">
+      <ZoneHeader
+        label="the dao"
+        seal="道"
+        right={`${rows.length} path${rows.length === 1 ? "" : "s"}`}
+      />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        {rows.map((r) => (
+          <p
+            key={r.name}
+            className="flex items-baseline gap-2 text-xs tabular-nums"
+          >
+            <span className="w-[88px] shrink-0 truncate text-fg/90">
+              {r.name}
+            </span>
+            <span className="shrink-0 text-fg">
+              {r.count.toLocaleString("en-AU")}{" "}
+              <span
+                aria-hidden
+                lang="zh"
+                className="font-[family-name:var(--font-zh)] text-(--essence-soft)"
+              >
+                道
+              </span>
+            </span>
+            <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted/60 sm:block">
+              {r.unit}
+            </span>
+            <span className="ml-auto shrink-0 text-[11px] text-muted">
+              {r.wk !== null && `+${r.wk} this wk`}
+            </span>
+          </p>
+        ))}
+        <p className="mt-1 text-[11px] italic text-muted/60">
+          each path&apos;s marks in its own substance — never converted, never
+          compared.
+        </p>
       </div>
     </div>
   );

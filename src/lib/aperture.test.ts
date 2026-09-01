@@ -500,6 +500,43 @@ describe("aperture — the sealed profile", () => {
   });
 });
 
+describe("aperture — dao marks", () => {
+  // Adjudicated per-path totals in the path's OWN unit — never converted,
+  // never summed (ADR 0167). Optional on paths AND sub-paths via normPath.
+  const marked = withSealed({
+    paths: [
+      {
+        name: "Smithing",
+        role: "main",
+        marks: { count: 1412, unit: "commit days" },
+        sub: [{ name: "Etching", marks: { count: 0, unit: "plates etched" } }],
+      },
+    ],
+  });
+
+  it("accepts marks on a path and a sub-path — zero is a real ledger", () => {
+    expect(normalizeAperture(marked)).toEqual(marked);
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed.paths[0]).not.toHaveProperty("marks");
+  });
+
+  it("hard-rejects present-but-malformed marks", () => {
+    const bad = (marks: unknown) =>
+      expect(
+        normalizeAperture(withSealed({ paths: [{ name: "P", marks }] })),
+      ).toBeNull();
+    bad("1412"); // a count where a ledger should be
+    bad({ count: -1, unit: "days" }); // a ledger can be empty, never negative
+    bad({ count: 3.5, unit: "days" }); // marks are whole
+    bad({ count: 3, unit: "" }); // a unit either names the substance or the ledger is absent
+    bad({ count: 3 }); // no unit at all
+  });
+});
+
 describe("aperture — the soul", () => {
   // The second axis beside rank: every field adjudicated, the site printing them
   // verbatim (the raw day count beside the grade is the page's only computation).

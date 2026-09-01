@@ -834,6 +834,50 @@ export function latestDailyDay(titles: string[], today: string): string | null {
   return latest;
 }
 
+// --- the dao band (ADR 0167) --------------------------------------------------
+
+/** One row of the 道 band: a marks-bearing path in its own unit. */
+export interface DaoRow {
+  /** The node's name, lowercased into the band's register. */
+  name: string;
+  count: number;
+  unit: string;
+  /** The node's OWN declared activity — the live "+n this wk" lookup key; null
+   *  when the node declares none (the row then prints without the column). */
+  activity: string | null;
+}
+
+/**
+ * Every marks-bearing node of the paths tree, in reading order (a path before
+ * its subs). The check-in decides which nodes carry a ledger — the walk just
+ * collects; different rows' counts are different substances and are never
+ * summed here or anywhere.
+ */
+export function daoRows(paths: AperturePath[]): DaoRow[] {
+  const out: DaoRow[] = [];
+  const walk = (list: AperturePath[]) => {
+    for (const p of list) {
+      if (p.marks)
+        out.push({
+          name: p.name.toLowerCase(),
+          count: p.marks.count,
+          unit: p.marks.unit,
+          activity: p.activity ?? null,
+        });
+      if (p.sub) walk(p.sub);
+    }
+  };
+  walk(paths);
+  return out;
+}
+
+/** Days in the trailing week that left evidence — nonzero entries among the
+ *  last 7 of a daily series. The dao band's live accrual beside the sealed
+ *  count (the soul's grade/count split, per row). */
+export function evidenceDaysThisWeek(values: number[]): number {
+  return values.slice(-7).filter((v) => v > 0).length;
+}
+
 /**
  * The soul's raw count: how many DISTINCT journal days the vault holds — one
  * recorded day is one man soul (the soul band's evidence figure). Same discipline

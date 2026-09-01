@@ -34,6 +34,8 @@ import {
   hardenLines,
   imminentMajorTrial,
   isImminent,
+  daoRows,
+  evidenceDaysThisWeek,
   latestDailyDay,
   recordedDays,
   membraneOf,
@@ -791,6 +793,47 @@ describe("apertureview — latestDailyDay", () => {
     expect(
       latestDailyDay(["2026-03-10", "2026-03-19"], "2026-03-05"),
     ).toBeNull();
+  });
+});
+
+describe("apertureview — daoRows + evidenceDaysThisWeek", () => {
+  it("collects marks-bearing nodes in reading order, names lowercased", () => {
+    const rows = daoRows([
+      {
+        name: "Craft",
+        activity: "commits",
+        marks: { count: 1412, unit: "commit days" },
+      },
+      { name: "Quiet" },
+      {
+        name: "Body",
+        sub: [
+          {
+            name: "Training",
+            activity: "gym",
+            marks: { count: 203, unit: "sessions" },
+          },
+          { name: "Walking", activity: "steps" },
+        ],
+      },
+    ]);
+    expect(rows).toEqual([
+      { name: "craft", count: 1412, unit: "commit days", activity: "commits" },
+      { name: "training", count: 203, unit: "sessions", activity: "gym" },
+    ]);
+  });
+
+  it("a marks-bearing node with no activity gets a null lookup key", () => {
+    expect(
+      daoRows([{ name: "Ledgerless", marks: { count: 3, unit: "days" } }])[0]
+        .activity,
+    ).toBeNull();
+  });
+
+  it("counts nonzero days among the trailing seven only", () => {
+    expect(evidenceDaysThisWeek([9, 9, 9, 1, 0, 2, 0, 3, 1, 0])).toBe(4);
+    expect(evidenceDaysThisWeek([1, 2])).toBe(2);
+    expect(evidenceDaysThisWeek([])).toBe(0);
   });
 });
 
