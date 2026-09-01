@@ -273,6 +273,33 @@ const MAX_PARAGRAPH_CHARS = 4000;
 const MAX_TITLE_CHARS = 200;
 const MAX_RULINGS = 30;
 const MAX_RULING_CHARS = 4000;
+const MAX_KILLER_MOVES = 12;
+const MAX_MOVE_STEPS = 12;
+const MAX_STEP_CHARS = 400;
+
+/**
+ * One killer move — a named composite ritual, the active half of the formations
+ * duality (阵 runs without the owner; a killer move is only ever CAST). The
+ * definition is adjudicated whole at the check-in and printed verbatim; the only
+ * thing the site adds beside it is a cast reading derived from evidence
+ * (`apertureview.castReading`) — never a self-reported count.
+ */
+export interface ApertureKillerMove {
+  /** The move's name, printed as the row. */
+  name: string;
+  /** The one-line component chain beside it — "csv → portfolio → seal". */
+  chain: string;
+  /** The unfolded casting, one step per line. A `` `backtick` `` span renders as
+   *  a copy-on-tap command chip (`apertureview.codeSpans`); everything else
+   *  prints literally. */
+  steps: string[];
+  /** Where the casting evidence lives — the seal record (count + age) or the
+   *  backup stamp (age alone). Absent = the move leaves no trace, and the row
+   *  says so honestly rather than inventing a beacon to self-report through. */
+  evidence?: "record" | "backup";
+  /** The honest line under the steps — what the reading can and cannot claim. */
+  note?: string;
+}
 
 /**
  * Standing context about the person the sheet is about. `born` is a `YYYY-MM-DD`
@@ -345,6 +372,10 @@ export interface ApertureSealed {
   /** The soul's standing — absent on every document sealed before the axis
    *  existed, and the band simply doesn't render. */
   soul?: ApertureSoul;
+  /** The named composite rituals — definitions sealed at the check-in, cast
+   *  readings derived by the site from evidence. Absent on every document
+   *  sealed before the band existed, and the band simply doesn't render. */
+  killerMoves?: ApertureKillerMove[];
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -599,6 +630,31 @@ function normRuling(x: unknown): ApertureRuling | null {
   return { date: x.date, text: x.text };
 }
 
+function normKillerMove(x: unknown): ApertureKillerMove | null {
+  if (!isObj(x)) return null;
+  if (!isProse(x.name, MAX_TITLE_CHARS) || !isProse(x.chain, MAX_TITLE_CHARS))
+    return null;
+  const steps = normArray(x.steps, (v) =>
+    isProse(v, MAX_STEP_CHARS) ? v : null,
+  );
+  // A move with no steps is not a move — the unfold would be bare chrome.
+  if (steps === null || steps.length === 0 || steps.length > MAX_MOVE_STEPS)
+    return null;
+  const { evidence, note } = x;
+  // The evidence source is a CLOSED vocabulary: the site derives the reading
+  // from it, so a value this build doesn't know is a frame breach, not data.
+  if (evidence !== undefined && evidence !== "record" && evidence !== "backup")
+    return null;
+  if (note !== undefined && !isProse(note, MAX_STEP_CHARS)) return null;
+  return {
+    name: x.name,
+    chain: x.chain,
+    steps,
+    ...(evidence !== undefined ? { evidence } : {}),
+    ...(note !== undefined ? { note } : {}),
+  };
+}
+
 function normBreakthrough(x: unknown): ApertureBreakthrough | null {
   if (!isObj(x)) return null;
   if (!isStr(x.wall) || !isStr(x.event)) return null;
@@ -666,6 +722,13 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (profile === null) return null;
   const soul = x.soul === undefined ? undefined : normSoul(x.soul);
   if (soul === null) return null;
+  const killerMoves =
+    x.killerMoves === undefined
+      ? undefined
+      : normArray(x.killerMoves, normKillerMove);
+  if (killerMoves === null) return null;
+  if (killerMoves !== undefined && killerMoves.length > MAX_KILLER_MOVES)
+    return null;
   // An EMPTY next line is malformed rather than absent: a seal either says what
   // it waits on or says nothing, and a blank string would render as bare chrome.
   const { next } = x;
@@ -683,6 +746,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(rented !== undefined ? { rented } : {}),
     ...(profile !== undefined ? { profile } : {}),
     ...(soul !== undefined ? { soul } : {}),
+    ...(killerMoves !== undefined ? { killerMoves } : {}),
   };
 }
 

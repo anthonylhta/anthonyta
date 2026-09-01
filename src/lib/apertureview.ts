@@ -554,6 +554,72 @@ export function sealedAgo(sealedAt: string, nowMs: number): string | null {
   return days < 1 ? "sealed today" : `sealed ${days}d ago`;
 }
 
+/** Elapsed days from an instant as a short age — "today" under one full day,
+ *  then Nd/Nw ago (the `agoLabel` register, floored the way `sealedAgo` floors).
+ *  Null on nothing, the unparseable, or an instant still ahead of the clock. */
+function elapsedLabel(iso: string | null, nowMs: number): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const days = Math.floor((nowMs - t) / DAY_MS);
+  if (days < 0) return null;
+  if (days < 1) return "today";
+  return days < AGO_WEEK_DAYS ? `${days}d ago` : `${Math.floor(days / 7)}w ago`;
+}
+
+/**
+ * A killer move's right-hand reading, derived ONLY from evidence the move's
+ * declared source actually holds (the band's whole doctrine — nothing here is
+ * self-reported):
+ *   - "record": one dated seal per cast, so the archive count IS the cast count,
+ *     aged by the current seal. A dead listing (total 0) drops the count rather
+ *     than claiming zero casts; a broken age drops the age.
+ *   - "backup": the stamp holds one date, so the reading is an age alone —
+ *     casts stay honestly uncounted until the script learns to count.
+ *   - absent: a pure read writes nothing, and the row says so.
+ */
+export function castReading(
+  evidence: "record" | "backup" | undefined,
+  ev: { recordTotal: number; sealedAt: string; backupAt: string | null },
+  nowMs: number,
+): string {
+  if (evidence === "record") {
+    const age = elapsedLabel(ev.sealedAt, nowMs);
+    if (ev.recordTotal > 0)
+      return `cast ${ev.recordTotal}${age ? ` · ${age}` : ""}`;
+    return age ?? "—";
+  }
+  if (evidence === "backup")
+    return elapsedLabel(ev.backupAt, nowMs) ?? "no record";
+  return "leaves no trace";
+}
+
+/** One rendered run of a killer-move step: literal text, or a command chip. */
+export interface CodeSpan {
+  code: boolean;
+  text: string;
+}
+
+/**
+ * Split a step on `` `backtick` `` pairs — the killer-move steps' one piece of
+ * markup, so a literal command can render (and copy) as a chip inside prose the
+ * site otherwise never parses. An unmatched final backtick stays literal text:
+ * a half-open span must render as what was written, never as a runaway chip.
+ */
+export function codeSpans(text: string): CodeSpan[] {
+  const parts = text.split("`");
+  if (parts.length % 2 === 0) {
+    const tail = parts.pop() as string;
+    parts[parts.length - 1] += "`" + tail;
+  }
+  const out: CodeSpan[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] === "") continue;
+    out.push({ code: i % 2 === 1, text: parts[i] });
+  }
+  return out;
+}
+
 // en-US short month over UTC: harden dates are bare Sydney calendar days, and
 // formatting the UTC-midnight they parse to preserves the written day.
 const HARDEN_DAY = new Intl.DateTimeFormat("en-US", {

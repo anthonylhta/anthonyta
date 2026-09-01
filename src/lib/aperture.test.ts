@@ -593,6 +593,54 @@ describe("aperture — the soul", () => {
   });
 });
 
+describe("aperture — killer moves", () => {
+  // The named composite rituals: definitions sealed whole at the check-in, the
+  // site deriving only the cast reading beside them. Same absent-vs-malformed
+  // doctrine as every optional sealed field.
+  const move = {
+    name: "the wednesday ritual",
+    chain: "csv → portfolio → check-in → seal",
+    steps: ["export the csv", "run `npm run aperture-sync`"],
+    evidence: "record",
+    note: "casts counted from the record — one dated seal per casting.",
+  };
+
+  it("accepts a well-formed move, and one that leaves no trace", () => {
+    const full = withSealed({ killerMoves: [move] });
+    expect(normalizeAperture(full)).toEqual(full);
+    // No evidence and no note is a real move — the documentation-only card.
+    const bare = withSealed({
+      killerMoves: [{ name: "the morning glance", chain: "a", steps: ["b"] }],
+    });
+    expect(normalizeAperture(bare)).toEqual(bare);
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("killerMoves");
+  });
+
+  it("drops an unknown key inside a move", () => {
+    const out = normalizeAperture(
+      withSealed({ killerMoves: [{ ...move, mutated: 1 }] }),
+    );
+    expect(out?.sealed.killerMoves).toEqual([move]);
+  });
+
+  it("hard-rejects a present-but-malformed list", () => {
+    const bad = (moves: unknown) =>
+      expect(normalizeAperture(withSealed({ killerMoves: moves }))).toBeNull();
+    bad("the wednesday ritual"); // a word where a list should be
+    bad([{ ...move, name: "" }]); // a move either has a name or isn't one
+    bad([{ ...move, steps: [] }]); // no steps → the unfold would be bare chrome
+    bad([{ ...move, steps: ["a", 2] }]); // one bad step rejects the list
+    bad([{ ...move, evidence: "chores" }]); // closed vocabulary — unknown source
+    bad([{ ...move, note: "" }]); // an empty note is malformed, not silence
+    bad(Array.from({ length: 13 }, (_, i) => ({ ...move, name: `m${i}` }))); // past the ceiling
+  });
+});
+
 describe("aperture — path peaks", () => {
   // How high a path goes, printed at the head of its card. Optional, and shared
   // with sub-paths by construction — `normPath` normalizes both.

@@ -16,6 +16,7 @@ import {
 } from "@/lib/apertureview";
 import { getStoredBriefing } from "@/lib/briefingstore";
 import { getApertureGlance } from "@/lib/connectors/aperture";
+import { getChoreReads } from "@/lib/connectors/chores";
 import { getGithub } from "@/lib/connectors/github";
 import { getSleep } from "@/lib/connectors/sleep";
 import { getSteps } from "@/lib/connectors/steps";
@@ -73,7 +74,7 @@ export default async function AperturePage() {
 
   const who = session.user.name ?? "anthony";
   const today = sydneyToday();
-  const [glance, gh, lang, steps, sleep, briefingRead, indexRead] =
+  const [glance, gh, lang, steps, sleep, briefingRead, indexRead, choreReads] =
     await Promise.all([
       getApertureGlance(),
       getGithub(),
@@ -82,6 +83,7 @@ export default async function AperturePage() {
       getSleep(today),
       getStoredBriefing(),
       getSnapIndex(),
+      getChoreReads(),
     ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
   const membrane = glance ? membraneOf(glance.stage) : null;
@@ -226,6 +228,7 @@ export default async function AperturePage() {
         <ApertureInner
           offline={!r2Enabled()}
           formations={formations}
+          backupAt={choreReads.backupAt}
           series={series}
           sleepWeekAvg={sleepWeekAverage(sleep, today)}
           sleepWeeks={sleepWeeklyAverages(sleep, today)}
