@@ -1,10 +1,12 @@
 import { after } from "next/server";
+import { sydneyToday } from "./fin";
 import {
   categoryOn,
   parsePushConfig,
   pruneSubs,
   pushPayload,
   serializePushConfig,
+  setFired,
   vapidStatus,
   type PushCategory,
   type PushConfig,
@@ -68,10 +70,19 @@ async function configure(): Promise<typeof import("web-push") | null> {
   }
 }
 
+/** What one delivery attempt did: how many devices actually received it (the
+ *  fired ledger stamps only when this is non-zero — a wire that reached nobody
+ *  didn't speak), and the gone ids to prune. */
+export interface Delivery {
+  sent: number;
+  gone: string[];
+}
+
 /**
- * Send one payload to every device subscribed to `category`. Returns the ids of
- * subscriptions the push service reports as GONE (404/410) so the caller can
- * prune them in the same write it was making anyway; never throws.
+ * Send one payload to every device subscribed to `category`. Returns the count
+ * that succeeded plus the ids of subscriptions the push service reports as
+ * GONE (404/410) so the caller can prune them in the same write it was making
+ * anyway; never throws.
  *
  * A 404/410 is the push service saying "this device unsubscribed or the browser
  * dropped it" — permanent, and the only status worth acting on. Every other
@@ -83,13 +94,14 @@ export async function deliver(
   category: PushCategory,
   body: string,
   url = "/",
-): Promise<string[]> {
-  if (!categoryOn(cfg, category)) return [];
+): Promise<Delivery> {
+  if (!categoryOn(cfg, category)) return { sent: 0, gone: [] };
   const webpush = await configure();
-  if (!webpush) return [];
+  if (!webpush) return { sent: 0, gone: [] };
 
   const payload = JSON.stringify(pushPayload(category, body, url));
   const gone: string[] = [];
+  let sent = 0;
 
   await Promise.all(
     cfg.subs.map(async (sub) => {
@@ -98,6 +110,7 @@ export async function deliver(
           { endpoint: sub.endpoint, keys: sub.keys },
           payload,
         );
+        sent += 1;
       } catch (err) {
         const status = (err as { statusCode?: number })?.statusCode;
         if (status === 404 || status === 410) {
@@ -109,7 +122,7 @@ export async function deliver(
     }),
   );
 
-  return gone;
+  return { sent, gone };
 }
 
 /**
@@ -131,9 +144,15 @@ export async function notify(
     if (read.state !== "ok") return;
 
     const cfg = parsePushConfig(read.value);
-    const gone = await deliver(cfg, category, body, url);
-    if (gone.length === 0) return;
-    await putPush(serializePushConfig(pruneSubs(cfg, gone)));
+    const { sent, gone } = await deliver(cfg, category, body, url);
+    let next = pruneSubs(cfg, gone);
+    // The fired ledger: a wire spoke only if at least one device heard it.
+    // `ingest` never arrives here (the cron drives its own deliveries and
+    // stamps per source), so the category IS the fired key.
+    if (sent > 0 && category !== "ingest")
+      next = setFired(next, category, sydneyToday());
+    if (serializePushConfig(next) === serializePushConfig(cfg)) return;
+    await putPush(serializePushConfig(next));
   } catch (err) {
     console.error("[push] notify failed", err);
   }

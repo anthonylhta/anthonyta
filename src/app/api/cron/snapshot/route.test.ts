@@ -111,7 +111,7 @@ describe("snapshot cron route", () => {
     // The notification jobs are OFF by default (no VAPID in CI), which is what
     // every snapshot test above assumes; the alarm block below turns them on.
     vi.mocked(pushConfigured).mockReturnValue(false);
-    vi.mocked(deliver).mockResolvedValue([]);
+    vi.mocked(deliver).mockResolvedValue({ sent: 1, gone: [] });
     vi.mocked(getPushRaw).mockResolvedValue({ state: "absent" });
     vi.mocked(putPush).mockResolvedValue(true);
     vi.mocked(getStepsRaw).mockResolvedValue({ state: "absent" });
