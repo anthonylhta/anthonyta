@@ -20,6 +20,7 @@ import {
   castReading,
   codeSpans,
   compactDollars,
+  guHeldCount,
   conditionChipClass,
   conditionChipPrefix,
   conditionStatusWord,
@@ -954,6 +955,23 @@ describe("apertureview — codeSpans", () => {
     expect(codeSpans("`npm run vault-sync`")).toEqual([
       { code: true, text: "npm run vault-sync" },
     ]);
+  });
+});
+
+describe("apertureview — guHeldCount", () => {
+  const path = (gu: number, sub?: AperturePath[]): AperturePath => ({
+    name: "p",
+    gu: Array.from({ length: gu }, (_, i) => ({ name: `g${i}` })),
+    ...(sub ? { sub } : {}),
+  });
+
+  it("sums gu across paths, sub-paths included", () => {
+    expect(guHeldCount([path(2), path(3, [path(1), path(0)])])).toBe(6);
+  });
+
+  it("counts nothing for uninventoried paths", () => {
+    expect(guHeldCount([{ name: "p" }])).toBe(0);
+    expect(guHeldCount([])).toBe(0);
   });
 });
 

@@ -375,6 +375,18 @@ export function pathEvidence(path: AperturePath): PathEvidence {
   return null;
 }
 
+/** Every gu held across the paths, sub-paths included — the gu-house census's
+ *  one figure the page didn't already have as a length. Uninventoried paths
+ *  (no `gu` array) count nothing rather than guessing. */
+export function guHeldCount(paths: AperturePath[]): number {
+  let n = 0;
+  for (const p of paths) {
+    n += p.gu?.length ?? 0;
+    if (p.sub) n += guHeldCount(p.sub);
+  }
+  return n;
+}
+
 /**
  * Every series key the document's paths actually ask for, sub-paths included.
  * The sheet uses this to decide what is worth FETCHING: a sealed series costs a
