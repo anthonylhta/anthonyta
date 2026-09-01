@@ -47,6 +47,7 @@ describe("formations — formationRows", () => {
     stepsDay: "2026-09-01",
     sleepDay: "2026-08-30",
     vapid: "ok",
+    fired: null,
   };
 
   it("always lists all five, in reading order", () => {
@@ -82,5 +83,70 @@ describe("formations — formationRows", () => {
   it("a never-written store reads unknown — silence is visible", () => {
     const rows = formationRows({ ...ev, sleepDay: null }, TODAY);
     expect(rows.find((r) => r.key === "sleep")?.status).toBe("unknown");
+  });
+});
+
+describe("formations — the tripwires' firing ledger", () => {
+  const ev: FormationEvidence = {
+    briefingDay: "2026-09-01",
+    cronDay: "2026-08-31",
+    stepsDay: "2026-09-01",
+    sleepDay: "2026-08-30",
+    vapid: "ok",
+    fired: {
+      dropbox: "2026-08-31",
+      signin: "2026-08-28",
+      briefing: "2026-08-26",
+    },
+  };
+  const wires = (e: FormationEvidence) =>
+    formationRows(e, TODAY).find((r) => r.key === "tripwires");
+
+  it("the armed row carries the newest firing", () => {
+    expect(wires(ev)?.last).toBe("armed · spoke 1d ago");
+  });
+
+  it("unfolds one line per wire, silence naming its source", () => {
+    const detail = wires(ev)?.detail;
+    expect(detail?.map((d) => d.label)).toEqual([
+      "mail",
+      "the door",
+      "share",
+      "silence",
+      "upkeep",
+      "health",
+    ]);
+    expect(detail?.find((d) => d.label === "mail")?.value).toBe("1d ago");
+    expect(detail?.find((d) => d.label === "silence")?.value).toBe(
+      "6d ago · briefing",
+    );
+    const share = detail?.find((d) => d.label === "share");
+    expect(share).toEqual({ label: "share", value: "never", fired: false });
+  });
+
+  it("an unreadable config drops the ledger, never a row of nevers", () => {
+    const row = wires({ ...ev, fired: null });
+    expect(row?.detail).toBeUndefined();
+    expect(row?.last).toBe("armed");
+  });
+
+  it("an empty ledger reads all never, the row staying plain armed", () => {
+    const row = wires({ ...ev, fired: {} });
+    expect(row?.last).toBe("armed");
+    expect(row?.detail?.every((d) => !d.fired)).toBe(true);
+  });
+
+  it("a broken trio keeps its own headline — history is context, not cover", () => {
+    const row = wires({ ...ev, vapid: "misconfigured" });
+    expect(row?.last).toBe("push broken — see /system");
+    expect(row?.detail?.length).toBe(6);
+  });
+
+  it("old firings switch to the week register", () => {
+    const row = wires({ ...ev, fired: { chores: "2026-08-01" } });
+    expect(row?.detail?.find((d) => d.label === "upkeep")?.value).toBe(
+      "4w ago",
+    );
+    expect(row?.last).toBe("armed · spoke 4w ago");
   });
 });
