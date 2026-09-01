@@ -641,6 +641,48 @@ describe("aperture — killer moves", () => {
   });
 });
 
+describe("aperture — gu houses", () => {
+  // The colophon's input: name/type/origin sealed whole, printed verbatim; the
+  // census beside the first house is derived and never rides the frame.
+  const house = {
+    name: "warm turtle house",
+    type: "defensive type — storage and refinement · one master",
+    origin: ["raised room by room", "burned once", "the shell has held since"],
+  };
+
+  it("accepts a well-formed house, alone and with a second", () => {
+    const one = withSealed({ guHouses: [house] });
+    expect(normalizeAperture(one)).toEqual(one);
+    const two = withSealed({
+      guHouses: [house, { name: "ishin", type: "refinement", origin: ["a"] }],
+    });
+    expect(normalizeAperture(two)).toEqual(two);
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("guHouses");
+  });
+
+  it("drops an unknown key inside a house", () => {
+    const out = normalizeAperture(
+      withSealed({ guHouses: [{ ...house, mutated: 1 }] }),
+    );
+    expect(out?.sealed.guHouses).toEqual([house]);
+  });
+
+  it("hard-rejects a present-but-malformed list", () => {
+    const bad = (houses: unknown) =>
+      expect(normalizeAperture(withSealed({ guHouses: houses }))).toBeNull();
+    bad("warm turtle house"); // a word where a list should be
+    bad([{ ...house, name: "" }]); // a house either has a name or isn't one
+    bad([{ ...house, origin: [] }]); // a house has a story or it isn't sealed yet
+    bad([{ ...house, origin: ["a", 2] }]); // one bad beat rejects the list
+    bad(Array.from({ length: 9 }, (_, i) => ({ ...house, name: `h${i}` }))); // past the ceiling
+  });
+});
+
 describe("aperture — path peaks", () => {
   // How high a path goes, printed at the head of its card. Optional, and shared
   // with sub-paths by construction — `normPath` normalizes both.

@@ -276,6 +276,31 @@ const MAX_RULING_CHARS = 4000;
 const MAX_KILLER_MOVES = 12;
 const MAX_MOVE_STEPS = 12;
 const MAX_STEP_CHARS = 400;
+const MAX_GU_HOUSES = 8;
+const MAX_ORIGIN_BEATS = 12;
+const MAX_BEAT_CHARS = 400;
+
+/**
+ * One gu house — a structure assembled from many gu whose combined effect
+ * exceeds using them individually, persisting whether or not its master is
+ * present (canon: a gu house IS a formation-path killer move, which is why the
+ * band renders below 阵 and 杀 as the thing they compose into). Adjudicated
+ * whole at the check-in and printed verbatim; the census the site draws beside
+ * the FIRST house (the hub itself) is derived from counts already on the page.
+ */
+export interface ApertureGuHouse {
+  /** The house's name, on the plate. */
+  name: string;
+  /** The type line, verbatim — "defensive type — storage and refinement · one
+   *  master". Whole-prose on purpose: master-ship, specialty, grade are all the
+   *  check-in's words, never site-computed. */
+  type: string;
+  /** The origin, one beat per entry — the site joins them with " · ". A later
+   *  seal may append a beat (a rebuild, a migration): the passage grows the way
+   *  the record grows seals. At least one — a house has a story or it isn't
+   *  sealed yet. */
+  origin: string[];
+}
 
 /**
  * One killer move — a named composite ritual, the active half of the formations
@@ -376,6 +401,10 @@ export interface ApertureSealed {
    *  readings derived by the site from evidence. Absent on every document
    *  sealed before the band existed, and the band simply doesn't render. */
   killerMoves?: ApertureKillerMove[];
+  /** The houses, first = the hub itself (it carries the derived census and
+   *  absorbs the rented footnote as its essence line). Absent on every document
+   *  sealed before the band existed. */
+  guHouses?: ApertureGuHouse[];
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -655,6 +684,22 @@ function normKillerMove(x: unknown): ApertureKillerMove | null {
   };
 }
 
+function normGuHouse(x: unknown): ApertureGuHouse | null {
+  if (!isObj(x)) return null;
+  if (!isProse(x.name, MAX_TITLE_CHARS) || !isProse(x.type, MAX_TITLE_CHARS))
+    return null;
+  const origin = normArray(x.origin, (v) =>
+    isProse(v, MAX_BEAT_CHARS) ? v : null,
+  );
+  if (
+    origin === null ||
+    origin.length === 0 ||
+    origin.length > MAX_ORIGIN_BEATS
+  )
+    return null;
+  return { name: x.name, type: x.type, origin };
+}
+
 function normBreakthrough(x: unknown): ApertureBreakthrough | null {
   if (!isObj(x)) return null;
   if (!isStr(x.wall) || !isStr(x.event)) return null;
@@ -729,6 +774,10 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (killerMoves === null) return null;
   if (killerMoves !== undefined && killerMoves.length > MAX_KILLER_MOVES)
     return null;
+  const guHouses =
+    x.guHouses === undefined ? undefined : normArray(x.guHouses, normGuHouse);
+  if (guHouses === null) return null;
+  if (guHouses !== undefined && guHouses.length > MAX_GU_HOUSES) return null;
   // An EMPTY next line is malformed rather than absent: a seal either says what
   // it waits on or says nothing, and a blank string would render as bare chrome.
   const { next } = x;
@@ -747,6 +796,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(profile !== undefined ? { profile } : {}),
     ...(soul !== undefined ? { soul } : {}),
     ...(killerMoves !== undefined ? { killerMoves } : {}),
+    ...(guHouses !== undefined ? { guHouses } : {}),
   };
 }
 

@@ -23,6 +23,7 @@ import {
   type AperturePath,
   type ApertureDoc,
   type ApertureGu,
+  type ApertureGuHouse,
   type ApertureKillerMove,
   type ApertureSoul,
   type ApertureVitalGu,
@@ -49,6 +50,7 @@ import {
   declaredSeriesKeys,
   detailStatus,
   evidenceDaysThisWeek,
+  guHeldCount,
   hardenLines,
   imminentMajorTrial,
   isImminent,
@@ -612,6 +614,7 @@ export function ApertureInner({
   if (!doc) return null;
   const { conditions, paths, vitalGu, trials, breakthrough, rented, soul } =
     doc.sealed;
+  const guHouses = doc.sealed.guHouses;
   const { open, resolved } = splitTrials(trials);
   const harden = hardenLines(doc.sealed.streaks);
   const strikes = Object.entries(breakthrough.recentStrikes);
@@ -1403,10 +1406,25 @@ export function ApertureInner({
           reads from. Absent until a seal opens a ledger on some path. */}
       {dao.length > 0 && <DaoBand rows={dao} />}
 
-      {rented && rented.length > 0 && (
-        <p className="px-4 pb-4 text-[11px] text-muted">
-          rented · {rented.join(" · ")}
-        </p>
+      {/* 府 — the colophon: the page ends with the thing that holds everything
+          above it. When the house stands it absorbs the bare rented footnote as
+          its essence line (same sealed list, better home); until a seal names a
+          house, the footnote renders as it always has. */}
+      {guHouses && guHouses.length > 0 ? (
+        <GuHouseBand
+          houses={guHouses}
+          formationsCount={formations.length}
+          movesCount={doc.sealed.killerMoves?.length ?? 0}
+          guHeld={guHeldCount(paths)}
+          rented={rented}
+        />
+      ) : (
+        rented &&
+        rented.length > 0 && (
+          <p className="px-4 pb-4 text-[11px] text-muted">
+            rented · {rented.join(" · ")}
+          </p>
+        )
       )}
     </>
   );
@@ -1666,6 +1684,98 @@ function CmdChip({ command }: { command: string }) {
     >
       {copied ? <span className="text-up">copied ✓</span> : command}
     </button>
+  );
+}
+
+/**
+ * The eight sealed envelope stores of the aevcontext config family (fin,
+ * transit, todo, totp, gym, meals, agenda, jobs) — the gu-house census's one
+ * code constant. A ninth store bumps this by hand: the census is a colophon,
+ * not an inventory system.
+ */
+const SEALED_STORES = 8;
+
+/**
+ * 府 — the gu house band, the page's colophon (canon: a gu house IS a
+ * formation-path killer move, so it renders below 阵 and 杀 as the structure
+ * they compose into). Nameplate, type line and origin all print off the seal
+ * verbatim; the census beside the FIRST house (the hub itself) is derived from
+ * counts already on the page — nothing fetched, nothing self-reported. Later
+ * houses render as plain nameplates: only the house this page lives in gets
+ * counted in its own gu. Never interactive, never a nag.
+ */
+function GuHouseBand({
+  houses,
+  formationsCount,
+  movesCount,
+  guHeld,
+  rented,
+}: {
+  houses: ApertureGuHouse[];
+  formationsCount: number;
+  movesCount: number;
+  guHeld: number;
+  rented?: string[];
+}) {
+  return (
+    <div className="border-t border-hairline">
+      <ZoneHeader
+        label="the gu house"
+        seal="府"
+        right={houses.length > 1 ? `${houses.length} standing` : undefined}
+      />
+      <div className="flex flex-col gap-4 border-b border-hairline px-4 py-3">
+        {houses.map((h, i) => (
+          <div key={h.name}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-base text-fg">{h.name}</p>
+                <p className="mt-0.5 text-[11px] text-muted">{h.type}</p>
+              </div>
+              <span
+                aria-hidden
+                lang="zh"
+                className="shrink-0 font-[family-name:var(--font-zh)] text-[30px] leading-none text-(--essence) opacity-80"
+              >
+                宅
+              </span>
+            </div>
+            <p className="mt-2 max-w-[60ch] text-[11px] leading-relaxed text-muted">
+              {h.origin.join(" · ")}
+            </p>
+            {i === 0 && (
+              <>
+                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+                  <Stat
+                    label="sealed stores"
+                    value={`${SEALED_STORES}`}
+                    tone="text-(--essence)"
+                  />
+                  <Stat
+                    label="formations"
+                    value={`${formationsCount} standing`}
+                  />
+                  <Stat
+                    label="killer moves"
+                    value={movesCount > 0 ? `${movesCount} named` : "—"}
+                  />
+                  <Stat label="gu held" value={`${guHeld}`} />
+                </div>
+                {rented && rented.length > 0 && (
+                  <p className="mt-3 text-[11px] text-muted/75">
+                    <span className="text-muted">essence supplied:</span> rented
+                    — {rented.join(" · ")}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        ))}
+        <p className="text-[11px] italic text-muted/60">
+          many gu, one effect — the house outlives every casting.
+        </p>
+      </div>
+    </div>
   );
 }
 
