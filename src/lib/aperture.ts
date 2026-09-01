@@ -279,6 +279,33 @@ const MAX_STEP_CHARS = 400;
 const MAX_GU_HOUSES = 8;
 const MAX_ORIGIN_BEATS = 12;
 const MAX_BEAT_CHARS = 400;
+const MAX_INHERITANCES = 12;
+
+/**
+ * One true inheritance — a whole legacy, either RECEIVED (a source outside
+ * yourself and what it handed down; an enlightenment is what you distilled, an
+ * inheritance is what was handed to you) or LEFT BEHIND (the estate being
+ * compiled for whoever passes the fair test). Adjudicated whole at the
+ * check-in, printed verbatim, and slow-growing BY DESIGN: a true inheritance
+ * is a few-per-life entry, and the check-in should refuse casual ones — the
+ * band ought to look almost identical for years.
+ */
+export interface ApertureInheritance {
+  /** Who or what handed it down — or, on the left side, the estate's name. */
+  source: string;
+  /** What it transmitted, one line — the collapsed row's summary. */
+  gave: string;
+  /** The unfolded passage, paragraphs printed verbatim (the harvest's
+   *  bold-lead exception applies here too). Absent = the row is the entry. */
+  body?: string[];
+}
+
+/** The band's two directions. `received` may be empty while `left` stands —
+ *  a seal can describe the estate before the formative list is worded. */
+export interface ApertureInheritances {
+  received: ApertureInheritance[];
+  left?: ApertureInheritance[];
+}
 
 /**
  * One gu house — a structure assembled from many gu whose combined effect
@@ -405,6 +432,9 @@ export interface ApertureSealed {
    *  absorbs the rented footnote as its essence line). Absent on every document
    *  sealed before the band existed. */
   guHouses?: ApertureGuHouse[];
+  /** What was handed down and what is being left behind — sealed whole, and
+   *  absent on every document sealed before the band existed. */
+  inheritances?: ApertureInheritances;
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -684,6 +714,40 @@ function normKillerMove(x: unknown): ApertureKillerMove | null {
   };
 }
 
+function normInheritance(x: unknown): ApertureInheritance | null {
+  if (!isObj(x)) return null;
+  if (!isProse(x.source, MAX_TITLE_CHARS) || !isProse(x.gave, MAX_TITLE_CHARS))
+    return null;
+  const { body } = x;
+  let bodyOut: string[] | undefined;
+  if (body !== undefined) {
+    const norm = normArray(body, (v) =>
+      isProse(v, MAX_PARAGRAPH_CHARS) ? v : null,
+    );
+    // An EMPTY body is malformed rather than absent: a row either unfolds into
+    // a passage or is the whole entry — a caret over nothing is bare chrome.
+    if (norm === null || norm.length === 0 || norm.length > MAX_PARAGRAPHS)
+      return null;
+    bodyOut = norm;
+  }
+  return {
+    source: x.source,
+    gave: x.gave,
+    ...(bodyOut !== undefined ? { body: bodyOut } : {}),
+  };
+}
+
+function normInheritances(x: unknown): ApertureInheritances | null {
+  if (!isObj(x)) return null;
+  const received = normArray(x.received, normInheritance);
+  if (received === null || received.length > MAX_INHERITANCES) return null;
+  const left =
+    x.left === undefined ? undefined : normArray(x.left, normInheritance);
+  if (left === null) return null;
+  if (left !== undefined && left.length > MAX_INHERITANCES) return null;
+  return { received, ...(left !== undefined ? { left } : {}) };
+}
+
 function normGuHouse(x: unknown): ApertureGuHouse | null {
   if (!isObj(x)) return null;
   if (!isProse(x.name, MAX_TITLE_CHARS) || !isProse(x.type, MAX_TITLE_CHARS))
@@ -778,6 +842,9 @@ function normSealed(x: unknown): ApertureSealed | null {
     x.guHouses === undefined ? undefined : normArray(x.guHouses, normGuHouse);
   if (guHouses === null) return null;
   if (guHouses !== undefined && guHouses.length > MAX_GU_HOUSES) return null;
+  const inheritances =
+    x.inheritances === undefined ? undefined : normInheritances(x.inheritances);
+  if (inheritances === null) return null;
   // An EMPTY next line is malformed rather than absent: a seal either says what
   // it waits on or says nothing, and a blank string would render as bare chrome.
   const { next } = x;
@@ -797,6 +864,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(soul !== undefined ? { soul } : {}),
     ...(killerMoves !== undefined ? { killerMoves } : {}),
     ...(guHouses !== undefined ? { guHouses } : {}),
+    ...(inheritances !== undefined ? { inheritances } : {}),
   };
 }
 

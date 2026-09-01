@@ -395,6 +395,7 @@ test.describe("guest gating", () => {
     "the walking tally", // a formation's name, on /aperture
     "killer move", // the ritual band's divider, on /aperture (bare 杀 too collision-prone to pin)
     "gu house", // the colophon band's divider, on /aperture (bare 府/宅 too collision-prone to pin)
+    "true inheritance", // the legacy band's divider, on /aperture (bare 傳 too collision-prone to pin)
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
