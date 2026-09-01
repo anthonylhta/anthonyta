@@ -27,9 +27,11 @@ import { formationRows } from "@/lib/formations";
 import {
   briefingRecordedDays,
   newestRecordedDay,
+  parsePushConfig,
   vapidStatus,
   type BriefingRead,
 } from "@/lib/push";
+import { getPushRaw } from "@/lib/pushstore";
 import { r2Enabled } from "@/lib/r2";
 import {
   weekAverage as sleepWeekAverage,
@@ -74,17 +76,27 @@ export default async function AperturePage() {
 
   const who = session.user.name ?? "anthony";
   const today = sydneyToday();
-  const [glance, gh, lang, steps, sleep, briefingRead, indexRead, choreReads] =
-    await Promise.all([
-      getApertureGlance(),
-      getGithub(),
-      getLanguageStats(),
-      getSteps(today),
-      getSleep(today),
-      getStoredBriefing(),
-      getSnapIndex(),
-      getChoreReads(),
-    ]);
+  const [
+    glance,
+    gh,
+    lang,
+    steps,
+    sleep,
+    briefingRead,
+    indexRead,
+    choreReads,
+    pushRead,
+  ] = await Promise.all([
+    getApertureGlance(),
+    getGithub(),
+    getLanguageStats(),
+    getSteps(today),
+    getSleep(today),
+    getStoredBriefing(),
+    getSnapIndex(),
+    getChoreReads(),
+    getPushRaw().catch(() => ({ state: "error" }) as const),
+  ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
   const membrane = glance ? membraneOf(glance.stage) : null;
   const phrase = glance ? gutterPhrase(glance.rank) : null;
@@ -133,6 +145,11 @@ export default async function AperturePage() {
         process.env.VAPID_PRIVATE_KEY,
         process.env.VAPID_SUBJECT,
       ).state,
+      // The firing ledger: readable config → its fired map (absent entries
+      // render "never"); an unreadable or never-written store → no ledger at
+      // all, never a fake row of nevers.
+      fired:
+        pushRead.state === "ok" ? parsePushConfig(pushRead.value).fired : null,
     },
     today,
   );

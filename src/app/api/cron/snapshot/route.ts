@@ -24,6 +24,7 @@ import {
   pruneSubs,
   serializePushConfig,
   setEpisode,
+  setFired,
   setHealth,
   staleAfterDays,
   stalenessBody,
@@ -219,7 +220,7 @@ async function alarmStaleIngests(date: string): Promise<Outcome> {
   if (!categoryOn(cfg, "ingest")) return "skipped";
 
   let next: PushConfig = cfg;
-  const alarms: string[] = [];
+  const alarms: { source: IngestSource; body: string }[] = [];
   for (const source of INGEST_SOURCES) {
     const verdict = checkStaleness(
       await recordedDays(source),
@@ -228,11 +229,16 @@ async function alarmStaleIngests(date: string): Promise<Outcome> {
       staleAfterDays(source),
     );
     next = setEpisode(next, source, verdict.episode);
-    if (verdict.alarm) alarms.push(stalenessBody(source, verdict.days));
+    if (verdict.alarm)
+      alarms.push({ source, body: stalenessBody(source, verdict.days) });
   }
 
-  for (const body of alarms)
-    next = pruneSubs(next, await deliver(next, "ingest", body, "/"));
+  for (const { source, body } of alarms) {
+    const { sent, gone } = await deliver(next, "ingest", body, "/");
+    next = pruneSubs(next, gone);
+    // The fired ledger stamps per SOURCE — the whole reason it splits `ingest`.
+    if (sent > 0) next = setFired(next, source, date);
+  }
 
   const serialized = serializePushConfig(next);
   if (serialized !== serializePushConfig(cfg) && !(await putPush(serialized)))
@@ -271,8 +277,11 @@ async function alarmOverdueChores(date: string): Promise<Outcome> {
   );
 
   let next = setEpisode(cfg, "chores", verdict.episode);
-  if (verdict.send)
-    next = pruneSubs(next, await deliver(next, "chores", verdict.body, "/"));
+  if (verdict.send) {
+    const { sent, gone } = await deliver(next, "chores", verdict.body, "/");
+    next = pruneSubs(next, gone);
+    if (sent > 0) next = setFired(next, "chores", date);
+  }
 
   const serialized = serializePushConfig(next);
   if (serialized !== serializePushConfig(cfg) && !(await putPush(serialized)))
@@ -285,7 +294,7 @@ async function alarmOverdueChores(date: string): Promise<Outcome> {
  *  difference is that a failing PROBE is not a failure here, it is the data.
  *  Probing is skipped entirely when nothing would be sent — the tripwire has no
  *  second purpose, so an off toggle costs the siblings nothing. */
-async function alarmProjectsDown(): Promise<Outcome> {
+async function alarmProjectsDown(date: string): Promise<Outcome> {
   if (!pushConfigured()) return "skipped";
 
   const read = await getPushRaw();
@@ -309,8 +318,11 @@ async function alarmProjectsDown(): Promise<Outcome> {
   const verdict = checkHealthDown(probes, cfg.health);
 
   let next = setHealth(cfg, verdict.health);
-  if (verdict.alarm)
-    next = pruneSubs(next, await deliver(next, "health", verdict.body, "/"));
+  if (verdict.alarm) {
+    const { sent, gone } = await deliver(next, "health", verdict.body, "/");
+    next = pruneSubs(next, gone);
+    if (sent > 0) next = setFired(next, "health", date);
+  }
 
   const serialized = serializePushConfig(next);
   if (serialized !== serializePushConfig(cfg) && !(await putPush(serialized)))
@@ -350,7 +362,7 @@ export async function GET(req: Request) {
     console.error("[cron:snapshot] upkeep digest failed:", err);
     return "failed" as Outcome;
   });
-  const health = await alarmProjectsDown().catch((err) => {
+  const health = await alarmProjectsDown(date).catch((err) => {
     console.error("[cron:snapshot] health tripwire failed:", err);
     return "failed" as Outcome;
   });

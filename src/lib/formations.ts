@@ -9,6 +9,8 @@
  * hands the newest evidence days in, and renders the rows verbatim.
  */
 
+import { INGEST_SOURCES, type FiredKey } from "./push";
+
 export type FormationStatus =
   /** turned on schedule */
   | "ok"
@@ -23,6 +25,15 @@ export type FormationStatus =
   | "broken"
   | "off";
 
+/** One line of the tripwires' firing ledger. `fired: false` renders as the
+ *  dim "never" — not since the ledger was laid, which the note under the
+ *  unfold says out loud. */
+export interface FormationDetail {
+  label: string;
+  value: string;
+  fired: boolean;
+}
+
 export interface FormationRow {
   key: string;
   /** The formation's name, in the band's register. */
@@ -32,6 +43,10 @@ export interface FormationRow {
   status: FormationStatus;
   /** The evidence label the row prints — "today", "3 days silent", "armed". */
   last: string;
+  /** The unfoldable firing ledger — only the tripwires row carries one, and
+   *  only when the push config could be read (an unreadable store must not
+   *  render as a row of nevers). */
+  detail?: FormationDetail[];
 }
 
 /**
@@ -84,6 +99,61 @@ export interface FormationEvidence {
   sleepDay: string | null;
   /** The push trio's verdict — `vapidStatus`'s three states. */
   vapid: "ok" | "misconfigured" | "off";
+  /** The push config's fired ledger — null when the config couldn't be read,
+   *  which drops the unfold entirely rather than faking a row of nevers. */
+  fired: Partial<Record<FiredKey, string>> | null;
+}
+
+/** The ledger register's short age: "today", then days, then weeks (the
+ *  agoLabel switch point). */
+function firedAge(day: string, today: string): string {
+  const age = daysBetweenDays(day, today);
+  if (age === 0) return "today";
+  return age < 14 ? `${age}d ago` : `${Math.floor(age / 7)}w ago`;
+}
+
+/**
+ * The tripwires' firing ledger: one line per wire, plus the newest day across
+ * all of them for the row's own "spoke" suffix. The three ingest sources fold
+ * to ONE silence line naming the source that spoke most recently — which
+ * silence was announced matters, three lines of mostly-never would not.
+ */
+function tripwireLedger(
+  fired: Partial<Record<FiredKey, string>>,
+  today: string,
+): { detail: FormationDetail[]; newest: string | null } {
+  const line = (
+    label: string,
+    day: string | undefined,
+    suffix = "",
+  ): FormationDetail => ({
+    label,
+    value: day === undefined ? "never" : `${firedAge(day, today)}${suffix}`,
+    fired: day !== undefined,
+  });
+
+  let silenceDay: string | undefined;
+  let silenceSource = "";
+  for (const s of INGEST_SOURCES) {
+    const d = fired[s];
+    if (d !== undefined && (silenceDay === undefined || d > silenceDay)) {
+      silenceDay = d;
+      silenceSource = s;
+    }
+  }
+
+  const detail = [
+    line("mail", fired.dropbox),
+    line("the door", fired.signin),
+    line("share", fired.share),
+    line("silence", silenceDay, silenceSource && ` · ${silenceSource}`),
+    line("upkeep", fired.chores),
+    line("health", fired.health),
+  ];
+  const days = Object.values(fired).filter((d): d is string => d !== undefined);
+  const newest =
+    days.length === 0 ? null : days.reduce((a, b) => (a > b ? a : b));
+  return { detail, newest };
 }
 
 /** The band's five rows, in reading order. Always all five — this band's whole
@@ -104,17 +174,24 @@ export function formationRows(
     ...formationState(day, FORMATION_SLACK_DAYS[key], today),
   });
 
+  const ledger = ev.fired === null ? null : tripwireLedger(ev.fired, today);
   const tripwires: FormationRow = {
     key: "tripwires",
     name: "the tripwires",
     what: "push · ingest silence · chores · health · shares · sign-ins",
     status: ev.vapid === "ok" ? "armed" : ev.vapid === "off" ? "off" : "broken",
+    // The armed row carries the newest firing so the band can say the wires
+    // are REAL, not just configured; a broken or off trio keeps its own
+    // message — history is context there, not a headline.
     last:
       ev.vapid === "ok"
-        ? "armed"
+        ? ledger?.newest
+          ? `armed · spoke ${firedAge(ledger.newest, today)}`
+          : "armed"
         : ev.vapid === "off"
           ? "not configured"
           : "push broken — see /system",
+    ...(ledger !== null ? { detail: ledger.detail } : {}),
   };
 
   return [

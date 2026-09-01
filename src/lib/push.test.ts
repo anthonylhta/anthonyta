@@ -26,6 +26,7 @@ import {
   serializePushConfig,
   setCategory,
   setEpisode,
+  setFired,
   setHealth,
   staleAfterDays,
   stalenessBody,
@@ -394,6 +395,55 @@ describe("setEpisode", () => {
     expect(setEpisode(marked, "chores", undefined).episodes).toEqual({
       steps: "2026-08-10",
     });
+  });
+});
+
+describe("the fired ledger", () => {
+  it("stamps and overwrites, never clears", () => {
+    const once = setFired(EMPTY_PUSH_CONFIG, "dropbox", "2026-08-10");
+    expect(once.fired).toEqual({ dropbox: "2026-08-10" });
+    expect(setFired(once, "dropbox", "2026-09-01").fired).toEqual({
+      dropbox: "2026-09-01",
+    });
+  });
+
+  it("keys per ingest source, beside the plain categories", () => {
+    const cfg = setFired(
+      setFired(EMPTY_PUSH_CONFIG, "briefing", "2026-08-30"),
+      "health",
+      "2026-08-31",
+    );
+    expect(cfg.fired).toEqual({
+      briefing: "2026-08-30",
+      health: "2026-08-31",
+    });
+  });
+
+  it("survives a serialize round-trip; drops what isn't a wire or a day", () => {
+    const cfg = setFired(EMPTY_PUSH_CONFIG, "signin", "2026-09-01");
+    expect(parsePushConfig(serializePushConfig(cfg)).fired).toEqual({
+      signin: "2026-09-01",
+    });
+    const raw = JSON.parse(serializePushConfig(EMPTY_PUSH_CONFIG)) as Record<
+      string,
+      unknown
+    >;
+    raw.fired = {
+      ingest: "2026-09-01", // the category is split into sources — not a wire
+      signin: "not a day",
+      share: "2026-08-30",
+      mystery: "2026-08-30",
+    };
+    expect(normalizePushConfig(raw).fired).toEqual({ share: "2026-08-30" });
+  });
+
+  it("reads a pre-ledger config as an empty ledger", () => {
+    const raw = JSON.parse(serializePushConfig(EMPTY_PUSH_CONFIG)) as Record<
+      string,
+      unknown
+    >;
+    delete raw.fired;
+    expect(normalizePushConfig(raw).fired).toEqual({});
   });
 });
 

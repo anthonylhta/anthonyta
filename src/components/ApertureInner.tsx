@@ -1528,9 +1528,12 @@ const FORMATION_LAST: Record<FormationStatus, string> = {
  * 阵 — the formations band (ADR 0167): everything autonomous, one row each,
  * judged on the server from evidence the machinery itself wrote (never
  * self-reported). Rendered verbatim; the rows are props because every read is
- * plaintext hub state needing no key.
+ * plaintext hub state needing no key. The one interactive element is the
+ * tripwires' firing ledger — a row carrying `detail` unfolds on tap, and the
+ * unfold reveals history, never a different judgement.
  */
 function FormationsBand({ rows }: { rows: FormationRow[] }) {
+  const [wiresOpen, setWiresOpen] = useState(false);
   const allTurning = rows.every(
     (r) => r.status === "ok" || r.status === "armed",
   );
@@ -1542,25 +1545,75 @@ function FormationsBand({ rows }: { rows: FormationRow[] }) {
         right={`${rows.length} standing${allTurning ? " · all turning" : ""}`}
       />
       <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
-        {rows.map((r) => (
-          <p key={r.key} className="flex items-baseline gap-2 text-xs">
-            <span
-              aria-hidden
-              className={`shrink-0 text-[11px] ${FORMATION_DOT[r.status]}`}
-            >
-              ●
-            </span>
-            <span className="w-[132px] shrink-0 text-fg/90">{r.name}</span>
-            <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted sm:block">
-              {r.what}
-            </span>
-            <span
-              className={`ml-auto shrink-0 text-[11px] tabular-nums ${FORMATION_LAST[r.status]}`}
-            >
-              {r.last}
-            </span>
-          </p>
-        ))}
+        {rows.map((r) => {
+          const row = (
+            <>
+              <span
+                aria-hidden
+                className={`shrink-0 text-[11px] ${FORMATION_DOT[r.status]}`}
+              >
+                ●
+              </span>
+              {r.detail && (
+                <span
+                  aria-hidden
+                  className="shrink-0 text-[10px] text-muted/60"
+                >
+                  {wiresOpen ? "▾" : "▸"}
+                </span>
+              )}
+              <span className="w-[132px] shrink-0 text-fg/90">{r.name}</span>
+              <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted sm:block">
+                {r.what}
+              </span>
+              <span
+                className={`ml-auto shrink-0 text-[11px] tabular-nums ${FORMATION_LAST[r.status]}`}
+              >
+                {r.last}
+              </span>
+            </>
+          );
+          if (!r.detail)
+            return (
+              <p key={r.key} className="flex items-baseline gap-2 text-xs">
+                {row}
+              </p>
+            );
+          return (
+            <div key={r.key}>
+              <button
+                type="button"
+                onClick={() => setWiresOpen(!wiresOpen)}
+                aria-expanded={wiresOpen}
+                className="flex w-full items-baseline gap-2 text-left text-xs"
+              >
+                {row}
+              </button>
+              {wiresOpen && (
+                <div className="mt-1 mb-1 ml-5 flex flex-col gap-1 text-[11px]">
+                  {r.detail.map((d) => (
+                    <p key={d.label} className="flex items-baseline gap-2">
+                      <span className="w-[96px] shrink-0 text-fg/80">
+                        {d.label}
+                      </span>
+                      <span
+                        className={`tabular-nums ${
+                          d.fired ? "text-muted" : "text-muted/50"
+                        }`}
+                      >
+                        {d.value}
+                      </span>
+                    </p>
+                  ))}
+                  <p className="mt-0.5 italic text-muted/60">
+                    never = not since the ledger was laid — a quiet wire is a
+                    good wire.
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })}
         <p className="mt-1 text-[11px] italic text-muted/60">
           a formation needs attention only when it stops — amber is one missed
           turn.

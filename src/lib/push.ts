@@ -58,6 +58,25 @@ export const EPISODE_KEYS: readonly EpisodeKey[] = [
   "chores",
 ];
 
+/**
+ * What the fired ledger may be keyed by: every wire that can actually speak —
+ * the plain categories, with `ingest` split into its sources so the ledger can
+ * say WHICH silence was announced. Unlike `episodes` (armed-state bookkeeping,
+ * cleared on re-arm), a fired day is written at each send and NEVER cleared:
+ * it is the only record that the wires are real, and history must not erase
+ * itself when an episode ends.
+ */
+export type FiredKey = Exclude<PushCategory, "ingest"> | IngestSource;
+
+export const FIRED_KEYS: readonly FiredKey[] = [
+  "dropbox",
+  "signin",
+  "share",
+  ...INGEST_SOURCES,
+  "chores",
+  "health",
+];
+
 /** One sibling project's standing in the nightly health tripwire. Absent = that
  *  project answered its last probe, so a healthy estate stores nothing at all. */
 export interface HealthEpisode {
@@ -107,6 +126,13 @@ export interface PushConfig {
    * the healthy steady state is `{}` (`checkHealthDown`).
    */
   health: Record<string, HealthEpisode>;
+  /**
+   * The fired ledger — the Sydney day each wire last actually SPOKE (a send
+   * that reached at least one device), overwritten per send and never cleared.
+   * One day per key, no counts, no messages: it answers "are the wires real"
+   * and nothing else. Feeds the formations band's tripwires row.
+   */
+  fired: Partial<Record<FiredKey, string>>;
 }
 
 /** Devices kept. A single owner with a phone, a laptop and a spare is the whole
@@ -168,6 +194,7 @@ export const EMPTY_PUSH_CONFIG: PushConfig = {
   },
   episodes: {},
   health: {},
+  fired: {},
 };
 
 /**
@@ -342,7 +369,25 @@ export function normalizePushConfig(raw: unknown): PushConfig {
     }
   }
 
-  return { v: 1, subs: subs.slice(0, MAX_SUBS), categories, episodes, health };
+  const fired: PushConfig["fired"] = {};
+  if (typeof o.fired === "object" && o.fired !== null) {
+    for (const [k, v] of Object.entries(o.fired as Record<string, unknown>))
+      if (
+        FIRED_KEYS.includes(k as FiredKey) &&
+        typeof v === "string" &&
+        DATE_RE.test(v)
+      )
+        fired[k as FiredKey] = v;
+  }
+
+  return {
+    v: 1,
+    subs: subs.slice(0, MAX_SUBS),
+    categories,
+    episodes,
+    health,
+    fired,
+  };
 }
 
 /** Serialize for storage (a stable, versioned shape). */
@@ -353,6 +398,7 @@ export function serializePushConfig(cfg: PushConfig): string {
     categories: cfg.categories,
     episodes: cfg.episodes,
     health: cfg.health,
+    fired: cfg.fired,
   });
 }
 
@@ -401,6 +447,15 @@ export function setCategory(
 /** Is this category allowed to interrupt — and is there anyone to interrupt? */
 export function categoryOn(cfg: PushConfig, category: PushCategory): boolean {
   return cfg.categories[category] === true && cfg.subs.length > 0;
+}
+
+/** Stamp one wire's fired day — overwritten per send, never cleared. */
+export function setFired(
+  cfg: PushConfig,
+  key: FiredKey,
+  day: string,
+): PushConfig {
+  return { ...cfg, fired: { ...cfg.fired, [key]: day } };
 }
 
 /** Record (or clear, with `undefined`) one alarm's episode marker. */
