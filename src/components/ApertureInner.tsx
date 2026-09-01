@@ -23,6 +23,7 @@ import {
   type AperturePath,
   type ApertureDoc,
   type ApertureGu,
+  type ApertureKillerMove,
   type ApertureSoul,
   type ApertureVitalGu,
 } from "@/lib/aperture";
@@ -36,6 +37,8 @@ import {
 } from "@/lib/aperturerecord";
 import {
   agoLabel,
+  castReading,
+  codeSpans,
   compactDollars,
   conditionChipClass,
   conditionChipPrefix,
@@ -342,6 +345,7 @@ async function mealsConfig(
 export function ApertureInner({
   offline,
   formations,
+  backupAt,
   series,
   sleepWeekAvg,
   sleepWeeks,
@@ -352,6 +356,9 @@ export function ApertureInner({
   /** The formations band's rows, judged on the server off plaintext evidence
    *  (ADR 0167) — the island renders them verbatim. */
   formations: FormationRow[];
+  /** The backup script's success stamp (the chores connector's read) — a
+   *  "backup"-evidenced killer move's whole reading. Null = no record. */
+  backupAt: string | null;
   /** The server-assembled path evidence — commits, languages, steps. */
   series: PathSeries;
   /** The week's mean minutes asleep, read on the server off the same plaintext
@@ -1152,6 +1159,18 @@ export function ApertureInner({
           absent row can't go amber (the briefing-skip lesson). */}
       <FormationsBand rows={formations} />
 
+      {/* 杀 — what only the owner casts, directly under what runs without him:
+          the two halves of the duality read top-to-bottom. Emission-gated like
+          the soul — absent until a seal carries the definitions. */}
+      {doc.sealed.killerMoves && doc.sealed.killerMoves.length > 0 && (
+        <KillerMovesBand
+          moves={doc.sealed.killerMoves}
+          recordTotal={recordTotal}
+          sealedAt={doc.sealedAt}
+          backupAt={backupAt}
+        />
+      )}
+
       <Section label="primeval stones">
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           <Stat
@@ -1519,6 +1538,134 @@ function FormationsBand({ rows }: { rows: FormationRow[] }) {
         </p>
       </div>
     </>
+  );
+}
+
+/**
+ * 杀 — the killer moves band (roadmap 92b): the named composite rituals, one
+ * compact row each, unfolding into the casting's literal steps. Definitions
+ * arrive sealed and print verbatim; the right-hand reading is the ONLY thing
+ * the site adds, derived per move from the evidence its `evidence` source
+ * actually holds (`castReading`) — a band that remembers and documents, never
+ * a nag: cadence pressure stays on the needs-doing board. Unmounts with the
+ * document, so the unfold state dies with the key like everything sealed.
+ */
+function KillerMovesBand({
+  moves,
+  recordTotal,
+  sealedAt,
+  backupAt,
+}: {
+  moves: ApertureKillerMove[];
+  /** Archived seals, fetched or counted — one dated seal per cast. */
+  recordTotal: number;
+  sealedAt: string;
+  backupAt: string | null;
+}) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (name: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  // Anchored once at mount (render stays pure): the band unmounts with the key,
+  // so every unlock reads a fresh clock — day-granular ages can't go stale.
+  const [nowMs] = useState(() => Date.now());
+  return (
+    <>
+      <ZoneHeader
+        label="killer moves"
+        seal="杀"
+        right={`${moves.length} named`}
+      />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        {moves.map((m) => (
+          <div key={m.name}>
+            <button
+              type="button"
+              onClick={() => toggle(m.name)}
+              className="flex w-full items-baseline gap-2 text-left text-xs"
+            >
+              <span aria-hidden className="shrink-0 text-[10px] text-muted/60">
+                {open.has(m.name) ? "▾" : "▸"}
+              </span>
+              <span className="w-[148px] shrink-0 truncate text-fg/90">
+                {m.name}
+              </span>
+              <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted sm:block">
+                {m.chain}
+              </span>
+              <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted">
+                {castReading(
+                  m.evidence,
+                  { recordTotal, sealedAt, backupAt },
+                  nowMs,
+                )}
+              </span>
+            </button>
+            {open.has(m.name) && (
+              <div className="mt-1 mb-1 ml-5 flex flex-col gap-1 text-[11px] text-muted">
+                {m.steps.map((s, i) => (
+                  <p key={i} className="flex items-baseline gap-2">
+                    <span className="shrink-0 tabular-nums text-muted/60">
+                      {i + 1}
+                    </span>
+                    <span>
+                      {codeSpans(s).map((seg, j) =>
+                        seg.code ? (
+                          <CmdChip key={j} command={seg.text} />
+                        ) : (
+                          <span key={j}>{seg.text}</span>
+                        ),
+                      )}
+                    </span>
+                  </p>
+                ))}
+                {m.note && (
+                  <p className="mt-0.5 italic text-muted/60">{m.note}</p>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+        <p className="mt-1 text-[11px] italic text-muted/60">
+          a killer move is cast, never scheduled — the formations hold
+          everything else.
+        </p>
+      </div>
+    </>
+  );
+}
+
+/**
+ * A step's literal command as a chip, tap-to-copy (the needs-doing board's copy
+ * idiom): the step already names what to run — the tap only removes the
+ * retyping. Feedback appears solely on a copy that landed; a clipboard the
+ * browser withholds leaves the plain chip.
+ */
+function CmdChip({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      aria-label={`copy ${command}`}
+      onClick={() =>
+        navigator.clipboard?.writeText(command).then(
+          () => setCopied(true),
+          () => {},
+        )
+      }
+      className="rounded-[2px] border border-hairline bg-surface px-[5px] text-[10px] text-fg/85 transition-colors hover:border-(--essence-soft)"
+    >
+      {copied ? <span className="text-up">copied ✓</span> : command}
+    </button>
   );
 }
 

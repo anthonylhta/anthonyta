@@ -393,6 +393,7 @@ test.describe("guest gating", () => {
     "the dao", // the dao-mark band's divider, on /aperture (bare 道 too collision-prone to pin)
     "the night ledger", // a formation's name, on /aperture
     "the walking tally", // a formation's name, on /aperture
+    "killer move", // the ritual band's divider, on /aperture (bare 杀 too collision-prone to pin)
   ];
 
   test("/ serves the lobby, never the command center", async ({ request }) => {
