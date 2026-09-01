@@ -17,6 +17,8 @@ import {
   ESSENCE_VAR,
   ageOn,
   agoLabel,
+  castReading,
+  codeSpans,
   compactDollars,
   conditionChipClass,
   conditionChipPrefix,
@@ -878,6 +880,80 @@ describe("apertureview — sealedAgo", () => {
 
   it("shows no age at all for an unparseable seal", () => {
     expect(sealedAgo("whenever", NOW)).toBeNull();
+  });
+});
+
+describe("apertureview — castReading", () => {
+  // The killer-move band's one computation: a reading derived only from what
+  // the declared evidence source actually holds.
+  const ev = {
+    recordTotal: 6,
+    sealedAt: "2026-03-02T00:00:00Z",
+    backupAt: "2026-02-21T00:00:00Z",
+  };
+
+  it("reads the record as a cast count aged by the current seal", () => {
+    expect(castReading("record", ev, NOW)).toBe("cast 6 · 3d ago");
+    expect(
+      castReading("record", { ...ev, sealedAt: "2026-03-05T00:00:00Z" }, NOW),
+    ).toBe("cast 6 · today");
+  });
+
+  it("drops the count on a dead listing rather than claiming zero casts", () => {
+    expect(castReading("record", { ...ev, recordTotal: 0 }, NOW)).toBe(
+      "3d ago",
+    );
+    expect(
+      castReading("record", { ...ev, recordTotal: 0, sealedAt: "??" }, NOW),
+    ).toBe("—");
+  });
+
+  it("reads the backup stamp as an age alone — casts stay uncounted", () => {
+    expect(castReading("backup", ev, NOW)).toBe("12d ago");
+    expect(castReading("backup", { ...ev, backupAt: null }, NOW)).toBe(
+      "no record",
+    );
+  });
+
+  it("switches to weeks past a fortnight, the agoLabel register", () => {
+    expect(
+      castReading("backup", { ...ev, backupAt: "2026-02-04T00:00:00Z" }, NOW),
+    ).toBe("4w ago");
+  });
+
+  it("says so when a move leaves no trace", () => {
+    expect(castReading(undefined, ev, NOW)).toBe("leaves no trace");
+  });
+});
+
+describe("apertureview — codeSpans", () => {
+  it("splits backtick pairs into chips and leaves prose literal", () => {
+    expect(codeSpans("run `npm run hub-backup` first")).toEqual([
+      { code: false, text: "run " },
+      { code: true, text: "npm run hub-backup" },
+      { code: false, text: " first" },
+    ]);
+  });
+
+  it("passes a plain step through untouched", () => {
+    expect(codeSpans("verify the printed counts")).toEqual([
+      { code: false, text: "verify the printed counts" },
+    ]);
+  });
+
+  it("keeps an unmatched final backtick as literal text", () => {
+    expect(codeSpans("a `b")).toEqual([{ code: false, text: "a `b" }]);
+    expect(codeSpans("`a` `b")).toEqual([
+      { code: true, text: "a" },
+      { code: false, text: " `b" },
+    ]);
+  });
+
+  it("never emits an empty segment", () => {
+    expect(codeSpans("``")).toEqual([]);
+    expect(codeSpans("`npm run vault-sync`")).toEqual([
+      { code: true, text: "npm run vault-sync" },
+    ]);
   });
 });
 
