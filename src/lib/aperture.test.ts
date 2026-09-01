@@ -683,6 +683,63 @@ describe("aperture — gu houses", () => {
   });
 });
 
+describe("aperture — true inheritances", () => {
+  // What was handed down and what is being left behind: sealed whole, the site
+  // deriving only the header counts. Same absent-vs-malformed doctrine.
+  const entry = {
+    source: "reverend insanity",
+    gave: "the framework itself",
+    body: ["**Transmitted:** rank, essence, the wall, the aperture."],
+  };
+  const bare = {
+    source: "the karpathy doctrine",
+    gave: "how code gets written",
+  };
+
+  it("accepts both directions, and a body-less row as its own whole entry", () => {
+    const full = withSealed({
+      inheritances: { received: [entry, bare], left: [bare] },
+    });
+    expect(normalizeAperture(full)).toEqual(full);
+    // The estate can be described before the formative list is worded.
+    const leftOnly = withSealed({
+      inheritances: { received: [], left: [entry] },
+    });
+    expect(normalizeAperture(leftOnly)).toEqual(leftOnly);
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("inheritances");
+  });
+
+  it("drops an unknown key inside an entry and inside the wrapper", () => {
+    const out = normalizeAperture(
+      withSealed({
+        inheritances: { received: [{ ...bare, mutated: 1 }], smuggled: true },
+      }),
+    );
+    expect(out?.sealed.inheritances).toEqual({ received: [bare] });
+  });
+
+  it("hard-rejects a present-but-malformed frame", () => {
+    const bad = (inheritances: unknown) =>
+      expect(normalizeAperture(withSealed({ inheritances }))).toBeNull();
+    bad("reverend insanity"); // a word where a record should be
+    bad({ left: [bare] }); // received is the frame's floor — absent ≠ empty
+    bad({ received: [{ ...bare, source: "" }] }); // an entry names its source or isn't one
+    bad({ received: [{ ...entry, body: [] }] }); // a caret over nothing is bare chrome
+    bad({ received: [{ ...entry, body: ["a", 2] }] }); // one bad paragraph rejects the list
+    bad({
+      received: Array.from({ length: 13 }, (_, i) => ({
+        ...bare,
+        source: `s${i}`,
+      })),
+    }); // past the ceiling
+  });
+});
+
 describe("aperture — path peaks", () => {
   // How high a path goes, printed at the head of its card. Optional, and shared
   // with sub-paths by construction — `normPath` normalizes both.
