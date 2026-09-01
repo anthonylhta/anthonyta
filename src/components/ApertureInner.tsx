@@ -24,6 +24,8 @@ import {
   type ApertureDoc,
   type ApertureGu,
   type ApertureGuHouse,
+  type ApertureInheritance,
+  type ApertureInheritances,
   type ApertureKillerMove,
   type ApertureSoul,
   type ApertureVitalGu,
@@ -615,6 +617,7 @@ export function ApertureInner({
   const { conditions, paths, vitalGu, trials, breakthrough, rented, soul } =
     doc.sealed;
   const guHouses = doc.sealed.guHouses;
+  const inheritances = doc.sealed.inheritances;
   const { open, resolved } = splitTrials(trials);
   const harden = hardenLines(doc.sealed.streaks);
   const strikes = Object.entries(breakthrough.recentStrikes);
@@ -1042,6 +1045,14 @@ export function ApertureInner({
           </div>
         </>
       )}
+
+      {/* 傳 — what was handed down and what is being left behind, directly
+          after the harvest: an enlightenment is a yield, an inheritance is the
+          whole field. Absent on every document sealed before the band existed. */}
+      {inheritances &&
+        inheritances.received.length + (inheritances.left?.length ?? 0) > 0 && (
+          <InheritancesBand inheritances={inheritances} />
+        )}
 
       {/* Every day the LISTING knew about, drawn or accounted for: rows on
           screen, the capped-out tail, and the ones that wouldn't open. */}
@@ -1684,6 +1695,136 @@ function CmdChip({ command }: { command: string }) {
     >
       {copied ? <span className="text-up">copied ✓</span> : command}
     </button>
+  );
+}
+
+/**
+ * 傳 — the true inheritances band: what was handed down (received — a source
+ * outside yourself and what it transmitted; an enlightenment is what you
+ * DISTILLED, an inheritance is what was HANDED to you) and what is being left
+ * behind (the estate, whose fair test — the paper shares — has stood armed
+ * since they were split). Everything prints off the seal verbatim; the only
+ * derivation is the header counts. Slow-growing by design: this band should
+ * look almost identical for years, and that is its dignity, not a defect.
+ */
+function InheritancesBand({
+  inheritances,
+}: {
+  inheritances: ApertureInheritances;
+}) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (source: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+  const { received, left } = inheritances;
+  const counts = [
+    ...(received.length > 0 ? [`${received.length} received`] : []),
+    ...(left && left.length > 0 ? [`${left.length} left`] : []),
+  ].join(" · ");
+  return (
+    <>
+      <ZoneHeader label="true inheritances" seal="傳" right={counts} />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        {received.length > 0 && (
+          <p className="text-[10px] uppercase tracking-[0.12em] text-muted/60">
+            received
+          </p>
+        )}
+        {received.map((e) => (
+          <InheritanceEntry
+            key={e.source}
+            entry={e}
+            shown={open.has(e.source)}
+            onToggle={() => toggle(e.source)}
+          />
+        ))}
+        {left && left.length > 0 && (
+          <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+            left behind
+          </p>
+        )}
+        {(left ?? []).map((e) => (
+          <InheritanceEntry
+            key={e.source}
+            entry={e}
+            shown={open.has(e.source)}
+            onToggle={() => toggle(e.source)}
+          />
+        ))}
+        <p className="mt-1 text-[11px] italic text-muted/60">
+          an enlightenment is a yield; an inheritance is the whole field, sealed
+          for whoever passes.
+        </p>
+      </div>
+    </>
+  );
+}
+
+/** One inheritance: a row that unfolds into its sealed passage when it has
+ *  one, and IS the whole entry when it doesn't. */
+function InheritanceEntry({
+  entry,
+  shown,
+  onToggle,
+}: {
+  entry: ApertureInheritance;
+  shown: boolean;
+  onToggle: () => void;
+}) {
+  const row = (
+    <>
+      <span aria-hidden className="shrink-0 text-[10px] text-muted/60">
+        {entry.body ? (shown ? "▾" : "▸") : "·"}
+      </span>
+      <span className="shrink-0 text-fg/90">{entry.source}</span>
+      {/* A row with a passage can hide its summary on the phone — the unfold
+          carries it. A row WITHOUT one is its own whole entry, so the summary
+          stays and wraps. */}
+      <span
+        className={
+          entry.body
+            ? "hidden min-w-0 flex-1 truncate text-[11px] text-muted sm:block"
+            : "min-w-0 flex-1 text-[11px] text-muted"
+        }
+      >
+        {entry.gave}
+      </span>
+    </>
+  );
+  return (
+    <div>
+      {entry.body ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={shown}
+          className="flex w-full items-baseline gap-2 text-left text-xs"
+        >
+          {row}
+        </button>
+      ) : (
+        <p className="flex items-baseline gap-2 text-xs">{row}</p>
+      )}
+      {shown && entry.body && (
+        <div className="mt-1 mb-1.5 ml-5 flex flex-col gap-1.5 text-xs leading-relaxed text-fg/80">
+          {entry.body.map((paragraph, i) => {
+            // The harvest's one markup exception, kept identical here: a bold
+            // lead reads as emphasis, everything else prints as written.
+            const { lead, rest } = splitLead(paragraph);
+            return (
+              <p key={i}>
+                {lead && <span className="text-fg/90">{lead}</span>}
+                {rest}
+              </p>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
