@@ -73,17 +73,17 @@ describe("route manifest", () => {
     const count = (s: RouteEntry["shape"]) =>
       ROUTE_MANIFEST.filter((r) => r.shape === s).length;
     expect(count("owner-api")).toBe(34);
-    expect(count("owner-page")).toBe(14);
+    expect(count("owner-page")).toBe(15);
     expect(count("public-inert")).toBe(2);
     expect(count("public-serving")).toBe(18);
     expect(count("auth-handler")).toBe(1);
     expect(count("cron")).toBe(1);
-    expect(ROUTE_MANIFEST.length).toBe(70);
+    expect(ROUTE_MANIFEST.length).toBe(71);
   });
 
   it("exposes the shape helpers matching the partition", () => {
     expect(ownerApiRoutes().length).toBe(34);
-    expect(ownerPageRoutes().length).toBe(14);
+    expect(ownerPageRoutes().length).toBe(15);
     expect(publicInertRoutes().length).toBe(2);
   });
 });
