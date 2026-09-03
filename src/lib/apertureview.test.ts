@@ -19,8 +19,15 @@ import {
   agoLabel,
   castReading,
   codeSpans,
+  castsThisMonth,
   compactDollars,
+  experienceBudget,
+  feedingLabel,
+  feedingState,
+  guBlocks,
+  guCensus,
   guHeldCount,
+  guReads,
   conditionChipClass,
   conditionChipPrefix,
   conditionStatusWord,
@@ -955,6 +962,197 @@ describe("apertureview — codeSpans", () => {
     expect(codeSpans("`npm run vault-sync`")).toEqual([
       { code: true, text: "npm run vault-sync" },
     ]);
+  });
+});
+
+describe("apertureview — the feeding clock", () => {
+  // The compendium's one derived reading. TODAY is a Sydney calendar day, like
+  // every anchor this module takes.
+  const TODAY = "2026-03-05";
+  const gu = (fed: string, interval: number, repo?: string) => ({
+    name: "Kiln gu",
+    fed,
+    interval,
+    ...(repo !== undefined ? { repo } : {}),
+  });
+
+  it("says nothing about a gu with no clock", () => {
+    expect(feedingState({ name: "Foundation gu" }, TODAY)).toBeNull();
+    // A lone hand can't reach here (normalize drops it), but the guard is the
+    // reason a foundation gu prints silence rather than "never fed".
+    expect(feedingState({ name: "x", fed: "2026-03-01" }, TODAY)).toBeNull();
+    expect(feedingState({ name: "x", interval: 7 }, TODAY)).toBeNull();
+  });
+
+  it("reads fed inside the period, hungry past it, a rock past three", () => {
+    expect(feedingState(gu("2026-03-03", 7), TODAY)).toEqual({
+      state: "fed",
+      days: 2,
+    });
+    // The edge belongs to the gentler word at both ends: exactly one period is
+    // still fed, exactly three is still hungry.
+    expect(feedingState(gu("2026-02-26", 7), TODAY)?.state).toBe("fed");
+    expect(feedingState(gu("2026-02-25", 7), TODAY)?.state).toBe("hungry");
+    expect(feedingState(gu("2026-02-12", 7), TODAY)).toEqual({
+      state: "hungry",
+      days: 21,
+    });
+    expect(feedingState(gu("2026-02-11", 7), TODAY)).toEqual({
+      state: "hibernating",
+      days: 22,
+    });
+  });
+
+  it("lets a repo's last push override the sealed day", () => {
+    // Sealed a fortnight ago, pushed yesterday — the push wins.
+    expect(
+      feedingState(
+        gu("2026-02-19", 7, "anthonyta"),
+        TODAY,
+        "2026-03-04T09:00:00Z",
+      ),
+    ).toEqual({ state: "fed", days: 1 });
+    // …and the push is read on the SYDNEY calendar: 22:00 UTC is this morning.
+    expect(
+      feedingState(
+        gu("2026-02-19", 7, "anthonyta"),
+        TODAY,
+        "2026-03-04T22:00:00Z",
+      ),
+    ).toEqual({ state: "fed", days: 0 });
+  });
+
+  it("falls back to the sealed day when the push is unknown or junk", () => {
+    const g = gu("2026-02-19", 7, "anthonyta");
+    expect(feedingState(g, TODAY, null)?.state).toBe("hungry");
+    expect(feedingState(g, TODAY, "whenever")?.state).toBe("hungry");
+    // A push handed in for a gu that names no repo is ignored, not applied.
+    expect(
+      feedingState(gu("2026-02-19", 7), TODAY, "2026-03-04T09:00:00Z")?.days,
+    ).toBe(14);
+  });
+
+  it("never counts backwards from a stamp ahead of today", () => {
+    expect(feedingState(gu("2026-03-09", 7), TODAY)).toEqual({
+      state: "fed",
+      days: 0,
+    });
+  });
+
+  it("prints the state as the page reads it", () => {
+    expect(feedingLabel({ state: "fed", days: 2 })).toBe("fed 2d");
+    expect(feedingLabel({ state: "hungry", days: 33 })).toBe("hungry 33d");
+    expect(feedingLabel({ state: "hibernating", days: 67 })).toBe(
+      "rock · 67d unfed",
+    );
+  });
+});
+
+describe("apertureview — guReads + guBlocks + guCensus", () => {
+  const TODAY = "2026-03-05";
+  const PUSHES = { anthonyta: "2026-03-04T09:00:00Z" };
+
+  it("reads a list against today, repo pushes included", () => {
+    const reads = guReads(
+      [
+        { name: "Foundation gu" },
+        { name: "Hub gu", fed: "2026-01-01", interval: 7, repo: "anthonyta" },
+      ],
+      TODAY,
+      PUSHES,
+    );
+    expect(reads[0].feeding).toBeNull();
+    expect(reads[1].feeding).toEqual({ state: "fed", days: 1 });
+    expect(guReads(undefined, TODAY, PUSHES)).toEqual([]);
+  });
+
+  it("never reads a repo name off the prototype", () => {
+    const reads = guReads(
+      [{ name: "x", fed: "2026-01-01", interval: 7, repo: "constructor" }],
+      TODAY,
+      {},
+    );
+    expect(reads[0].feeding).toEqual({ state: "hibernating", days: 63 });
+  });
+
+  it("blocks every node that holds gu, parents before children", () => {
+    const paths: AperturePath[] = [
+      {
+        name: "craft",
+        attainment: "master",
+        gu: [{ name: "a" }],
+        sub: [{ name: "the hub", gu: [{ name: "b" }] }],
+      },
+      { name: "wealth" },
+      { name: "body", sub: [{ name: "the log", gu: [{ name: "c" }] }] },
+    ];
+    expect(guBlocks(paths, TODAY, {}).map((b) => b.name)).toEqual([
+      "craft",
+      "craft · the hub",
+      "body · the log",
+    ]);
+    expect(guBlocks(paths, TODAY, {})[0].attainment).toBe("master");
+    // An uninventoried parent never swallows its children's gu.
+    expect(guBlocks(paths, TODAY, {})[2].gu[0].gu.name).toBe("c");
+  });
+
+  it("counts the inventory and the rocks, never the hungry", () => {
+    const blocks = guBlocks(
+      [
+        {
+          name: "craft",
+          gu: [
+            { name: "a", fed: "2026-03-04", interval: 7 },
+            { name: "b", fed: "2025-12-01", interval: 7 },
+          ],
+        },
+      ],
+      TODAY,
+      {},
+    );
+    const held = guReads(
+      [{ name: "c" }, { name: "d", fed: "2026-02-20", interval: 7 }],
+      TODAY,
+      {},
+    );
+    expect(guCensus(blocks, held)).toEqual({ total: 4, rocks: 1 });
+    expect(guCensus([], [])).toEqual({ total: 0, rocks: 0 });
+  });
+});
+
+describe("apertureview — experienceBudget + castsThisMonth", () => {
+  const TODAY = "2026-03-05";
+
+  it("allots the sealed share of what came in, in cents", () => {
+    expect(experienceBudget(120_000, 5)).toBe(6000);
+    expect(experienceBudget(120_000, 0)).toBe(0);
+    expect(experienceBudget(12_345, 5)).toBe(617); // rounded, never a fraction of a cent
+  });
+
+  it("says nothing about a week with no income", () => {
+    expect(experienceBudget(null, 5)).toBeNull();
+  });
+
+  it("windows the casts to today's month, newest first, and sums them", () => {
+    const casts = [
+      { date: "2026-03-01", name: "coffee", stones: 4200 },
+      { date: "2026-02-28", name: "last month", stones: 9900 },
+      { date: "2026-03-04", name: "a day off the road" },
+    ];
+    const out = castsThisMonth(casts, TODAY);
+    expect(out.casts.map((c) => c.name)).toEqual([
+      "a day off the road",
+      "coffee",
+    ]);
+    expect(out.stones).toBe(4200);
+  });
+
+  it("reads an empty month as empty, not as broken", () => {
+    expect(castsThisMonth([], TODAY)).toEqual({ casts: [], stones: 0 });
+    expect(castsThisMonth([{ date: "2026-01-09", name: "x" }], TODAY)).toEqual({
+      casts: [],
+      stones: 0,
+    });
   });
 });
 

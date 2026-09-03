@@ -1,8 +1,10 @@
 import {
   isApertureStage,
   type AperturePath,
+  type ApertureCast,
   type ApertureCondition,
   type ApertureDoc,
+  type ApertureGu,
   type ApertureStage,
   type ApertureStreak,
   type ApertureTrial,
@@ -385,6 +387,192 @@ export function guHeldCount(paths: AperturePath[]): number {
     if (p.sub) n += guHeldCount(p.sub);
   }
   return n;
+}
+
+// --- the gu compendium ---------------------------------------------------------
+
+/**
+ * A gu's feeding state. Three words and no fourth: a gu is either inside its own
+ * period, past it, or so far past it that it has gone dormant — the "rock" the
+ * compendium dims rather than flags. NOTHING here is a nag: hunger is a reading,
+ * and the page prints it muted like every other fact on it.
+ */
+export type FeedingState = "fed" | "hungry" | "hibernating";
+
+/** A feeding state with the count behind it, so the page can print both. */
+export interface FeedingRead {
+  state: FeedingState;
+  /** Whole days since the last feeding, floored at 0 (a push stamped later today
+   *  still reads as today, never as a gu fed in the future). */
+  days: number;
+}
+
+/** How many periods past the last feeding a gu is before it is a rock. Three,
+ *  so a weekly gu goes dormant after three weeks — long enough that a busy
+ *  fortnight never reads as abandonment. */
+const HIBERNATE_PERIODS = 3;
+
+// en-CA formats as YYYY-MM-DD. A push instant is UTC and `today` is a SYDNEY
+// calendar day, so the instant is read onto the same calendar before the two are
+// subtracted — otherwise a push made this morning in Sydney reads a day old.
+const SYDNEY_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Australia/Sydney",
+});
+
+/**
+ * What a gu's clock says, or null when it has none — a foundation gu (fed once,
+ * holds) is silence on the page, never "never fed".
+ *
+ * `repoPushedAt` is the OVERRIDE: where a gu names a repo and the page can see
+ * that repo's last push, the push is the feeding, because a repo's own history is
+ * better evidence than a day typed at a check-in. An unparseable or unknown push
+ * falls back to the sealed day rather than voiding the clock.
+ */
+export function feedingState(
+  gu: ApertureGu,
+  todayISO: string,
+  repoPushedAt?: string | null,
+): FeedingRead | null {
+  const { fed, interval } = gu;
+  if (fed === undefined || interval === undefined) return null;
+  let anchor = fed;
+  if (gu.repo !== undefined && repoPushedAt) {
+    const t = Date.parse(repoPushedAt);
+    if (Number.isFinite(t)) anchor = SYDNEY_DAY.format(t);
+  }
+  const gap = dayGap(anchor, todayISO);
+  if (gap === null) return null;
+  const days = Math.max(0, -gap);
+  if (days <= interval) return { state: "fed", days };
+  return days <= interval * HIBERNATE_PERIODS
+    ? { state: "hungry", days }
+    : { state: "hibernating", days };
+}
+
+/**
+ * The feeding read as the compendium prints it — "fed 2d", "hungry 33d", and for
+ * a dormant gu the noun rather than the verb: "rock · 67d unfed". A rock is a
+ * state of the gu, not a failure of the owner, so it is named as a thing.
+ */
+export function feedingLabel(read: FeedingRead): string {
+  if (read.state === "hibernating") return `rock · ${read.days}d unfed`;
+  return `${read.state} ${read.days}d`;
+}
+
+/** One gu as the compendium reads it: the sealed entry and its clock. */
+export interface GuRead {
+  gu: ApertureGu;
+  /** Null for a foundation gu — no clock, so no state to print. */
+  feeding: FeedingRead | null;
+}
+
+/** One block of the compendium: a path (or sub-path) and the gu it holds. */
+export interface GuBlock {
+  /** The node's name, a sub-path qualified by its parent — the blocks are read
+   *  flat, so "craft · the hub" has to carry where it sits. */
+  name: string;
+  attainment?: string;
+  gu: GuRead[];
+}
+
+/** Look one repo's last push out of the connector's map. `Object.hasOwn`, because
+ *  the keys are repo names — data — and `constructor` must miss, not find. */
+function pushAt(
+  pushes: Record<string, string>,
+  repo: string | undefined,
+): string | undefined {
+  if (repo === undefined || !Object.hasOwn(pushes, repo)) return undefined;
+  return pushes[repo];
+}
+
+/** A sealed gu list with each entry's clock read against today. */
+export function guReads(
+  gu: ApertureGu[] | undefined,
+  todayISO: string,
+  pushes: Record<string, string>,
+): GuRead[] {
+  return (gu ?? []).map((g) => ({
+    gu: g,
+    feeding: feedingState(g, todayISO, pushAt(pushes, g.repo)),
+  }));
+}
+
+/**
+ * The compendium's blocks, depth-first: every path and sub-path that actually
+ * HOLDS gu, in seal order, parents before their children. A node with no gu is
+ * not a block — an empty inventory would be chrome around nothing — but its
+ * children are still walked, so a sub-path's gu can never be lost behind an
+ * uninventoried parent.
+ */
+export function guBlocks(
+  paths: AperturePath[],
+  todayISO: string,
+  pushes: Record<string, string>,
+): GuBlock[] {
+  const out: GuBlock[] = [];
+  const walk = (list: AperturePath[], parent: string | null) => {
+    for (const p of list) {
+      const name = parent === null ? p.name : `${parent} · ${p.name}`;
+      if (p.gu && p.gu.length > 0)
+        out.push({
+          name,
+          ...(p.attainment !== undefined ? { attainment: p.attainment } : {}),
+          gu: guReads(p.gu, todayISO, pushes),
+        });
+      if (p.sub) walk(p.sub, name);
+    }
+  };
+  walk(paths, null);
+  return out;
+}
+
+/**
+ * The header's inventory: how many gu are held, and how many of those are rocks.
+ * INVENTORY, never alarm — the count of hungry gu is deliberately not here, since
+ * a number of hungry things at the top of a page is a nag by another name.
+ */
+export function guCensus(
+  blocks: GuBlock[],
+  held: GuRead[],
+): { total: number; rocks: number } {
+  const all = [...blocks.flatMap((b) => b.gu), ...held];
+  return {
+    total: all.length,
+    rocks: all.filter((r) => r.feeding?.state === "hibernating").length,
+  };
+}
+
+/**
+ * This week's burn allotment in cents — the recovered income times the sealed
+ * share. Null when nothing came in this week, which is the honest answer during a
+ * week with no income rather than a budget of zero the page made up.
+ */
+export function experienceBudget(
+  recoveredThisWeek: number | null,
+  budgetPct: number,
+): number | null {
+  if (recoveredThisWeek === null || !Number.isFinite(budgetPct)) return null;
+  return Math.round((recoveredThisWeek * budgetPct) / 100);
+}
+
+/**
+ * The casts inside today's month, newest first, and what they cost together. The
+ * month is `today`'s own — the page anchors on the Sydney day, so the window
+ * turns over at Sydney midnight like every other reading here. Casts with no
+ * `stones` cost nothing, which is a real cast (a day off the road), not a gap.
+ */
+export function castsThisMonth(
+  casts: ApertureCast[],
+  todayISO: string,
+): { casts: ApertureCast[]; stones: number } {
+  const month = todayISO.slice(0, 7);
+  const inMonth = casts
+    .filter((c) => c.date.slice(0, 7) === month)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  return {
+    casts: inMonth,
+    stones: inMonth.reduce((sum, c) => sum + (c.stones ?? 0), 0),
+  };
 }
 
 /**
