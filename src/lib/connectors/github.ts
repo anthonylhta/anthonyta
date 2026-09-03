@@ -61,7 +61,11 @@ const load = unstable_cache(
     const user = await fetchGithub(login);
     return user ? summarizeGithub(user, login) : sampleGithub;
   },
-  ["github"],
+  // The key part carries a shape version: Next keys this cache on the wrapper's
+  // own source plus these parts, and the data cache persists ACROSS deploys — so
+  // when `GithubStats` grows a field the summariser adds, the old entry keeps
+  // serving the old shape for up to an hour unless the key moves with it.
+  ["github", "v2"],
   { revalidate: 3600, tags: ["github"] },
 );
 

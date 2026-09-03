@@ -481,7 +481,10 @@ function pushAt(
   pushes: Record<string, string>,
   repo: string | undefined,
 ): string | undefined {
-  if (repo === undefined || !Object.hasOwn(pushes, repo)) return undefined;
+  // `pushes` may be missing when a cached connector read predates the field —
+  // a missing map reads as no push known, never a throw on the client.
+  if (!pushes || repo === undefined || !Object.hasOwn(pushes, repo))
+    return undefined;
   return pushes[repo];
 }
 
