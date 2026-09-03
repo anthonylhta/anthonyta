@@ -1370,7 +1370,7 @@ export function ApertureInner({
           houses={guHouses}
           formationsCount={formations.length}
           movesCount={doc.sealed.killerMoves?.length ?? 0}
-          guHeld={guHeldCount(paths)}
+          guHeld={guHeldCount(paths) + (doc.sealed.held?.length ?? 0)}
           rented={rented}
         />
       ) : (
@@ -2296,7 +2296,7 @@ function PathCard({ path }: { path: AperturePath }) {
         )}
       </div>
       <PeakLine peak={path.peak} />
-      <GuList gu={path.gu} />
+      <GuLine gu={path.gu} />
       <NextLine next={path.next} />
       {path.sub?.map((s, i) => (
         <SubPath key={i} path={s} />
@@ -2316,7 +2316,7 @@ function SubPath({ path }: { path: AperturePath }) {
         {path.name}
       </p>
       <PeakLine peak={path.peak} />
-      <GuList gu={path.gu} />
+      <GuLine gu={path.gu} />
       <NextLine next={path.next} />
       {path.sub?.map((s, i) => (
         <SubPath key={i} path={s} />
@@ -2325,25 +2325,19 @@ function SubPath({ path }: { path: AperturePath }) {
   );
 }
 
-/** The gu a path holds. The one that BEARS the attainment is inked; the rest are
- *  held, which the dot says by staying quiet. */
-function GuList({ gu }: { gu?: ApertureGu[] }) {
+/** How many gu the path holds, and the door to the compendium where they are
+ *  read one by one (their types, their feeding, the rocks among them). The list
+ *  itself moved to /gu when this reading grew past what one page can hold; a
+ *  count and a door is what a path card needs of it. */
+function GuLine({ gu }: { gu?: ApertureGu[] }) {
   if (!gu || gu.length === 0) return null;
   return (
-    <div className="mt-2 flex flex-col gap-1">
-      {gu.map((g, i) => (
-        <p key={i} className="text-xs">
-          <span
-            aria-hidden
-            className={g.bears ? "text-(--essence)" : "text-muted/40"}
-          >
-            ●{" "}
-          </span>
-          <span className="text-fg/90">{g.name}</span>
-          {g.type && <span className="text-muted"> — {g.type}</span>}
-        </p>
-      ))}
-    </div>
+    <p className="mt-2 text-[11px] text-muted">
+      {gu.length} gu held ·{" "}
+      <Link href="/gu" className="transition-colors hover:text-amber">
+        → /gu
+      </Link>
+    </p>
   );
 }
 

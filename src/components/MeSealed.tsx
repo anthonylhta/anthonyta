@@ -139,6 +139,13 @@ export function MeSealed({
         >
           aperture →
         </Link>
+        <span className="text-muted/40">·</span>
+        <Link
+          href="/gu"
+          className="text-muted transition-colors hover:text-amber"
+        >
+          gu →
+        </Link>
       </p>
 
       {quote && (
