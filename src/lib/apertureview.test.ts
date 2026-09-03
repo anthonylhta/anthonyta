@@ -1066,6 +1066,18 @@ describe("apertureview — guReads + guBlocks + guCensus", () => {
     expect(guReads(undefined, TODAY, PUSHES)).toEqual([]);
   });
 
+  it("reads a missing pushes map as no push known, never a throw", () => {
+    // A cached connector read can predate the `pushes` field (the data cache
+    // persists across deploys under an unchanged key); the sealed day must win.
+    const stale = undefined as unknown as Record<string, string>;
+    const reads = guReads(
+      [{ name: "Hub gu", fed: "2026-03-01", interval: 7, repo: "anthonyta" }],
+      TODAY,
+      stale,
+    );
+    expect(reads[0].feeding).toEqual({ state: "fed", days: 4 });
+  });
+
   it("never reads a repo name off the prototype", () => {
     const reads = guReads(
       [{ name: "x", fed: "2026-01-01", interval: 7, repo: "constructor" }],
