@@ -894,6 +894,70 @@ describe("aperture — consumables", () => {
   });
 });
 
+describe("aperture — the almanac", () => {
+  // What the world is producing: dated feeds and ambient ones, verbatim.
+  const entry = {
+    name: "whale season off the heads",
+    source: "the calendar",
+    from: "05-01",
+    to: "11-30",
+    free: true,
+    feeds: ["movement", "the Opal card"],
+    note: "the coast walk with a reason",
+    pair: "the Manly ferry (a fare)",
+  };
+
+  it("accepts a page — recurring, one-off and ambient lines alike", () => {
+    const full = withSealed({
+      almanac: [
+        entry,
+        { name: "Sydney Fringe", from: "2026-09-01", to: "2026-09-30" },
+        { name: "a coastal walk", free: true },
+      ],
+    });
+    expect(normalizeAperture(full)).toEqual(full);
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("almanac");
+  });
+
+  it("drops a half-written or mismatched window rather than the document", () => {
+    // A lone end is the check-in's slip; the line reads as ambient.
+    const lone = normalizeAperture(
+      withSealed({ almanac: [{ name: "x", from: "05-01" }] }),
+    );
+    expect(lone?.sealed.almanac).toEqual([{ name: "x" }]);
+    // A recurring end paired with a calendar day is no window either.
+    const mixed = normalizeAperture(
+      withSealed({ almanac: [{ name: "x", from: "05-01", to: "2026-11-30" }] }),
+    );
+    expect(mixed?.sealed.almanac).toEqual([{ name: "x" }]);
+  });
+
+  it("drops an unknown key inside a line", () => {
+    const out = normalizeAperture(
+      withSealed({ almanac: [{ ...entry, mutated: 1 }] }),
+    );
+    expect(out?.sealed.almanac).toEqual([entry]);
+  });
+
+  it("hard-rejects a present-but-malformed page", () => {
+    const bad = (v: unknown) =>
+      expect(normalizeAperture(withSealed({ almanac: v }))).toBeNull();
+    bad("whales"); // a word where a list should be
+    bad([{ ...entry, name: "" }]);
+    bad([{ ...entry, from: "13-01" }]); // a present end is held to its shape
+    bad([{ ...entry, to: "november" }]);
+    bad([{ ...entry, free: "yes" }]);
+    bad([{ ...entry, feeds: "movement" }]); // mouths are a list
+    bad([{ ...entry, feeds: [1] }]);
+    bad(Array.from({ length: 41 }, (_, i) => ({ name: `feed ${i}` }))); // past the ceiling
+  });
+});
+
 describe("aperture — the refinement queue", () => {
   // The recipe book's open page: prose rows about gu NOT held.
   const entry = {

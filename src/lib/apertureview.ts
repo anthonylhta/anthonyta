@@ -1,5 +1,6 @@
 import {
   isApertureStage,
+  type ApertureAlmanacEntry,
   type AperturePath,
   type ApertureCast,
   type ApertureCondition,
@@ -474,6 +475,111 @@ export function feedingDot(read: GuRead): {
     bears: read.gu.bears === true,
     ring: state === "hungry" || state === "hibernating",
     rock: state === "hibernating",
+  };
+}
+
+/**
+ * The almanac windowed to today (ADR 0174). A dated feed is RIPE while today
+ * sits inside its window, NEXT while its window opens within the next sixty
+ * days, and otherwise off the page — a closed window simply leaves, and a far
+ * one waits in the seal. A feed with no window is ambient: any week. Nothing is
+ * counted against anything; the almanac is a menu, and the only sort is that
+ * free feeds print first within each group — canon's arithmetic (cheap food
+ * beats good food), stable otherwise.
+ */
+export interface AlmanacRead {
+  entry: ApertureAlmanacEntry;
+  /** "until 30 nov" for a ripe feed, "from 15 oct" for a coming one, "" for
+   *  an ambient one. */
+  when: string;
+}
+export interface AlmanacGroups {
+  ripe: AlmanacRead[];
+  next: AlmanacRead[];
+  ambient: AlmanacRead[];
+}
+const NEXT_WINDOW_DAYS = 60;
+const MONTH_WORDS = [
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+];
+
+/** `2026-11-30` → "30 nov". */
+function dayWord(iso: string): string {
+  const month = MONTH_WORDS[Number(iso.slice(5, 7)) - 1] ?? iso.slice(5, 7);
+  return `${Number(iso.slice(8, 10))} ${month}`;
+}
+
+/**
+ * Where today falls against an entry's window. A recurring window is read as
+ * its occurrences around today (last year's, this year's, next year's — a
+ * window that wraps the new year opens in one year and closes in the next);
+ * a one-off is itself. ISO days compare as strings, so containment needs no
+ * clock; only the "opens within sixty days" read counts days.
+ */
+function almanacWindow(
+  entry: ApertureAlmanacEntry,
+  todayISO: string,
+): { state: "ripe" | "next" | "off"; opens: string; closes: string } | null {
+  const { from, to } = entry;
+  if (from === undefined || to === undefined) return null;
+  const year = Number(todayISO.slice(0, 4));
+  let occurrences: [string, string][];
+  if (from.length === 5) {
+    const wraps = to < from;
+    occurrences = [year - 1, year, year + 1].map((y) => [
+      `${y}-${from}`,
+      `${wraps ? y + 1 : y}-${to}`,
+    ]);
+  } else occurrences = [[from, to]];
+  for (const [opens, closes] of occurrences)
+    if (opens <= todayISO && todayISO <= closes)
+      return { state: "ripe", opens, closes };
+  let best: { gap: number; opens: string; closes: string } | null = null;
+  for (const [opens, closes] of occurrences) {
+    const gap = dayGap(opens, todayISO);
+    if (gap === null) return null;
+    if (gap > 0 && gap <= NEXT_WINDOW_DAYS && (best === null || gap < best.gap))
+      best = { gap, opens, closes };
+  }
+  return best === null
+    ? { state: "off", opens: "", closes: "" }
+    : { state: "next", opens: best.opens, closes: best.closes };
+}
+
+export function almanacGroups(
+  entries: ApertureAlmanacEntry[],
+  todayISO: string,
+): AlmanacGroups {
+  const groups: AlmanacGroups = { ripe: [], next: [], ambient: [] };
+  for (const entry of entries) {
+    const w = almanacWindow(entry, todayISO);
+    // An unreadable window (null from a day the engine can't parse) reads as
+    // ambient rather than losing the line — the feeding clock's lenience.
+    if (w === null) groups.ambient.push({ entry, when: "" });
+    else if (w.state === "ripe")
+      groups.ripe.push({ entry, when: `until ${dayWord(w.closes)}` });
+    else if (w.state === "next")
+      groups.next.push({ entry, when: `from ${dayWord(w.opens)}` });
+  }
+  const freeFirst = (list: AlmanacRead[]) => [
+    ...list.filter((r) => r.entry.free === true),
+    ...list.filter((r) => r.entry.free !== true),
+  ];
+  return {
+    ripe: freeFirst(groups.ripe),
+    next: freeFirst(groups.next),
+    ambient: freeFirst(groups.ambient),
   };
 }
 

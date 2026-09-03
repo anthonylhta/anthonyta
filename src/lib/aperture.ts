@@ -303,6 +303,10 @@ const MAX_INHERITANCES = 12;
 const MAX_HELD_GU = 12;
 const MAX_CASTS = 60;
 const MAX_REFINING = 24;
+/** The almanac's page — a year of dated feeds plus a dozen ambient ones. */
+const MAX_ALMANAC = 40;
+/** The mouths one feed can name. */
+const MAX_ALMANAC_FEEDS = 8;
 
 /**
  * One true inheritance — a whole legacy, either RECEIVED (a source outside
@@ -426,6 +430,40 @@ export interface ApertureRefinement {
 }
 
 /**
+ * One line of the almanac — a thing the world produces that a gu could eat: a
+ * season, a festival, a run, or an ambient feed with no date at all. Canon's
+ * frame is that a gu's food is a thing the world produces on the world's own
+ * calendar (moon-orchid petals wilt in days; ginseng keeps), so the page has
+ * two halves, dated and ambient, and the site only WINDOWS the dated half to
+ * today — it never rules what is picked. Nothing here is held, so nothing here
+ * can starve.
+ *
+ * THE WINDOW IS A PAIR, like the feeding clock: `from` and `to` are either both
+ * `MM-DD` (recurs every year, and may wrap the new year) or both `YYYY-MM-DD`
+ * (a one-off). A lone end, or a mismatched pair, is dropped rather than
+ * rejected — the line reads as ambient instead of taking the document down. A
+ * PRESENT end is still held to its shape.
+ */
+export interface ApertureAlmanacEntry {
+  name: string;
+  /** Where it comes from, in the check-in's words — "the calendar", "the city". */
+  source?: string;
+  from?: string;
+  to?: string;
+  /** Costs nothing but the choosing — canon's bulking agent, listed first. */
+  free?: boolean;
+  /** The cost tier, a word like every rung here — "1", "2". */
+  tier?: string;
+  /** The mouths it feeds, open vocabulary: a class ("movement"), a held gu's
+   *  name ("the Opal card"), a path ("Language"). Printed as written. */
+  feeds?: string[];
+  note?: string;
+  /** The other half it pairs with — the priced half of a free feed, or the
+   *  free half of a priced one. */
+  pair?: string;
+}
+
+/**
  * Standing context about the person the sheet is about. `born` is a `YYYY-MM-DD`
  * calendar day the browser turns into an age. (A `now` line was designed and cut
  * the same day — the age and the daily quote carry the block.)
@@ -516,6 +554,9 @@ export interface ApertureSealed {
   /** The refinement queue — the recipe book's open page. Absent on the same
    *  terms, and the band simply doesn't render. */
   refining?: ApertureRefinement[];
+  /** The almanac — what the world is producing, dated and ambient. Absent on
+   *  the same terms. */
+  almanac?: ApertureAlmanacEntry[];
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -563,6 +604,11 @@ function isDay(x: unknown): x is string {
   return (
     typeof x === "string" && DAY_ISO.test(x) && Number.isFinite(Date.parse(x))
   );
+}
+/** A day of the YEAR — `MM-DD`, the almanac's recurring window end. */
+const MONTH_DAY = /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+function isMonthDay(x: unknown): x is string {
+  return typeof x === "string" && MONTH_DAY.test(x);
 }
 
 /** Rebuild an array field-for-field, rejecting the WHOLE array if any row is off
@@ -909,6 +955,45 @@ function normRefinement(x: unknown): ApertureRefinement | null {
   };
 }
 
+function normAlmanacEntry(x: unknown): ApertureAlmanacEntry | null {
+  if (!isObj(x)) return null;
+  if (!isProse(x.name, MAX_TITLE_CHARS)) return null;
+  const { source, from, to, free, tier, feeds, note, pair } = x;
+  if (source !== undefined && !isProse(source, MAX_TITLE_CHARS)) return null;
+  if (tier !== undefined && !isProse(tier, MAX_TITLE_CHARS)) return null;
+  if (pair !== undefined && !isProse(pair, MAX_TITLE_CHARS)) return null;
+  if (note !== undefined && !isProse(note, MAX_STEP_CHARS)) return null;
+  if (free !== undefined && typeof free !== "boolean") return null;
+  // A window end is a day of the year or a calendar day; anything else is
+  // malformed rather than absent.
+  if (from !== undefined && !isDay(from) && !isMonthDay(from)) return null;
+  if (to !== undefined && !isDay(to) && !isMonthDay(to)) return null;
+  const mouths =
+    feeds === undefined
+      ? undefined
+      : normArray(feeds, (v) => (isProse(v, MAX_TITLE_CHARS) ? v : null));
+  if (
+    mouths === null ||
+    (mouths !== undefined && mouths.length > MAX_ALMANAC_FEEDS)
+  )
+    return null;
+  // The pairing rule (see the interface): both ends, same shape, or no window.
+  const window =
+    from !== undefined && to !== undefined && isDay(from) === isDay(to)
+      ? { from, to }
+      : {};
+  return {
+    name: x.name,
+    ...(source !== undefined ? { source } : {}),
+    ...window,
+    ...(free !== undefined ? { free } : {}),
+    ...(tier !== undefined ? { tier } : {}),
+    ...(mouths !== undefined ? { feeds: mouths } : {}),
+    ...(note !== undefined ? { note } : {}),
+    ...(pair !== undefined ? { pair } : {}),
+  };
+}
+
 function normBreakthrough(x: unknown): ApertureBreakthrough | null {
   if (!isObj(x)) return null;
   if (!isStr(x.wall) || !isStr(x.event)) return null;
@@ -1002,6 +1087,12 @@ function normSealed(x: unknown): ApertureSealed | null {
       : normArray(x.refining, normRefinement);
   if (refining === null) return null;
   if (refining !== undefined && refining.length > MAX_REFINING) return null;
+  const almanac =
+    x.almanac === undefined
+      ? undefined
+      : normArray(x.almanac, normAlmanacEntry);
+  if (almanac === null) return null;
+  if (almanac !== undefined && almanac.length > MAX_ALMANAC) return null;
   // An EMPTY next line is malformed rather than absent: a seal either says what
   // it waits on or says nothing, and a blank string would render as bare chrome.
   const { next } = x;
@@ -1025,6 +1116,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(held !== undefined ? { held } : {}),
     ...(consumables !== undefined ? { consumables } : {}),
     ...(refining !== undefined ? { refining } : {}),
+    ...(almanac !== undefined ? { almanac } : {}),
   };
 }
 

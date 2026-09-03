@@ -18,6 +18,7 @@ import {
   ESSENCE_VAR,
   ageOn,
   agoLabel,
+  almanacGroups,
   castReading,
   codeSpans,
   castsThisMonth,
@@ -1132,6 +1133,64 @@ describe("apertureview — guReads + guBlocks + guCensus", () => {
     );
     expect(guCensus(blocks, held)).toEqual({ total: 4, rocks: 1 });
     expect(guCensus([], [])).toEqual({ total: 0, rocks: 0 });
+  });
+});
+
+describe("apertureview — almanacGroups", () => {
+  const whales = { name: "whales", from: "05-01", to: "11-30", free: true };
+  const jacarandas = { name: "jacarandas", from: "10-15", to: "11-20" };
+  const summer = { name: "summer swims", from: "12-01", to: "02-28" };
+  const fringe = { name: "fringe", from: "2026-09-01", to: "2026-09-30" };
+  const walk = { name: "a coastal walk", free: true };
+  const ramen = { name: "a new ramen" };
+
+  it("windows the page to today — ripe, next within sixty days, or off", () => {
+    const g = almanacGroups([whales, jacarandas, summer, fringe], "2026-09-03");
+    expect(g.ripe.map((r) => [r.entry.name, r.when])).toEqual([
+      ["whales", "until 30 nov"],
+      ["fringe", "until 30 sep"],
+    ]);
+    expect(g.next.map((r) => [r.entry.name, r.when])).toEqual([
+      ["jacarandas", "from 15 oct"],
+    ]);
+    // Summer opens in 89 days — it waits in the seal, off the page.
+    expect(g.ambient).toEqual([]);
+  });
+
+  it("reads a window that wraps the new year in both of its years", () => {
+    expect(almanacGroups([summer], "2027-01-15").ripe[0]?.when).toBe(
+      "until 28 feb",
+    );
+    expect(almanacGroups([summer], "2026-11-05").next[0]?.when).toBe(
+      "from 1 dec",
+    );
+    expect(almanacGroups([summer], "2026-06-01").ripe).toEqual([]);
+  });
+
+  it("lets a closed one-off window leave the page", () => {
+    const g = almanacGroups([fringe], "2026-10-02");
+    expect(g.ripe).toEqual([]);
+    expect(g.next).toEqual([]);
+  });
+
+  it("reads no window as any week, free lines first", () => {
+    const g = almanacGroups([ramen, walk], "2026-09-03");
+    expect(g.ambient.map((r) => r.entry.name)).toEqual([
+      "a coastal walk",
+      "a new ramen",
+    ]);
+    expect(g.ambient[0].when).toBe("");
+  });
+
+  it("sorts free before priced within a group, stable otherwise", () => {
+    const g = almanacGroups(
+      [jacarandas, { ...jacarandas, name: "free first", free: true }],
+      "2026-10-20",
+    );
+    expect(g.ripe.map((r) => r.entry.name)).toEqual([
+      "free first",
+      "jacarandas",
+    ]);
   });
 });
 

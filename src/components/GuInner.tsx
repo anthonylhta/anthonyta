@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import type { ApertureCast, ApertureRefinement } from "@/lib/aperture";
 import {
+  almanacGroups,
   castsThisMonth,
   detailStatus,
   experienceBudget,
@@ -12,6 +13,7 @@ import {
   guBlocks,
   guCensus,
   guReads,
+  type AlmanacRead,
   type GuBlock,
   type GuRead,
 } from "@/lib/apertureview";
@@ -112,7 +114,7 @@ export function GuInner({
 
   // `ready` — narrowed by the switch above, but TS can't see it through the helper.
   if (!doc) return null;
-  const { rented, consumables, refining } = doc.sealed;
+  const { rented, consumables, refining, almanac } = doc.sealed;
   const budget = consumables
     ? experienceBudget(
         fin ? recoveredThisWeek(fin, today) : null,
@@ -164,6 +166,10 @@ export function GuInner({
             <CastsFold casts={month.casts} stones={month.stones} />
           )}
         </Section>
+      )}
+
+      {almanac && almanac.length > 0 && (
+        <AlmanacBand entries={almanacGroups(almanac, today)} />
       )}
 
       {refining && refining.length > 0 && (
@@ -220,8 +226,8 @@ function Chevron({ open }: { open: boolean }) {
  * A set of names toggled one at a time — the fold state of a band. Anchored in
  * the band, so it unmounts with the document and every unlock opens folded.
  */
-function useFolds() {
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+function useFolds(initial: readonly string[] = []) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(initial));
   const toggle = (name: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -421,6 +427,167 @@ function CastRow({ cast }: { cast: ApertureCast }) {
         <span className="ml-auto text-muted">{aud(cast.stones / 100)}</span>
       )}
     </p>
+  );
+}
+
+/**
+ * The almanac (ADR 0174): what the world is producing, windowed to today.
+ * Three groups — ripe now, next, any week — and RIPE NOW OPENS BY ITSELF, the
+ * one fold on the page that does: the band exists to answer "what's ripe"
+ * without a tap. The other two fold to a row and a count. A menu, never a
+ * list of things owed: no count of what wasn't picked, no dimming as a
+ * window closes, no buttons — a cast is a journal line, sealed at the
+ * check-in. Free feeds print first and wear the strip's soft essence, the
+ * "cheap" tone rather than the bearer's.
+ */
+const RIPE = "ripe now";
+const NEXT = "next";
+const ANY_WEEK = "any week";
+
+function AlmanacBand({
+  entries,
+}: {
+  entries: { ripe: AlmanacRead[]; next: AlmanacRead[]; ambient: AlmanacRead[] };
+}) {
+  const { open, toggle } = useFolds([RIPE]);
+  const rows = useFolds();
+  const groups: [string, AlmanacRead[]][] = [
+    [RIPE, entries.ripe],
+    [NEXT, entries.next],
+    [ANY_WEEK, entries.ambient],
+  ];
+  return (
+    <Section label="almanac">
+      <div className="flex flex-col gap-1.5">
+        {groups.map(([name, reads]) => (
+          <div key={name}>
+            <button
+              type="button"
+              onClick={() => toggle(name)}
+              aria-expanded={open.has(name)}
+              className="flex w-full items-baseline gap-2 text-left text-xs"
+            >
+              <Chevron open={open.has(name)} />
+              <span className="text-fg/90">{name}</span>
+              <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted">
+                {reads.length}
+              </span>
+            </button>
+            {open.has(name) && (
+              <div className="mt-1 mb-1 ml-5 flex flex-col gap-1.5">
+                {reads.length === 0 ? (
+                  <p className="text-[11px] text-muted">nothing in season</p>
+                ) : (
+                  reads.map((r, i) => {
+                    const key = `${name}-${r.entry.name}-${i}`;
+                    return (
+                      <AlmanacRow
+                        key={key}
+                        read={r}
+                        open={rows.open.has(key)}
+                        onToggle={() => rows.toggle(key)}
+                      />
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <Flavor>
+        what the world is producing — picked from, never owed. ◦ costs nothing
+        but the choosing.
+      </Flavor>
+    </Section>
+  );
+}
+
+/**
+ * One feed: a free mark or a plain one, the name, when, and the mouths it
+ * feeds where there is room (they ride in the unfold on the phone). The
+ * unfold is its source, its cost, the note, and what it pairs with; a row
+ * with nothing to unfold is its own whole entry.
+ */
+function AlmanacRow({
+  read,
+  open,
+  onToggle,
+}: {
+  read: AlmanacRead;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { entry, when } = read;
+  const free = entry.free === true;
+  const feeds = entry.feeds ?? [];
+  const cost = free ? "free" : entry.tier ? `rank ${entry.tier}` : null;
+  const detail = [entry.source, cost, entry.note].filter(
+    (v): v is string => typeof v === "string" && v.length > 0,
+  );
+  const hasBody =
+    detail.length > 0 || entry.pair !== undefined || feeds.length > 0;
+  const row = (
+    <>
+      <span aria-hidden className="w-2 shrink-0 text-[10px] text-muted/60">
+        {hasBody ? (open ? "▾" : "▸") : "·"}
+      </span>
+      <span
+        aria-hidden
+        className={`w-2.5 shrink-0 ${free ? "text-(--essence-soft)" : "text-muted/40"}`}
+      >
+        {free ? "◦" : "·"}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-fg/90 sm:w-[268px] sm:flex-none">
+        {entry.name}
+      </span>
+      {when && (
+        <span className="shrink-0 text-[11px] tabular-nums text-muted">
+          {when}
+        </span>
+      )}
+      {feeds.length > 0 && (
+        <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted/60 sm:block">
+          {feeds.join(" · ")}
+        </span>
+      )}
+    </>
+  );
+  return (
+    <div>
+      {hasBody ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex w-full items-baseline gap-2 text-left text-xs"
+        >
+          {row}
+        </button>
+      ) : (
+        <p className="flex items-baseline gap-2 text-xs">{row}</p>
+      )}
+      {open && hasBody && (
+        <div className="mt-0.5 mb-1 ml-5 flex flex-col gap-0.5 text-[11px] text-muted">
+          {feeds.length > 0 && (
+            <p className="text-muted/60 sm:hidden">feeds {feeds.join(" · ")}</p>
+          )}
+          {detail.length > 0 && (
+            <p>
+              {detail.map((d, i) => (
+                <span key={i}>
+                  {i > 0 && " · "}
+                  <span className={d === cost ? "text-fg/80" : undefined}>
+                    {d}
+                  </span>
+                </span>
+              ))}
+            </p>
+          )}
+          {entry.pair && <p>pairs with · {entry.pair}</p>}
+        </div>
+      )}
+    </div>
   );
 }
 
