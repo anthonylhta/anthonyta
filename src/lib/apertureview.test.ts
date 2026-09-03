@@ -10,6 +10,7 @@ import {
   type ApertureDoc,
   type ApertureStreak,
   type ApertureTrial,
+  type ApertureGu,
 } from "./aperture";
 import {
   ACTIVITY_SERIES,
@@ -22,6 +23,7 @@ import {
   castsThisMonth,
   compactDollars,
   experienceBudget,
+  feedingDot,
   feedingLabel,
   feedingState,
   guBlocks,
@@ -59,6 +61,7 @@ import {
   tierGlyph,
   trialCountdown,
   trialsSummary,
+  type FeedingRead,
 } from "./apertureview";
 
 // These ARE the me-block + island's component tests. Nothing renders in this suite,
@@ -1129,6 +1132,34 @@ describe("apertureview — guReads + guBlocks + guCensus", () => {
     );
     expect(guCensus(blocks, held)).toEqual({ total: 4, rocks: 1 });
     expect(guCensus([], [])).toEqual({ total: 0, rocks: 0 });
+  });
+});
+
+describe("apertureview — feedingDot", () => {
+  const dot = (gu: ApertureGu, feeding: FeedingRead | null) =>
+    feedingDot({ gu, feeding });
+
+  it("draws the strip from the same read the row prints", () => {
+    // No clock is the foundation state — filled, inked by whether it bears.
+    expect(dot({ name: "degree", bears: true }, null)).toEqual({
+      bears: true,
+      ring: false,
+      rock: false,
+    });
+    expect(dot({ name: "vault" }, { state: "fed", days: 2 })).toEqual({
+      bears: false,
+      ring: false,
+      rock: false,
+    });
+    // Past the interval the dot hollows; a rock hollows AND dims, as the row does.
+    expect(dot({ name: "pitch" }, { state: "hungry", days: 20 })).toEqual({
+      bears: false,
+      ring: true,
+      rock: false,
+    });
+    expect(
+      dot({ name: "riichi", bears: true }, { state: "hibernating", days: 43 }),
+    ).toEqual({ bears: true, ring: true, rock: true });
   });
 });
 
