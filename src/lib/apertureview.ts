@@ -459,6 +459,24 @@ export function feedingLabel(read: FeedingRead): string {
   return `${read.state} ${read.days}d`;
 }
 
+/** The strip's reading of one gu — the group row's dot, drawn from the SAME
+ *  read the unfolded row prints, so the two can never disagree. `bears` inks the
+ *  dot essence; `ring` hollows it once the clock is past its interval; `rock`
+ *  dims it whole, the way the row dims. A foundation gu (no clock) is a filled
+ *  dot: fed once, holds. */
+export function feedingDot(read: GuRead): {
+  bears: boolean;
+  ring: boolean;
+  rock: boolean;
+} {
+  const state = read.feeding?.state;
+  return {
+    bears: read.gu.bears === true,
+    ring: state === "hungry" || state === "hibernating",
+    rock: state === "hibernating",
+  };
+}
+
 /** One gu as the compendium reads it: the sealed entry and its clock. */
 export interface GuRead {
   gu: ApertureGu;

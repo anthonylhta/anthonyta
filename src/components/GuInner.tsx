@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import type { ApertureCast, ApertureRefinement } from "@/lib/aperture";
 import {
   castsThisMonth,
   detailStatus,
   experienceBudget,
+  feedingDot,
   feedingLabel,
   guBlocks,
   guCensus,
@@ -29,11 +30,23 @@ import { useApertureDoc } from "./useApertureDoc";
  * one about what was sealed. The fin envelope rides along for one figure — the
  * week's recovered income, which the burn allotment is a share of.
  *
+ * THE PAGE'S RESTING HEIGHT IS SET BY ITS GROUPS, NEVER BY ITS MEMBERS. A path
+ * folds to one row — its name, its rung, a dot per gu, a count — and the dot
+ * strip IS the feeding ledger at a glance: filled is fed (or a foundation, which
+ * holds), a ring is past its interval, a dim ring is a rock, essence marks the
+ * gu that bears the path. Tap the row and the gu appear under it with their
+ * clocks. The queue folds the same way, one row per entry with the test and what
+ * it needs underneath; a month's casts fold under their meter. Growth goes into
+ * the unfold, not onto the page, so the compendium at thirty gu is the height of
+ * the compendium at fourteen. Fold state is component state: it dies with the
+ * key, like every unfold on the sheet, and the page opens folded on both widths
+ * — one behaviour, no memory.
+ *
  * IT ADJUDICATES NOTHING and it NEVER NAGS. A feeding state is a reading, printed
- * muted like every other fact here; a rock is dimmed rather than flagged; the
- * header counts inventory and never hunger. No amber appears on this page at all —
- * amber is the hub's word for "something wants you", and a gu that wants feeding
- * is information, not an alarm.
+ * muted like every other fact here; a rock is dimmed rather than flagged; a group
+ * row counts inventory and never hunger, and so does the header. No amber appears
+ * on this page at all — amber is the hub's word for "something wants you", and a
+ * gu that wants feeding is information, not an alarm.
  */
 export function GuInner({
   offline,
@@ -112,28 +125,21 @@ export function GuInner({
       <ZoneHeader label="gu" seal="蛊" right={censusLine(census)} />
 
       <Section label="gu held">
-        {blocks.length === 0 ? (
+        {blocks.length === 0 && held.length === 0 ? (
           <p className="text-xs text-muted">nothing inventoried yet</p>
         ) : (
-          <div className="flex flex-col gap-3.5">
-            {blocks.map((b) => (
-              <GuBlockRows key={b.name} block={b} />
-            ))}
-          </div>
+          <GuGroups blocks={blocks} held={held} />
         )}
         {rented && rented.length > 0 && (
           <p className="mt-3 text-[11px] text-muted">
             rented · {rented.join(" · ")}
           </p>
         )}
+        <Flavor>
+          a ring is past its interval · a dim ring is a rock · essence bears the
+          path
+        </Flavor>
       </Section>
-
-      {held.length > 0 && (
-        <Section label="held, no path">
-          <GuRows reads={held} />
-          <Flavor>held by the house rather than by a road.</Flavor>
-        </Section>
-      )}
 
       {consumables && (
         <Section label="consumables">
@@ -155,22 +161,14 @@ export function GuInner({
           {month.casts.length === 0 ? (
             <p className="mt-2.5 text-xs text-muted">none cast this month</p>
           ) : (
-            <div className="mt-2.5 flex flex-col gap-1">
-              {month.casts.map((c, i) => (
-                <CastRow key={`${c.date}-${i}`} cast={c} />
-              ))}
-            </div>
+            <CastsFold casts={month.casts} stones={month.stones} />
           )}
         </Section>
       )}
 
       {refining && refining.length > 0 && (
         <Section label="refining">
-          <div className="flex flex-col gap-2.5">
-            {refining.map((r, i) => (
-              <RefiningRow key={`${r.name}-${i}`} entry={r} />
-            ))}
-          </div>
+          <RefiningRows entries={refining} />
           <Flavor>
             the recipe book&apos;s open page — nothing here is held.
           </Flavor>
@@ -209,30 +207,146 @@ function StatusLine({ children }: { children: ReactNode }) {
   return <p className="px-4 py-3 text-xs text-down">{children}</p>;
 }
 
-/** One path's (or sub-path's) gu, under its name and the rung it stands at. */
-function GuBlockRows({ block }: { block: GuBlock }) {
+/** The chevron every folding row leads with — the sheet's, verbatim. */
+function Chevron({ open }: { open: boolean }) {
   return (
-    <div>
-      <p className="text-[11px] uppercase tracking-[0.15em] text-muted/70">
-        {block.name}
-        {block.attainment && (
-          <span className="ml-2 tracking-normal text-muted/60 normal-case">
-            {block.attainment}
-          </span>
-        )}
-      </p>
-      <GuRows reads={block.gu} />
+    <span aria-hidden className="w-2 shrink-0 text-[10px] text-muted/60">
+      {open ? "▾" : "▸"}
+    </span>
+  );
+}
+
+/**
+ * A set of names toggled one at a time — the fold state of a band. Anchored in
+ * the band, so it unmounts with the document and every unlock opens folded.
+ */
+function useFolds() {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (name: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  return { open, toggle };
+}
+
+/** Held by the house rather than by a road — the path-less list, read as one
+ *  more group so the band has one shape. Named so no real path can collide. */
+const NO_PATH = "no path";
+
+/**
+ * The held band: one row per path (or sub-path) that holds gu, the path-less
+ * list last. Rows fold; the strip carries every gu's state, so nothing folded
+ * is hidden — the unfold only adds names and clocks.
+ */
+function GuGroups({ blocks, held }: { blocks: GuBlock[]; held: GuRead[] }) {
+  const { open, toggle } = useFolds();
+  return (
+    <div className="flex flex-col gap-1.5">
+      {blocks.map((b) => (
+        <GuGroup
+          key={b.name}
+          name={b.name}
+          attainment={b.attainment}
+          reads={b.gu}
+          open={open.has(b.name)}
+          onToggle={() => toggle(b.name)}
+        />
+      ))}
+      {held.length > 0 && (
+        <GuGroup
+          name={NO_PATH}
+          reads={held}
+          open={open.has(NO_PATH)}
+          onToggle={() => toggle(NO_PATH)}
+          flavor="held by the house rather than by a road."
+        />
+      )}
     </div>
   );
 }
 
-function GuRows({ reads }: { reads: GuRead[] }) {
+/** One group: the folding row and, open, the rows it stands for. The count is
+ *  inventory — how many — never how many are hungry. */
+function GuGroup({
+  name,
+  attainment,
+  reads,
+  open,
+  onToggle,
+  flavor,
+}: {
+  name: string;
+  attainment?: string;
+  reads: GuRead[];
+  open: boolean;
+  onToggle: () => void;
+  flavor?: string;
+}) {
   return (
-    <div className="mt-1.5 flex flex-col gap-1">
-      {reads.map((r, i) => (
-        <GuRow key={`${r.gu.name}-${i}`} read={r} />
-      ))}
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left text-xs"
+      >
+        <Chevron open={open} />
+        <span className="w-[140px] shrink-0 truncate text-fg/90 sm:w-[148px]">
+          {name}
+        </span>
+        {/* The rung hides on the phone — the unfold's path card on /aperture
+            carries it, and the strip needs the width more. */}
+        <span className="hidden w-24 shrink-0 truncate text-[11px] text-muted/60 sm:inline">
+          {attainment}
+        </span>
+        <span className="flex min-w-0 flex-wrap items-center gap-[3px]">
+          {reads.map((r, i) => (
+            <FeedingDot key={`${r.gu.name}-${i}`} read={r} />
+          ))}
+        </span>
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted">
+          {reads.length}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1 mb-1 ml-5">
+          <div className="flex flex-col gap-1">
+            {reads.map((r, i) => (
+              <GuRow key={`${r.gu.name}-${i}`} read={r} />
+            ))}
+          </div>
+          {flavor && (
+            <p className="mt-1.5 text-[11px] italic text-muted/60">{flavor}</p>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * One gu on the strip, drawn from the same read as its row (`feedingDot`) so the
+ * strip and the unfold can never disagree. Essence for the bearer, muted for
+ * the merely held; hollow past the interval; dimmed whole as a rock, exactly as
+ * the row dims.
+ */
+function FeedingDot({ read }: { read: GuRead }) {
+  const { bears, ring, rock } = feedingDot(read);
+  const fill = ring
+    ? bears
+      ? "border border-(--essence)"
+      : "border border-muted"
+    : bears
+      ? "bg-(--essence)"
+      : "bg-muted/40";
+  return (
+    <span
+      aria-hidden
+      className={`size-2 shrink-0 rounded-full ${fill} ${rock ? "opacity-40" : ""}`}
+    />
   );
 }
 
@@ -262,6 +376,40 @@ function GuRow({ read }: { read: GuRead }) {
   );
 }
 
+/** The month's casts, folded under one row that carries their count and sum. */
+function CastsFold({
+  casts,
+  stones,
+}: {
+  casts: ApertureCast[];
+  stones: number;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-baseline gap-2 text-left text-xs"
+      >
+        <Chevron open={open} />
+        <span className="text-fg/90">{casts.length} cast this month</span>
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted">
+          {aud(stones / 100)}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1 mb-1 ml-5 flex flex-col gap-1">
+          {casts.map((c, i) => (
+            <CastRow key={`${c.date}-${i}`} cast={c} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One cast: when, what, of what kind, and what it cost. */
 function CastRow({ cast }: { cast: ApertureCast }) {
   return (
@@ -276,22 +424,68 @@ function CastRow({ cast }: { cast: ApertureCast }) {
   );
 }
 
-/** One entry in the queue — what it would be, what would prove it, what it wants. */
-function RefiningRow({ entry }: { entry: ApertureRefinement }) {
+/** The queue, one folding row per entry, in the emitter's order — a rank is a
+ *  word here ("2 → 4", "legend"), so nothing sorts on it. */
+function RefiningRows({ entries }: { entries: ApertureRefinement[] }) {
+  const { open, toggle } = useFolds();
+  return (
+    <div className="flex flex-col gap-1.5">
+      {entries.map((r, i) => {
+        const key = `${r.name}-${i}`;
+        return (
+          <RefiningRow
+            key={key}
+            entry={r}
+            open={open.has(key)}
+            onToggle={() => toggle(key)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * One entry in the queue: what it would be and at what rank on the row, its
+ * type beside them where there is room; unfolded, what would prove it and what
+ * it still wants. On the phone the type rides in the unfold instead.
+ */
+function RefiningRow({
+  entry,
+  open,
+  onToggle,
+}: {
+  entry: ApertureRefinement;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
     <div>
-      <p className="text-xs">
-        <span className="text-fg/80">{entry.name}</span>
-        <span className="text-muted">
-          {" "}
-          — rank {entry.rank} · {entry.type}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-baseline gap-2 text-left text-xs"
+      >
+        <Chevron open={open} />
+        <span className="min-w-0 flex-1 truncate text-fg/80 sm:w-[208px] sm:flex-none">
+          {entry.name}
         </span>
-      </p>
-      <p className="mt-0.5 text-[11px] text-muted">{entry.test}</p>
-      {entry.needs && (
-        <p className="mt-0.5 text-[11px] text-muted/70">
-          needs · {entry.needs}
-        </p>
+        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted sm:ml-0">
+          rank {entry.rank}
+        </span>
+        <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted/60 sm:block">
+          {entry.type}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-0.5 mb-1 ml-5 flex flex-col gap-0.5 text-[11px] text-muted">
+          <p className="text-muted/60 sm:hidden">{entry.type}</p>
+          <p>{entry.test}</p>
+          {entry.needs && (
+            <p className="text-muted/70">needs · {entry.needs}</p>
+          )}
+        </div>
       )}
     </div>
   );
