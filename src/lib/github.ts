@@ -24,6 +24,11 @@ export interface GithubStats {
   months: { label: string; week: number }[];
   /** most-recently-pushed public repo */
   recent: { repo: string; lang: string | null; at: string } | null;
+  /** every public repo's last push, keyed by the repo NAME as GitHub spells it —
+   *  the gu compendium's feeding evidence (a gu naming a repo is fed by its
+   *  pushes). Empty when the read fell back to sample: no token, no pushes, and
+   *  a gu falls back to the day its check-in sealed. */
+  pushes: Record<string, string>;
   /** false when served from SAMPLE (no token / read failed) */
   isLive: boolean;
 }
@@ -107,6 +112,8 @@ export function summarizeGithub(user: RawUser, login: string): GithubStats {
     w.contributionDays.map((d) => contribLevel(d.contributionCount, max)),
   );
   const top = user.repositories.nodes[0] ?? null;
+  const pushes: Record<string, string> = {};
+  for (const r of user.repositories.nodes) pushes[r.name] = r.pushedAt;
   return {
     login,
     contributions: cal.totalContributions,
@@ -123,6 +130,7 @@ export function summarizeGithub(user: RawUser, login: string): GithubStats {
           at: top.pushedAt,
         }
       : null,
+    pushes,
     isLive: true,
   };
 }
@@ -189,5 +197,8 @@ export const sampleGithub: GithubStats = {
     "Jun",
   ].map((label, i) => ({ label, week: Math.round((i * 53) / 12) })),
   recent: { repo: "anthonyta", lang: "TypeScript", at: "" },
+  // No invented push times: a made-up stamp would feed a gu on the strength of
+  // sample data, which is the one thing the compendium must never do.
+  pushes: {},
   isLive: false,
 };

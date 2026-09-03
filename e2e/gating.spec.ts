@@ -43,6 +43,7 @@ test.describe("guest gating", () => {
     "/reader", // the owner-only morning feeds page (ADR: rss reader)
     "/api/aperture", // E2EE private status envelope (the aperture module)
     "/aperture", // the owner-only inward page (stones, gu, attainment)
+    "/gu", // the owner-only gu compendium (feeding, consumables, refining)
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);

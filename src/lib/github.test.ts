@@ -91,6 +91,30 @@ describe("summarizeGithub", () => {
     expect(s.isLive).toBe(true);
   });
 
+  it("keys every repo's last push by name", () => {
+    const s = summarizeGithub(
+      {
+        ...user,
+        repositories: {
+          totalCount: 7,
+          nodes: [
+            ...user.repositories.nodes,
+            {
+              name: "anthonyta",
+              pushedAt: "2026-06-25T08:00:00Z",
+              primaryLanguage: null,
+            },
+          ],
+        },
+      },
+      "x",
+    );
+    expect(s.pushes).toEqual({
+      riichi: "2026-06-26T10:00:00Z",
+      anthonyta: "2026-06-25T08:00:00Z",
+    });
+  });
+
   it("labels the month at the first week of the calendar", () => {
     const s = summarizeGithub(user, "x");
     expect(s.months).toEqual([{ label: "Jun", week: 0 }]);

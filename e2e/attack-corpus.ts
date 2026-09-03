@@ -311,6 +311,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET"],
   },
   {
+    routeKey: "/gu",
+    probe: "/gu",
+    shape: "owner-page",
+    methods: ["GET"],
+  },
+  {
     routeKey: "/files",
     probe: "/files",
     shape: "owner-page",

@@ -2,16 +2,13 @@
 
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useVault } from "@/app/files/useVault";
 import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { ExceptionLine } from "@/components/terminal/ExceptionLine";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import {
-  APERTURE_CONTEXT,
   apertureHistPath,
-  FIN_CONTEXT,
   GYM_CONTEXT,
   JOBS_CONTEXT,
   MEALS_CONTEXT,
@@ -75,10 +72,8 @@ import {
   investedAt,
   latestEntry,
   monthToDateBaseline,
-  normalizeFinConfig,
   recoveredThisWeek,
   weeklyFlow,
-  type FinConfig,
 } from "@/lib/fin";
 import {
   e1rmSeries,
@@ -106,6 +101,7 @@ import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
 import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
+import { useApertureDoc } from "./useApertureDoc";
 
 /**
  * ApertureInner — the full reading, as ONE client island: the sealed status document
@@ -120,6 +116,10 @@ import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
  * the foundation, the gu. Two envelopes and two riders in ONE island for the same
  * reason the sheet kept its bands together: it is all one reading, and splitting it
  * would mean fetching and decrypting the same blobs several times for one page.
+ *
+ * Both envelopes are opened by `useApertureDoc`, shared with the gu compendium —
+ * the one other surface read from the same seal. What stays here is what only this
+ * page reads: the journal index, the two logs, the ledger and the seal history.
  *
  * The document is authoritative and the money is a rider. A status document that
  * won't open is the page's red line (`tamper`, exactly as on the sheet); a fin
@@ -380,10 +380,7 @@ export function ApertureInner({
    *  draws and the ones it derives in the browser can't sit on different days. */
   today: string;
 }) {
-  const { status, openItem } = useVault(offline);
-  const [doc, setDoc] = useState<ApertureDoc | null>(null);
-  const [fin, setFin] = useState<FinConfig | null>(null);
-  const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
+  const { status, openItem, doc, fin, dataErr } = useApertureDoc(offline);
   /** The sealed gym log, once it lands — the training strip and the vessel's
    *  figures are both derived from it below. */
   const [gymCfg, setGymCfg] = useState<GymConfig | null>(null);
@@ -413,9 +410,6 @@ export function ApertureInner({
   if (wasUnlocked !== unlocked) {
     setWasUnlocked(unlocked);
     if (!unlocked) {
-      setDoc(null);
-      setFin(null);
-      setDataErr(null);
       setGymCfg(null);
       setMealsCfg(null);
       setRecord(null);
@@ -428,96 +422,46 @@ export function ApertureInner({
     }
   }
 
+  // THIS PAGE's own riders, once the document has landed (the hook opens the two
+  // envelopes every inward surface shares — the seal and the money). Keyed on the
+  // document because each of these is read BESIDE it: the adjudication line
+  // measures the raw journal against the seal, and the rest are figures the
+  // reading prints next to sealed ones. Every one is best-effort by construction,
+  // so none can hold the page back or fail it.
   useEffect(() => {
-    if (status !== "unlocked") return;
+    if (!doc) return;
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch("/api/aperture");
-        if (res.status !== 200) {
-          // 404 (nothing sealed yet) and 503 (a flaky store) mean the same thing
-          // to this page: no document to look into, and not the vault's fault.
-          if (!cancelled) setDataErr("unreachable");
-          return;
-        }
-        let next: ApertureDoc;
-        try {
-          const { bytes } = await openItem(
-            new Uint8Array(await res.arrayBuffer()),
-            APERTURE_CONTEXT,
-          );
-          const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-          const normalized = normalizeAperture(parsed);
-          // Decrypted-but-malformed is indistinguishable from tampering at this
-          // boundary: the AEAD tag passed, so these ARE the sealed bytes — if
-          // their shape is wrong, what went into the seal is not what this build
-          // trusts. Same red line the sheet draws.
-          if (!normalized) throw new Error("aperture: bad shape");
-          next = normalized;
-        } catch {
-          if (!cancelled) setDataErr("tamper");
-          return;
-        }
-        if (!cancelled) setDoc(next);
-
-        // The money rider — best-effort by construction. It only fills figures,
-        // so it must never hold the document back or be able to fail it.
-        try {
-          const finRes = await fetch("/api/fin/config");
-          let cfg: FinConfig | null = null;
-          if (finRes.status === 200) {
-            const { bytes } = await openItem(
-              new Uint8Array(await finRes.arrayBuffer()),
-              FIN_CONTEXT,
-            );
-            const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-            cfg = normalizeFinConfig(parsed);
-            if (!cfg) throw new Error("fin config: bad shape");
-          } else if (finRes.status === 404) {
-            // Nothing sealed yet — an empty ledger, not a failure.
-            cfg = { v: 2, entries: [], invested: [], portfolio: null };
-          } else {
-            throw new Error(`fin config: ${finRes.status}`);
-          }
-          if (!cancelled) setFin(cfg);
-        } catch {
-          if (!cancelled) setFin(null);
-        }
-
-        // The index rider — the adjudication line at the head of the reading and
-        // the soul's day count, off one fetch; like every rider here it can only
-        // ADD, never hold the page back and never fail it.
-        const idx = await indexReading(next.sealedAt, today, openItem);
-        if (!cancelled) {
-          if (idx.pending) setPending(true);
-          setSoulDays(idx.soulDays);
-        }
-
-        // Both sealed logs — one request and one decrypt each, unconditionally:
-        // the vessel band reads a body, which no path has to have been declared
-        // over. The two evidence strips still wait on a declaration, but they
-        // come off these same bytes rather than a second decrypt.
-        const meals = await mealsConfig(openItem);
-        if (meals && !cancelled) setMealsCfg(meals);
-
-        const gymLog = await gymConfig(openItem);
-        if (gymLog && !cancelled) setGymCfg(gymLog);
-
-        // The sect-search rider — same best-effort terms.
-        const apps = await jobsApps(openItem);
-        if (apps && !cancelled) setJobs(apps);
-
-        // The seal history — a listing plus up to a dozen fetches and decrypts.
-        const rec = await recordSeries(openItem);
-        if (rec && !cancelled) setRecord(rec);
-      } catch {
-        if (!cancelled) setDataErr("unreachable");
+      // The index rider — the adjudication line at the head of the reading and
+      // the soul's day count, off one fetch.
+      const idx = await indexReading(doc.sealedAt, today, openItem);
+      if (!cancelled) {
+        if (idx.pending) setPending(true);
+        setSoulDays(idx.soulDays);
       }
+
+      // Both sealed logs — one request and one decrypt each, unconditionally:
+      // the vessel band reads a body, which no path has to have been declared
+      // over. The two evidence strips still wait on a declaration, but they
+      // come off these same bytes rather than a second decrypt.
+      const meals = await mealsConfig(openItem);
+      if (meals && !cancelled) setMealsCfg(meals);
+
+      const gymLog = await gymConfig(openItem);
+      if (gymLog && !cancelled) setGymCfg(gymLog);
+
+      // The sect-search rider — same best-effort terms.
+      const apps = await jobsApps(openItem);
+      if (apps && !cancelled) setJobs(apps);
+
+      // The seal history — a listing plus up to a dozen fetches and decrypts.
+      const rec = await recordSeries(openItem);
+      if (rec && !cancelled) setRecord(rec);
     })();
     return () => {
       cancelled = true;
     };
-  }, [status, openItem, today]);
+  }, [doc, openItem, today]);
 
   // The meals path's evidence, off the log already open here — protein per day
   // (the macro the meal log accents) with today's count beside it, rounded since
@@ -1426,7 +1370,7 @@ export function ApertureInner({
           houses={guHouses}
           formationsCount={formations.length}
           movesCount={doc.sealed.killerMoves?.length ?? 0}
-          guHeld={guHeldCount(paths)}
+          guHeld={guHeldCount(paths) + (doc.sealed.held?.length ?? 0)}
           rented={rented}
         />
       ) : (
@@ -2352,7 +2296,7 @@ function PathCard({ path }: { path: AperturePath }) {
         )}
       </div>
       <PeakLine peak={path.peak} />
-      <GuList gu={path.gu} />
+      <GuLine gu={path.gu} />
       <NextLine next={path.next} />
       {path.sub?.map((s, i) => (
         <SubPath key={i} path={s} />
@@ -2372,7 +2316,7 @@ function SubPath({ path }: { path: AperturePath }) {
         {path.name}
       </p>
       <PeakLine peak={path.peak} />
-      <GuList gu={path.gu} />
+      <GuLine gu={path.gu} />
       <NextLine next={path.next} />
       {path.sub?.map((s, i) => (
         <SubPath key={i} path={s} />
@@ -2381,25 +2325,19 @@ function SubPath({ path }: { path: AperturePath }) {
   );
 }
 
-/** The gu a path holds. The one that BEARS the attainment is inked; the rest are
- *  held, which the dot says by staying quiet. */
-function GuList({ gu }: { gu?: ApertureGu[] }) {
+/** How many gu the path holds, and the door to the compendium where they are
+ *  read one by one (their types, their feeding, the rocks among them). The list
+ *  itself moved to /gu when this reading grew past what one page can hold; a
+ *  count and a door is what a path card needs of it. */
+function GuLine({ gu }: { gu?: ApertureGu[] }) {
   if (!gu || gu.length === 0) return null;
   return (
-    <div className="mt-2 flex flex-col gap-1">
-      {gu.map((g, i) => (
-        <p key={i} className="text-xs">
-          <span
-            aria-hidden
-            className={g.bears ? "text-(--essence)" : "text-muted/40"}
-          >
-            ●{" "}
-          </span>
-          <span className="text-fg/90">{g.name}</span>
-          {g.type && <span className="text-muted"> — {g.type}</span>}
-        </p>
-      ))}
-    </div>
+    <p className="mt-2 text-[11px] text-muted">
+      {gu.length} gu held ·{" "}
+      <Link href="/gu" className="transition-colors hover:text-amber">
+        → /gu
+      </Link>
+    </p>
   );
 }
 

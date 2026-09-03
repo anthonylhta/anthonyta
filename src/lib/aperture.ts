@@ -158,13 +158,33 @@ export interface ApertureCondition {
   unit: string;
 }
 
-/** One gu a path holds — a named capability, its `type` open vocabulary like every
- *  other enum-shaped field here. `bears` marks the one carrying the path's
- *  attainment; the rest are held, not load-bearing. */
+/**
+ * One gu a path holds — a named capability, its `type` open vocabulary like every
+ * other enum-shaped field here. `bears` marks the one carrying the path's
+ * attainment; the rest are held, not load-bearing.
+ *
+ * THE FEEDING CLOCK is `fed` + `interval`, and it is a PAIR: a day with no period
+ * says nothing about hunger, and a period with no day has nothing to count from.
+ * A LONE ONE IS DROPPED rather than rejected — a half-written feeding line is the
+ * check-in's slip, and losing the whole document (every path, every trial, the
+ * wall) over one gu's missing number would be the frame punishing the wrong
+ * thing. A PRESENT field is still held to its type, so what survives normalize is
+ * either a whole clock or no clock at all — never half of one. No clock is the
+ * foundation state: a gu fed once that holds, which the page reads as silence
+ * rather than as never-fed.
+ */
 export interface ApertureGu {
   name: string;
   type?: string;
   bears?: boolean;
+  /** The day it was last fed, `YYYY-MM-DD`. Only meaningful with `interval`. */
+  fed?: string;
+  /** Whole days it goes between feedings — the clock's period. Only with `fed`. */
+  interval?: number;
+  /** A GitHub repo whose last push feeds it, named as GitHub spells it. Where the
+   *  page can see that push it OVERRIDES `fed`: the repo's own history is better
+   *  evidence than a day typed at the check-in a week ago. */
+  repo?: string;
 }
 
 /** One path. Sub-paths reuse the same shape — `role` only appears on top-level
@@ -280,6 +300,9 @@ const MAX_GU_HOUSES = 8;
 const MAX_ORIGIN_BEATS = 12;
 const MAX_BEAT_CHARS = 400;
 const MAX_INHERITANCES = 12;
+const MAX_HELD_GU = 12;
+const MAX_CASTS = 60;
+const MAX_REFINING = 24;
 
 /**
  * One true inheritance — a whole legacy, either RECEIVED (a source outside
@@ -351,6 +374,55 @@ export interface ApertureKillerMove {
   evidence?: "record" | "backup";
   /** The honest line under the steps — what the reading can and cannot claim. */
   note?: string;
+}
+
+/**
+ * One cast of a consumable — a spirit stone spent, and what it bought. `stones` is
+ * CENTS, the hub's one money unit (the fin envelope's, the jobs ledger's), so a
+ * month can be summed without the page ever guessing at a scale; absent = a cast
+ * that cost nothing but the choosing.
+ */
+export interface ApertureCast {
+  /** The day it was cast, `YYYY-MM-DD`. */
+  date: string;
+  /** What it bought, in the check-in's words. */
+  name: string;
+  /** What it cost, in cents. */
+  stones?: number;
+  /** Open vocabulary, like every other type line on this document. */
+  type?: string;
+}
+
+/**
+ * The consumables ledger: the share of what comes in that may be BURNED, and what
+ * has been burned against it. `budgetPct` is a percentage of the week's recovered
+ * income — the site multiplies and prints, and never rules on the share.
+ *
+ * The casts arrive in the emitter's writing order; newest-first is the PAGE's
+ * reading, applied there the way the harvest's is.
+ */
+export interface ApertureConsumables {
+  /** 0–100, the adjudicated allotment. */
+  budgetPct: number;
+  /** Every cast the seal carries — the page windows them to the month. */
+  casts: ApertureCast[];
+}
+
+/**
+ * One entry in the refinement queue — a gu being worked TOWARD, never one held.
+ * Wholly adjudicated prose: what it would be, at what rank, what would prove it,
+ * and what it still wants. Nothing here is inventory, which is why the band says
+ * so under itself.
+ */
+export interface ApertureRefinement {
+  name: string;
+  /** The rank it would come out at — a word, open like every rung here. */
+  rank: string;
+  type: string;
+  /** What would prove it — the yield test, in the check-in's words. */
+  test: string;
+  /** What is still missing. Absent = nothing named yet. */
+  needs?: string;
 }
 
 /**
@@ -435,6 +507,15 @@ export interface ApertureSealed {
   /** What was handed down and what is being left behind — sealed whole, and
    *  absent on every document sealed before the band existed. */
   inheritances?: ApertureInheritances;
+  /** Gu belonging to no path — held by the house rather than by a road (the
+   *  portfolio is the standing example). Absent on every document sealed before
+   *  the compendium existed. */
+  held?: ApertureGu[];
+  /** The burn allotment and the casts against it. Absent on the same terms. */
+  consumables?: ApertureConsumables;
+  /** The refinement queue — the recipe book's open page. Absent on the same
+   *  terms, and the band simply doesn't render. */
+  refining?: ApertureRefinement[];
 }
 
 /** The decrypted aperture document — the panel's entire input. */
@@ -554,13 +635,26 @@ function normCondition(x: unknown): ApertureCondition | null {
 function normGu(x: unknown): ApertureGu | null {
   if (!isObj(x)) return null;
   if (!isStr(x.name)) return null;
-  const { type, bears } = x;
+  const { type, bears, fed, interval, repo } = x;
   if (type !== undefined && !isStr(type)) return null;
   if (bears !== undefined && typeof bears !== "boolean") return null;
+  if (fed !== undefined && !isDay(fed)) return null;
+  // A period is whole days and at least one — a zero interval would make a gu
+  // hungry the instant it was fed.
+  if (interval !== undefined && !isPosInt(interval)) return null;
+  // An empty repo name is absent-in-disguise (it can match no push), so it
+  // rejects the way an empty `peak` line does.
+  if (repo !== undefined && !isNonEmptyStr(repo)) return null;
+  // The pairing rule (see the interface): a clock needs both hands, and a lone
+  // hand is dropped rather than allowed to reject the document.
+  const clock =
+    fed !== undefined && interval !== undefined ? { fed, interval } : {};
   return {
     name: x.name,
     ...(type !== undefined ? { type } : {}),
     ...(bears !== undefined ? { bears } : {}),
+    ...clock,
+    ...(repo !== undefined ? { repo } : {}),
   };
 }
 
@@ -764,6 +858,57 @@ function normGuHouse(x: unknown): ApertureGuHouse | null {
   return { name: x.name, type: x.type, origin };
 }
 
+function normCast(x: unknown): ApertureCast | null {
+  if (!isObj(x)) return null;
+  if (!isDay(x.date) || !isProse(x.name, MAX_TITLE_CHARS)) return null;
+  const { stones, type } = x;
+  // Cents, so a whole number ≥ 0: a fractional cent is not a price anyone paid,
+  // and a negative cast is a refund this ledger has no shape for.
+  if (stones !== undefined && !isNonNegInt(stones)) return null;
+  if (type !== undefined && !isProse(type, MAX_TITLE_CHARS)) return null;
+  return {
+    date: x.date,
+    name: x.name,
+    ...(stones !== undefined ? { stones } : {}),
+    ...(type !== undefined ? { type } : {}),
+  };
+}
+
+function normConsumables(x: unknown): ApertureConsumables | null {
+  if (!isObj(x)) return null;
+  // A percentage, and one of a whole: outside 0–100 it is not a share of
+  // anything, so it breaks the frame rather than multiplying into nonsense.
+  if (!isFiniteNum(x.budgetPct) || x.budgetPct < 0 || x.budgetPct > 100)
+    return null;
+  const casts = normArray(x.casts, normCast);
+  // An EMPTY list is a real ledger (a month with nothing burned); a MISSING one
+  // is malformed, since the allotment alone is only half the reading.
+  if (casts === null || casts.length > MAX_CASTS) return null;
+  return { budgetPct: x.budgetPct, casts };
+}
+
+function normRefinement(x: unknown): ApertureRefinement | null {
+  if (!isObj(x)) return null;
+  if (
+    !isProse(x.name, MAX_TITLE_CHARS) ||
+    !isProse(x.rank, MAX_TITLE_CHARS) ||
+    !isProse(x.type, MAX_TITLE_CHARS)
+  )
+    return null;
+  // The test and what it still wants are the row's two prose lines — the killer
+  // move's step ceiling, since they are read at the same width.
+  if (!isProse(x.test, MAX_STEP_CHARS)) return null;
+  const { needs } = x;
+  if (needs !== undefined && !isProse(needs, MAX_STEP_CHARS)) return null;
+  return {
+    name: x.name,
+    rank: x.rank,
+    type: x.type,
+    test: x.test,
+    ...(needs !== undefined ? { needs } : {}),
+  };
+}
+
 function normBreakthrough(x: unknown): ApertureBreakthrough | null {
   if (!isObj(x)) return null;
   if (!isStr(x.wall) || !isStr(x.event)) return null;
@@ -845,6 +990,18 @@ function normSealed(x: unknown): ApertureSealed | null {
   const inheritances =
     x.inheritances === undefined ? undefined : normInheritances(x.inheritances);
   if (inheritances === null) return null;
+  const held = x.held === undefined ? undefined : normArray(x.held, normGu);
+  if (held === null) return null;
+  if (held !== undefined && held.length > MAX_HELD_GU) return null;
+  const consumables =
+    x.consumables === undefined ? undefined : normConsumables(x.consumables);
+  if (consumables === null) return null;
+  const refining =
+    x.refining === undefined
+      ? undefined
+      : normArray(x.refining, normRefinement);
+  if (refining === null) return null;
+  if (refining !== undefined && refining.length > MAX_REFINING) return null;
   // An EMPTY next line is malformed rather than absent: a seal either says what
   // it waits on or says nothing, and a blank string would render as bare chrome.
   const { next } = x;
@@ -865,6 +1022,9 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(killerMoves !== undefined ? { killerMoves } : {}),
     ...(guHouses !== undefined ? { guHouses } : {}),
     ...(inheritances !== undefined ? { inheritances } : {}),
+    ...(held !== undefined ? { held } : {}),
+    ...(consumables !== undefined ? { consumables } : {}),
+    ...(refining !== undefined ? { refining } : {}),
   };
 }
 
