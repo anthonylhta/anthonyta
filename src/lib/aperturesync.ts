@@ -306,6 +306,13 @@ function needDay(v: unknown, at: string): Fail {
     : `${at} must be a YYYY-MM-DD day (found ${show(v)})`;
 }
 
+/** A whole number of at least 1 — a feeding period, and nothing else so far. */
+function needPosInt(v: unknown, at: string): Fail {
+  return typeof v === "number" && Number.isSafeInteger(v) && v > 0
+    ? null
+    : `${at} must be a whole number of at least 1 (found ${show(v)})`;
+}
+
 function needBool(v: unknown, at: string): Fail {
   return typeof v === "boolean"
     ? null
@@ -364,6 +371,12 @@ function walkGu(x: unknown, at: string): Fail {
     needStr(x.name, `${at}.name`),
     ifPresent(x.type, `${at}.type`, needStr),
     ifPresent(x.bears, `${at}.bears`, needBool),
+    // The feeding clock's two hands are typed here but NOT paired: normalize
+    // drops a lone one rather than rejecting, so pairing is not a rejection this
+    // walk could ever be explaining.
+    ifPresent(x.fed, `${at}.fed`, needDay),
+    ifPresent(x.interval, `${at}.interval`, needPosInt),
+    ifPresent(x.repo, `${at}.repo`, needNonEmptyStr),
   );
 }
 

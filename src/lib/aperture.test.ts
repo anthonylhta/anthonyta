@@ -740,6 +740,205 @@ describe("aperture — true inheritances", () => {
   });
 });
 
+describe("aperture — the feeding clock", () => {
+  // The compendium's one moving part on a gu: a day and a period, which are a
+  // PAIR. A lone hand is dropped (the document is worth more than one gu's
+  // clock); a present hand is still held to its type.
+  const held = (gu: Record<string, unknown>) =>
+    withSealed({
+      paths: [{ name: "Smithing", gu: [{ name: "Kiln gu", ...gu }] }],
+    });
+  const firstGu = (d: unknown) => normalizeAperture(d)?.sealed.paths[0].gu?.[0];
+
+  it("accepts a whole clock, with and without a repo", () => {
+    const clock = held({ fed: "2026-03-01", interval: 7 });
+    expect(normalizeAperture(clock)).toEqual(clock);
+    const fed = held({ fed: "2026-03-01", interval: 7, repo: "anthonyta" });
+    expect(normalizeAperture(fed)).toEqual(fed);
+  });
+
+  it("keeps a repo with no clock — the push is then the only hand", () => {
+    const repo = held({ repo: "anthonyta" });
+    expect(normalizeAperture(repo)).toEqual(repo);
+  });
+
+  it("drops a lone hand rather than rejecting the whole document", () => {
+    expect(firstGu(held({ fed: "2026-03-01" }))).toEqual({ name: "Kiln gu" });
+    expect(firstGu(held({ interval: 7 }))).toEqual({ name: "Kiln gu" });
+    // …and the rest of the document survives it untouched.
+    expect(normalizeAperture(held({ interval: 7 }))?.sealed.trials).toEqual(
+      doc.sealed.trials,
+    );
+  });
+
+  it("normalizes a gu with no clock exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(firstGu(held({}))).toEqual({ name: "Kiln gu" });
+  });
+
+  it("hard-rejects a present-but-malformed hand", () => {
+    const bad = (gu: Record<string, unknown>) =>
+      expect(normalizeAperture(held(gu))).toBeNull();
+    bad({ fed: "march", interval: 7 }); // not a day
+    bad({ fed: "2026-03-01", interval: 0 }); // hungry the instant it was fed
+    bad({ fed: "2026-03-01", interval: 1.5 }); // half a day is not a period
+    bad({ fed: "2026-03-01", interval: 7, repo: "" }); // matches no push
+  });
+});
+
+describe("aperture — gu held by no path", () => {
+  // The compendium's second block: gu the house holds rather than a road.
+  const gu = {
+    name: "The portfolio",
+    type: "wealth gu",
+    fed: "2026-03-02",
+    interval: 7,
+  };
+
+  it("accepts a list, and an empty one", () => {
+    const one = withSealed({ held: [gu] });
+    expect(normalizeAperture(one)).toEqual(one);
+    const none = withSealed({ held: [] });
+    expect(normalizeAperture(none)).toEqual(none);
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("held");
+  });
+
+  it("drops an unknown key inside one", () => {
+    const out = normalizeAperture(
+      withSealed({ held: [{ ...gu, mutated: 1 }] }),
+    );
+    expect(out?.sealed.held).toEqual([gu]);
+  });
+
+  it("hard-rejects a present-but-malformed list", () => {
+    const bad = (list: unknown) =>
+      expect(normalizeAperture(withSealed({ held: list }))).toBeNull();
+    bad("the portfolio"); // a word where a list should be
+    bad([{ ...gu, name: 3 }]); // a gu has a name
+    bad([{ ...gu, bears: "yes" }]); // one bad row rejects the list
+    bad(Array.from({ length: 13 }, (_, i) => ({ name: `g${i}` }))); // past the ceiling
+  });
+});
+
+describe("aperture — consumables", () => {
+  // The burn allotment and what was burned against it. `stones` is cents, so
+  // the frame holds it to whole non-negative numbers.
+  const consumables = {
+    budgetPct: 5,
+    casts: [
+      {
+        date: "2026-03-02",
+        name: "A month of the good coffee",
+        stones: 4200,
+        type: "comfort",
+      },
+      { date: "2026-02-14", name: "A day off the road" },
+    ],
+  };
+
+  it("accepts a well-formed ledger, and an empty month", () => {
+    const full = withSealed({ consumables });
+    expect(normalizeAperture(full)).toEqual(full);
+    const empty = withSealed({ consumables: { budgetPct: 0, casts: [] } });
+    expect(normalizeAperture(empty)).toEqual(empty);
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("consumables");
+  });
+
+  it("drops an unknown key inside a cast", () => {
+    const out = normalizeAperture(
+      withSealed({
+        consumables: {
+          budgetPct: 5,
+          casts: [{ ...consumables.casts[0], mutated: 1 }],
+        },
+      }),
+    );
+    expect(out?.sealed.consumables?.casts).toEqual([consumables.casts[0]]);
+  });
+
+  it("hard-rejects a present-but-malformed ledger", () => {
+    const bad = (v: unknown) =>
+      expect(normalizeAperture(withSealed({ consumables: v }))).toBeNull();
+    bad(5); // a number where the ledger should be
+    bad({ budgetPct: 5 }); // the allotment alone is half a reading
+    bad({ ...consumables, budgetPct: 101 }); // not a share of anything
+    bad({ ...consumables, budgetPct: -1 });
+    bad({ budgetPct: 5, casts: [{ date: "march", name: "x" }] }); // not a day
+    bad({ budgetPct: 5, casts: [{ date: "2026-03-02", name: "" }] }); // unnamed
+    bad({
+      budgetPct: 5,
+      casts: [{ date: "2026-03-02", name: "x", stones: -1 }],
+    });
+    bad({
+      budgetPct: 5,
+      casts: [{ date: "2026-03-02", name: "x", stones: 4.5 }],
+    });
+    bad({
+      budgetPct: 5,
+      casts: Array.from({ length: 61 }, () => ({
+        date: "2026-03-02",
+        name: "x",
+      })),
+    }); // past the ceiling
+  });
+});
+
+describe("aperture — the refinement queue", () => {
+  // The recipe book's open page: prose rows about gu NOT held.
+  const entry = {
+    name: "Chronicle gu",
+    rank: "3",
+    type: "record type",
+    test: "a year of entries read back without a gap",
+    needs: "a nightly hand",
+  };
+
+  it("accepts a queue, with and without what it needs", () => {
+    const full = withSealed({ refining: [entry] });
+    expect(normalizeAperture(full)).toEqual(full);
+    const bare = withSealed({
+      refining: [{ name: "a", rank: "1", type: "b", test: "c" }],
+    });
+    expect(normalizeAperture(bare)).toEqual(bare);
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("refining");
+  });
+
+  it("drops an unknown key inside an entry", () => {
+    const out = normalizeAperture(
+      withSealed({ refining: [{ ...entry, mutated: 1 }] }),
+    );
+    expect(out?.sealed.refining).toEqual([entry]);
+  });
+
+  it("hard-rejects a present-but-malformed queue", () => {
+    const bad = (v: unknown) =>
+      expect(normalizeAperture(withSealed({ refining: v }))).toBeNull();
+    bad("chronicle gu"); // a word where a list should be
+    bad([{ ...entry, name: "" }]); // an entry either has a name or isn't one
+    bad([{ ...entry, rank: "" }]);
+    bad([{ ...entry, test: "" }]); // no test is no entry — the row's whole point
+    bad([{ ...entry, needs: "" }]); // an empty line is malformed, not silence
+    bad([{ ...entry, test: "x".repeat(401) }]); // past the prose ceiling
+    bad(Array.from({ length: 25 }, (_, i) => ({ ...entry, name: `r${i}` }))); // past the ceiling
+  });
+});
+
 describe("aperture — path peaks", () => {
   // How high a path goes, printed at the head of its card. Optional, and shared
   // with sub-paths by construction — `normPath` normalizes both.
