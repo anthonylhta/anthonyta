@@ -14,16 +14,35 @@ import {
 } from "./aperture";
 import {
   ACTIVITY_SERIES,
-  ESSENCE_TEXT,
-  ESSENCE_VAR,
   ageOn,
   agoLabel,
   almanacGroups,
+  bookCounts,
+  bookEntries,
+  bookPage,
+  bookPageCount,
+  bookRankKey,
+  bookStatus,
   castReading,
-  codeSpans,
   castsThisMonth,
+  codeSpans,
   compactDollars,
+  conditionChipClass,
+  conditionChipPrefix,
+  conditionsSummary,
+  conditionStatusWord,
+  daoRows,
+  dayGap,
+  daysOpen,
+  declaredSeriesKeys,
+  detailStatus,
+  ESSENCE_TEXT,
+  ESSENCE_VAR,
+  essenceTextClass,
+  essenceVarClass,
+  evidenceDaysThisWeek,
   experienceBudget,
+  familyOf,
   feedingDot,
   feedingLabel,
   feedingState,
@@ -31,30 +50,17 @@ import {
   guCensus,
   guHeldCount,
   guReads,
-  conditionChipClass,
-  conditionChipPrefix,
-  conditionStatusWord,
-  conditionsSummary,
-  dayGap,
-  daysOpen,
-  declaredSeriesKeys,
-  detailStatus,
-  essenceTextClass,
-  essenceVarClass,
-  familyOf,
   gutterPhrase,
   hardenLabel,
   hardenLines,
   imminentMajorTrial,
   isImminent,
-  daoRows,
-  evidenceDaysThisWeek,
   latestDailyDay,
-  recordedDays,
   membraneOf,
   mortalSegments,
   pathAnchor,
   pathEvidence,
+  recordedDays,
   sealedAgo,
   signedCount,
   splitLead,
@@ -1219,6 +1225,99 @@ describe("apertureview — feedingDot", () => {
     expect(
       dot({ name: "riichi", bears: true }, { state: "hibernating", days: 43 }),
     ).toEqual({ bears: true, ring: true, rock: true });
+  });
+});
+
+describe("apertureview — the book", () => {
+  const row = (name: string, rank: string, since?: string) => ({
+    name,
+    rank,
+    type: "consumable · made",
+    test: "t",
+    ...(since !== undefined ? { since } : {}),
+  });
+  // Seal order on purpose: rank 2 first, a worded rank, then the rank 1s.
+  const refining = [
+    row("the pitch", "2 → 4", "2026-05-06"),
+    row("perseverance", "legend"),
+    row("mochi brownies", "1"),
+    row("all-out effort", "1 → 6", "2026-07-14"),
+    row("a pizza", "1"),
+  ];
+
+  it("orders by rank, then refining first, then the seal's order — and numbers it", () => {
+    const book = bookEntries(refining);
+    expect(book.map((e) => [e.n, e.entry.name])).toEqual([
+      [1, "all-out effort"],
+      [2, "mochi brownies"],
+      [3, "a pizza"],
+      [4, "the pitch"],
+      [5, "perseverance"],
+    ]);
+    expect(book[0].rankLabel).toBe("rank 1");
+    expect(book[3].rankLabel).toBe("rank 2");
+    expect(book[4].rankLabel).toBe("legend"); // a worded rank keeps its word, last
+  });
+
+  it("overlays a mark's since, flags it unsealed, and lets the seal's win", () => {
+    const book = bookEntries(refining, {
+      "a pizza": { since: "2026-09-05" },
+      "all-out effort": { since: "2026-01-01" }, // the seal already dates it
+    });
+    const pizza = book.find((e) => e.entry.name === "a pizza")!;
+    expect(pizza.since).toBe("2026-09-05");
+    expect(pizza.unsealed).toBe(true);
+    expect(pizza.n).toBe(2); // moved up beside the other refining rank 1
+    const effort = book.find((e) => e.entry.name === "all-out effort")!;
+    expect(effort.since).toBe("2026-07-14");
+    expect(effort.unsealed).toBe(false);
+  });
+
+  it("drops an entry with an unsealed cast from the book", () => {
+    const book = bookEntries(refining, {
+      "a pizza": { since: "2026-09-05", cast: { date: "2026-09-05" } },
+    });
+    expect(book.map((e) => e.entry.name)).not.toContain("a pizza");
+    expect(book.map((e) => e.n)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("counts the known and the moving", () => {
+    expect(bookCounts(bookEntries(refining))).toEqual({
+      known: 5,
+      refining: 2,
+    });
+    expect(bookCounts([])).toEqual({ known: 0, refining: 0 });
+  });
+
+  it("pages ten entries with a header at every rank change, repeated across a break", () => {
+    const many = Array.from({ length: 13 }, (_, i) =>
+      row(`r1-${i}`, "1"),
+    ).concat(row("r2", "2"));
+    const book = bookEntries(many);
+    expect(bookPageCount(book.length)).toBe(2);
+    const p1 = bookPage(book, 0);
+    expect(p1[0]).toEqual({ kind: "header", label: "rank 1", count: 13 });
+    expect(p1.filter((r) => r.kind === "entry")).toHaveLength(10);
+    const p2 = bookPage(book, 1);
+    expect(
+      p2.map((r) => (r.kind === "header" ? `#${r.label}` : r.entry.entry.name)),
+    ).toEqual(["#rank 1", "r1-10", "r1-11", "r1-12", "#rank 2", "r2"]);
+  });
+
+  it("never has zero pages, and reads the status line the pager's way", () => {
+    expect(bookPageCount(0)).toBe(1);
+    expect(bookPageCount(10)).toBe(1);
+    expect(bookPageCount(11)).toBe(2);
+    expect(bookStatus(20, 0)).toBe("1-10/20 · 50%");
+    expect(bookStatus(21, 2)).toBe("21-21/21 · 100%");
+    expect(bookStatus(7, 0)).toBe("1-7/7 · 100%");
+    expect(bookStatus(0, 0)).toBe("0/0");
+  });
+
+  it("reads a rank's leading number, or none", () => {
+    expect(bookRankKey("1 → 6")).toBe(1);
+    expect(bookRankKey("7")).toBe(7);
+    expect(bookRankKey("legend")).toBe(Number.POSITIVE_INFINITY);
   });
 });
 
