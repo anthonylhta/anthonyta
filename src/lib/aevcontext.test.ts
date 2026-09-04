@@ -6,6 +6,7 @@ import {
   apertureHistDay,
   apertureHistPath,
   FIN_CONTEXT,
+  GU_MARKS_CONTEXT,
   GYM_CONTEXT,
   JOBS_CONTEXT,
   MEALS_CONTEXT,
@@ -17,6 +18,7 @@ import { AGENDA_PATH } from "./agendastore";
 import { APERTURE_PATH } from "./aperturestore";
 import { generateMk, open, seal, type EnvelopeMeta } from "./crypto";
 import { FIN_PATH } from "./finstore";
+import { GU_MARKS_PATH } from "./gumarksstore";
 import { GYM_PATH } from "./gymstore";
 import { JOBS_PATH } from "./jobsstore";
 import { MEALS_PATH } from "./mealsstore";
@@ -33,6 +35,7 @@ const STORES = [
   { name: "meals", ctx: MEALS_CONTEXT, path: MEALS_PATH },
   { name: "agenda", ctx: AGENDA_CONTEXT, path: AGENDA_PATH },
   { name: "jobs", ctx: JOBS_CONTEXT, path: JOBS_PATH },
+  { name: "gu-marks", ctx: GU_MARKS_CONTEXT, path: GU_MARKS_PATH },
 ];
 
 const meta: EnvelopeMeta = { n: "x.json", t: "application/json", s: 3 };

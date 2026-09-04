@@ -11,6 +11,7 @@ import { BRIEFING_PATH } from "./briefingstore";
 import { BACKUP_STAMP_PATH } from "./chores";
 import { FIN_PATH, SNAP_INDEX_PATH } from "./finstore";
 import { GYM_PATH } from "./gymstore";
+import { GU_MARKS_PATH } from "./gumarksstore";
 import { JOBS_PATH } from "./jobsstore";
 import { KEYSTORE_PATH } from "./inbox";
 import { LAYOUT_PATH } from "./layoutstore";
@@ -92,6 +93,11 @@ describe("drift guards", () => {
       action: "rewrite",
       kind: "envelope",
       context: JOBS_PATH,
+    });
+    expect(classifyKey(GU_MARKS_PATH)).toEqual({
+      action: "rewrite",
+      kind: "envelope",
+      context: GU_MARKS_PATH,
     });
     // The aperture envelope: sealed by the sync script rather than a browser,
     // but MK-sealed AEV2 all the same — unclassified it silently blocked every
