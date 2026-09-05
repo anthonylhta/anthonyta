@@ -990,6 +990,25 @@ describe("aperture — the refinement queue", () => {
     expect(out?.sealed.refining).toEqual([entry]);
   });
 
+  it("carries a start day, and rejects one that is not a day", () => {
+    const begun = withSealed({ refining: [{ ...entry, since: "2026-09-05" }] });
+    expect(normalizeAperture(begun)).toEqual(begun);
+    expect(
+      normalizeAperture(
+        withSealed({ refining: [{ ...entry, since: "5 sep" }] }),
+      ),
+    ).toBeNull();
+  });
+
+  it("holds two hundred rows and not one more — the book is paged, the envelope is not", () => {
+    const rows = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...entry, name: `gu ${i}` }));
+    expect(
+      normalizeAperture(withSealed({ refining: rows(200) })),
+    ).not.toBeNull();
+    expect(normalizeAperture(withSealed({ refining: rows(201) }))).toBeNull();
+  });
+
   it("hard-rejects a present-but-malformed queue", () => {
     const bad = (v: unknown) =>
       expect(normalizeAperture(withSealed({ refining: v }))).toBeNull();
@@ -999,7 +1018,7 @@ describe("aperture — the refinement queue", () => {
     bad([{ ...entry, test: "" }]); // no test is no entry — the row's whole point
     bad([{ ...entry, needs: "" }]); // an empty line is malformed, not silence
     bad([{ ...entry, test: "x".repeat(401) }]); // past the prose ceiling
-    bad(Array.from({ length: 25 }, (_, i) => ({ ...entry, name: `r${i}` }))); // past the ceiling
+    bad(Array.from({ length: 201 }, (_, i) => ({ ...entry, name: `r${i}` }))); // past the ceiling (200 — the book is paged)
   });
 });
 

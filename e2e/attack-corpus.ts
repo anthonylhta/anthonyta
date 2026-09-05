@@ -184,6 +184,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET", "PUT"],
   },
   {
+    routeKey: "/api/gu-marks",
+    probe: "/api/gu-marks",
+    shape: "owner-api",
+    methods: ["GET", "PUT"],
+  },
+  {
     routeKey: "/api/jobs",
     probe: "/api/jobs",
     shape: "owner-api",

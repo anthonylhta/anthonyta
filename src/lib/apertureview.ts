@@ -6,6 +6,7 @@ import {
   type ApertureCondition,
   type ApertureDoc,
   type ApertureGu,
+  type ApertureRefinement,
   type ApertureStage,
   type ApertureStreak,
   type ApertureTrial,
@@ -699,6 +700,144 @@ export function castsThisMonth(
   return {
     casts: inMonth,
     stones: inMonth.reduce((sum, c) => sum + (c.stones ?? 0), 0),
+  };
+}
+
+// --- the book (ADR 0175) ---------------------------------------------------------
+
+/** One entry of the gu book as the page reads it: the sealed row plus the
+ *  effective start (the seal's `since`, else the site's own mark). */
+export interface BookEntry {
+  entry: ApertureRefinement;
+  /** 1-based running number in display order — a position, not an id. */
+  n: number;
+  /** The rank's leading number for grouping; a rank with no number sorts last. */
+  rankKey: number;
+  /** The group header this entry sits under: "rank 1", or the rank's own word. */
+  rankLabel: string;
+  since: string | null;
+  /** True when the start came from the mark store rather than the seal. */
+  unsealed: boolean;
+}
+
+/** The marks the page overlays on the seal — the shape lib/gumarks stores. */
+export interface BookMarks {
+  [name: string]: { since?: string; cast?: { date: string } } | undefined;
+}
+
+/** Ten to a page: the old-school menu's fixed window. */
+export const BOOK_PAGE = 10;
+
+/** The rank's leading number, or +∞ for a rank that is only a word. */
+export function bookRankKey(rank: string): number {
+  const m = /^\s*(\d+)/.exec(rank);
+  return m ? Number(m[1]) : Number.POSITIVE_INFINITY;
+}
+
+function bookRankLabel(rank: string, key: number): string {
+  return Number.isFinite(key) ? `rank ${key}` : rank.trim();
+}
+
+/**
+ * The book in display order: by rank, then entries being refined before the
+ * merely known, then the seal's own order — and numbered in that order. An
+ * entry with an unsealed CAST is not in the book at all: on the site it has
+ * already left for the month's casts, and Wednesday's seal will agree.
+ */
+export function bookEntries(
+  refining: readonly ApertureRefinement[],
+  marks: BookMarks = {},
+): BookEntry[] {
+  const rows = refining
+    .map((entry, i) => {
+      const mark = marks[entry.name];
+      const since = entry.since ?? mark?.since ?? null;
+      return {
+        entry,
+        i,
+        since,
+        unsealed: entry.since === undefined && since !== null,
+        cast: mark?.cast !== undefined,
+        rankKey: bookRankKey(entry.rank),
+      };
+    })
+    .filter((r) => !r.cast)
+    .sort(
+      (a, b) =>
+        a.rankKey - b.rankKey ||
+        Number(a.since === null) - Number(b.since === null) ||
+        a.i - b.i,
+    );
+  return rows.map((r, idx) => ({
+    entry: r.entry,
+    n: idx + 1,
+    rankKey: r.rankKey,
+    rankLabel: bookRankLabel(r.entry.rank, r.rankKey),
+    since: r.since,
+    unsealed: r.unsealed,
+  }));
+}
+
+export type BookRow =
+  | { kind: "header"; label: string; count: number }
+  | { kind: "entry"; entry: BookEntry };
+
+/** How many pages a book of `total` entries fills — never zero, so an empty
+ *  window still has a page to stand on. */
+export function bookPageCount(total: number, per = BOOK_PAGE): number {
+  return Math.max(1, Math.ceil(total / per));
+}
+
+/**
+ * One page of the book: its `per` entries with a group header wherever the
+ * rank changes — repeated at the top of a page whose first entry continues a
+ * rank from the page before, so no page opens without saying where it is.
+ * Headers ride outside the count; a page is ten ENTRIES.
+ */
+export function bookPage(
+  entries: readonly BookEntry[],
+  page: number,
+  per = BOOK_PAGE,
+): BookRow[] {
+  const counts = new Map<string, number>();
+  for (const e of entries)
+    counts.set(e.rankLabel, (counts.get(e.rankLabel) ?? 0) + 1);
+  const out: BookRow[] = [];
+  let last: string | null = null;
+  for (const entry of entries.slice(page * per, (page + 1) * per)) {
+    if (entry.rankLabel !== last) {
+      out.push({
+        kind: "header",
+        label: entry.rankLabel,
+        count: counts.get(entry.rankLabel) ?? 0,
+      });
+      last = entry.rankLabel;
+    }
+    out.push({ kind: "entry", entry });
+  }
+  return out;
+}
+
+/** The status line's left half, in the pager's idiom: "1-10/20 · 50%". */
+export function bookStatus(
+  total: number,
+  page: number,
+  per = BOOK_PAGE,
+): string {
+  if (total === 0) return "0/0";
+  const lo = page * per + 1;
+  const hi = Math.min(total, (page + 1) * per);
+  return `${lo}-${hi}/${total} · ${Math.round((hi / total) * 100)}%`;
+}
+
+/** The band header's right half: what is known, and how much of it is moving. */
+export function bookCounts(entries: readonly BookEntry[]): {
+  known: number;
+  refining: number;
+} {
+  return {
+    known: entries.length,
+    refining: entries.filter((e) => e.since !== null).length,
   };
 }
 

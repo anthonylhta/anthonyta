@@ -1,24 +1,55 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  checkSeqAndRemember,
+  rememberSavedSeq,
+  SeqAlarm,
+} from "@/components/SeqAlarm";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
-import type { ApertureCast, ApertureRefinement } from "@/lib/aperture";
+import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
+import type { ApertureCast } from "@/lib/aperture";
 import {
   almanacGroups,
+  type AlmanacRead,
+  BOOK_PAGE,
+  bookCounts,
+  bookEntries,
+  type BookEntry,
+  bookPage,
+  bookPageCount,
+  bookStatus,
   castsThisMonth,
   detailStatus,
   experienceBudget,
   feedingDot,
   feedingLabel,
+  type GuBlock,
   guBlocks,
   guCensus,
-  guReads,
-  type AlmanacRead,
-  type GuBlock,
   type GuRead,
+  guReads,
 } from "@/lib/apertureview";
 import { recoveredThisWeek } from "@/lib/fin";
+import {
+  EMPTY_GU_MARKS,
+  normalizeGuMarks,
+  reconcileMarks,
+  unsealedCasts,
+  withCast,
+  withSince,
+  type GuCastMark,
+  type GuMarksConfig,
+} from "@/lib/gumarks";
 import { aud } from "@/lib/money";
+import { nextSeq } from "@/lib/seqrule";
 import { useApertureDoc } from "./useApertureDoc";
 
 /**
@@ -64,7 +95,139 @@ export function GuInner({
    *  page counts from the same midnight. */
   today: string;
 }) {
-  const { status, doc, fin, dataErr } = useApertureDoc(offline);
+  const { status, doc, fin, dataErr, openItem, sealItem } =
+    useApertureDoc(offline);
+
+  // --- the book's marks: the owner's word, a rider under the same key ----------
+  // Loaded once the document is open, retired by `reconcileMarks` as the seal
+  // catches up, written back with the jobs ledger's seal → PUT → retry-once
+  // dance (ADR 0175). The marks leave with the document.
+  const [marks, setMarks] = useState<GuMarksConfig | null>(null);
+  const [marksExisted, setMarksExisted] = useState(false);
+  const [marksAlarm, setMarksAlarm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const hasDoc = doc !== null;
+  const [hadDoc, setHadDoc] = useState(hasDoc);
+  if (hadDoc !== hasDoc) {
+    setHadDoc(hasDoc);
+    if (!hasDoc) {
+      setMarks(null);
+      setMarksExisted(false);
+      setNotice(null);
+    }
+  }
+
+  const putMarks = useCallback(
+    async (
+      next: GuMarksConfig,
+      prior: GuMarksConfig,
+      existed: boolean,
+    ): Promise<
+      { state: "ok"; written: GuMarksConfig } | { state: "conflict" | "failed" }
+    > => {
+      // Bump the sealed write counter (58b); prior = the newer of what was
+      // loaded and next itself (a 409-dance rebuild carries the fresher seq).
+      const written = {
+        ...next,
+        seq: Math.max(nextSeq(prior), nextSeq(next)),
+      };
+      const bytes = new TextEncoder().encode(JSON.stringify(written));
+      const sealed = await sealItem(
+        { n: "gu-marks.json", t: "application/json", s: bytes.length },
+        bytes,
+        GU_MARKS_CONTEXT,
+      );
+      const res = await fetch("/api/gu-marks", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/octet-stream",
+          ...(existed ? { "x-gu-marks-overwrite": "1" } : {}),
+        },
+        body: new Blob([sealed as BlobPart]),
+      });
+      if (res.status === 409) return { state: "conflict" };
+      if (!res.ok) return { state: "failed" };
+      rememberSavedSeq("gu-marks", written);
+      return { state: "ok", written };
+    },
+    [sealItem],
+  );
+
+  const fetchMarks = useCallback(async (): Promise<{
+    cfg: GuMarksConfig;
+    existed: boolean;
+  }> => {
+    const res = await fetch("/api/gu-marks");
+    if (res.status === 404) return { cfg: EMPTY_GU_MARKS, existed: false };
+    if (res.status !== 200) throw new Error(`gu-marks: ${res.status}`);
+    const { bytes } = await openItem(
+      new Uint8Array(await res.arrayBuffer()),
+      GU_MARKS_CONTEXT,
+    );
+    const cfg = normalizeGuMarks(JSON.parse(new TextDecoder().decode(bytes)));
+    if (!cfg) throw new Error("gu-marks: bad shape");
+    return { cfg, existed: true };
+  }, [openItem]);
+
+  useEffect(() => {
+    if (!doc) return;
+    let cancelled = false;
+    (async () => {
+      let loaded: { cfg: GuMarksConfig; existed: boolean };
+      try {
+        loaded = await fetchMarks();
+      } catch {
+        if (!cancelled) setNotice("marks unreachable — reload to retry");
+        return;
+      }
+      if (cancelled) return;
+      // Retire what the seal has caught up with. The write-back is best-effort:
+      // the page already reads the settled record either way.
+      const settled = reconcileMarks(loaded.cfg, doc.sealed.refining ?? []);
+      setMarks(settled);
+      setMarksExisted(loaded.existed);
+      void checkSeqAndRemember("gu-marks", loaded.cfg).then((rolled) => {
+        if (rolled && !cancelled) setMarksAlarm(true);
+      });
+      if (settled !== loaded.cfg && loaded.existed)
+        void putMarks(settled, loaded.cfg, true).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, fetchMarks, putMarks]);
+
+  /** Apply a pure transform, seal, PUT — retrying once against a fresh record
+   *  on a 409 (the phone and the desk may both have marked something). */
+  async function saveMarks(
+    apply: (base: GuMarksConfig) => GuMarksConfig,
+  ): Promise<void> {
+    if (!marks || !doc) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      let base = marks;
+      let existed = marksExisted;
+      let r = await putMarks(apply(base), base, existed);
+      if (r.state === "conflict") {
+        const fresh = await fetchMarks();
+        base = reconcileMarks(fresh.cfg, doc.sealed.refining ?? []);
+        existed = true;
+        r = await putMarks(apply(base), base, existed);
+      }
+      if (r.state !== "ok") {
+        setNotice("could not save the mark — try again");
+        return;
+      }
+      setMarks(r.written);
+      setMarksExisted(true);
+    } catch {
+      setNotice("could not save the mark — try again");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const blocks = useMemo(
     () => (doc ? guBlocks(doc.sealed.paths, today, repoPushes) : []),
@@ -75,9 +238,23 @@ export function GuInner({
     [doc, today, repoPushes],
   );
   const census = useMemo(() => guCensus(blocks, held), [blocks, held]);
-  const month = useMemo(
-    () => castsThisMonth(doc?.sealed.consumables?.casts ?? [], today),
-    [doc, today],
+  // The month's casts: the seal's, plus the site's own unsealed ones — a cast
+  // marked from the pane joins the meter at once and reads "unsealed" until
+  // Wednesday's seal carries it.
+  const month = useMemo(() => {
+    const pending =
+      marks && doc ? unsealedCasts(marks, doc.sealed.refining ?? []) : [];
+    return {
+      ...castsThisMonth(
+        [...(doc?.sealed.consumables?.casts ?? []), ...pending],
+        today,
+      ),
+      unsealed: new Set(pending.map((c) => `${c.date}|${c.name}`)),
+    };
+  }, [doc, marks, today]);
+  const book = useMemo(
+    () => bookEntries(doc?.sealed.refining ?? [], marks?.marks ?? {}),
+    [doc, marks],
   );
 
   switch (detailStatus(status, dataErr, doc)) {
@@ -163,7 +340,16 @@ export function GuInner({
           {month.casts.length === 0 ? (
             <p className="mt-2.5 text-xs text-muted">none cast this month</p>
           ) : (
-            <CastsFold casts={month.casts} stones={month.stones} />
+            <CastsFold
+              casts={month.casts}
+              stones={month.stones}
+              unsealed={month.unsealed}
+              onClear={
+                busy
+                  ? undefined
+                  : (name) => saveMarks((b) => withCast(b, name, null))
+              }
+            />
           )}
         </Section>
       )}
@@ -173,10 +359,33 @@ export function GuInner({
       )}
 
       {refining && refining.length > 0 && (
-        <Section label="refining">
-          <RefiningRows entries={refining} />
+        <Section label="gu known" right={countsLine(bookCounts(book))}>
+          {marksAlarm && (
+            <div className="mb-3">
+              <SeqAlarm what="gu marks" />
+            </div>
+          )}
+          {book.length === 0 ? (
+            <p className="text-xs text-muted">
+              every known gu is cast — the seal turns the page
+            </p>
+          ) : (
+            <BookBand
+              entries={book}
+              today={today}
+              busy={busy || marks === null}
+              onSince={(name, since) =>
+                void saveMarks((b) => withSince(b, name, since))
+              }
+              onCast={(name, cast) =>
+                void saveMarks((b) => withCast(b, name, cast))
+              }
+            />
+          )}
+          {notice && <p className="mt-2 text-[11px] text-amber">{notice}</p>}
           <Flavor>
-            the recipe book&apos;s open page — nothing here is held.
+            the book of every gu known at his level — a page to be read, never a
+            list owed. ▸ marks one being refined.
           </Flavor>
         </Section>
       )}
@@ -192,12 +401,31 @@ function censusLine(census: { total: number; rocks: number }): string {
   return `${held} · ${census.rocks} rock${census.rocks === 1 ? "" : "s"}`;
 }
 
+/** The book header's right side: what is known, and how much of it is moving. */
+function countsLine(c: { known: number; refining: number }): string {
+  const known = `${c.known} known`;
+  return c.refining === 0 ? known : `${known} · ${c.refining} refining`;
+}
+
 /** One bordered band, labelled in the register the inward page reads in. */
-function Section({ label, children }: { label: string; children: ReactNode }) {
+function Section({
+  label,
+  right,
+  children,
+}: {
+  label: string;
+  right?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="border-t border-hairline px-4 py-4">
-      <p className="mb-2.5 text-[11px] uppercase tracking-[0.2em] text-muted">
-        {label}
+      <p className="mb-2.5 flex items-baseline gap-2 text-[11px] uppercase tracking-[0.2em] text-muted">
+        <span>{label}</span>
+        {right && (
+          <span className="ml-auto normal-case tracking-normal tabular-nums">
+            {right}
+          </span>
+        )}
       </p>
       {children}
     </div>
@@ -382,15 +610,20 @@ function GuRow({ read }: { read: GuRead }) {
   );
 }
 
-/** The month's casts, folded under one row that carries their count and sum. */
+/** The month's casts, folded under one row that carries their count and sum —
+ *  open by itself when one of them is the site's own, still unsealed. */
 function CastsFold({
   casts,
   stones,
+  unsealed,
+  onClear,
 }: {
   casts: ApertureCast[];
   stones: number;
+  unsealed: ReadonlySet<string>;
+  onClear?: (name: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(unsealed.size > 0);
   return (
     <div className="mt-2.5">
       <button
@@ -407,22 +640,56 @@ function CastsFold({
       </button>
       {open && (
         <div className="mt-1 mb-1 ml-5 flex flex-col gap-1">
-          {casts.map((c, i) => (
-            <CastRow key={`${c.date}-${i}`} cast={c} />
-          ))}
+          {casts.map((c, i) => {
+            const pending = unsealed.has(`${c.date}|${c.name}`);
+            return (
+              <CastRow
+                key={`${c.date}-${i}`}
+                cast={c}
+                unsealed={pending}
+                onClear={pending && onClear ? () => onClear(c.name) : undefined}
+              />
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-/** One cast: when, what, of what kind, and what it cost. */
-function CastRow({ cast }: { cast: ApertureCast }) {
+/** One cast: when, what, of what kind, and what it cost — and, for one the
+ *  site marked itself, that it waits on the seal, with the way back. */
+function CastRow({
+  cast,
+  unsealed,
+  onClear,
+}: {
+  cast: ApertureCast;
+  unsealed: boolean;
+  onClear?: () => void;
+}) {
   return (
     <p className="flex flex-wrap items-baseline gap-x-2 text-xs tabular-nums">
       <span className="text-muted">{cast.date}</span>
       <span className="text-fg/90">{cast.name}</span>
       {cast.type && <span className="text-muted/70">{cast.type}</span>}
+      {unsealed && (
+        <span className="text-[10px] text-muted/60">
+          unsealed
+          {onClear && (
+            <>
+              {" · "}
+              <button
+                type="button"
+                onClick={onClear}
+                className="hover:text-amber"
+              >
+                clear
+              </button>
+            </>
+          )}
+        </span>
+      )}
       {cast.stones !== undefined && (
         <span className="ml-auto text-muted">{aud(cast.stones / 100)}</span>
       )}
@@ -591,69 +858,413 @@ function AlmanacRow({
   );
 }
 
-/** The queue, one folding row per entry, in the emitter's order — a rank is a
- *  word here ("2 → 4", "legend"), so nothing sorts on it. */
-function RefiningRows({ entries }: { entries: ApertureRefinement[] }) {
-  const { open, toggle } = useFolds();
+// --- the book (ADR 0175) ---------------------------------------------------------
+
+const inputCls =
+  "border border-hairline bg-transparent px-2 py-1 font-mono text-[13px] text-fg placeholder:text-muted focus:border-amber focus:outline-none disabled:opacity-50";
+const btnCls =
+  "border border-hairline px-2 py-1 text-muted transition-colors hover:border-amber hover:text-amber disabled:opacity-30";
+
+const MONTHS = [
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+];
+
+/** `2026-09-05` → `5 sep` — the almanac's day word, for a start date. */
+function sinceWord(iso: string): string {
+  const m = Number(iso.slice(5, 7));
+  return `${Number(iso.slice(8, 10))} ${MONTHS[m - 1] ?? ""}`.trim();
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * The book as an old-school menu (ADR 0175): one line per gu, ten to a page,
+ * rank as inline group headers, one description pane for the selected row —
+ * beside the list on desktop, under it on the phone — and a status line in
+ * the pager's idiom. The band's height no longer moves with the count.
+ *
+ * Selection is the entry's NAME, so a row that re-sorts (a mark sets its
+ * start and it rises to the top of its rank) stays selected and the page
+ * follows it; the page is derived, never stored. Keys work only while the
+ * list has focus — arrows primary, j/k/n/p as aliases — so nothing here
+ * fights ⌘K. No memory: every unlock opens on row one.
+ */
+function BookBand({
+  entries,
+  today,
+  busy,
+  onSince,
+  onCast,
+}: {
+  entries: BookEntry[];
+  today: string;
+  busy: boolean;
+  onSince: (name: string, since: string | null) => void;
+  onCast: (name: string, cast: GuCastMark | null) => void;
+}) {
+  const [selName, setSelName] = useState<string | null>(null);
+  const [castOpen, setCastOpen] = useState(false);
+  const idBase = useId();
+  const selIdx = Math.max(
+    0,
+    entries.findIndex((e) => e.entry.name === selName),
+  );
+  const page = Math.floor(selIdx / BOOK_PAGE);
+  const pages = bookPageCount(entries.length);
+  const selected = entries[selIdx];
+  const rows = bookPage(entries, page);
+
+  const select = (i: number) => {
+    const clamped = Math.max(0, Math.min(entries.length - 1, i));
+    setSelName(entries[clamped].entry.name);
+    setCastOpen(false);
+  };
+  const flip = (d: number) => {
+    const next = Math.max(0, Math.min(pages - 1, page + d));
+    if (next !== page) select(next * BOOK_PAGE);
+  };
+  const onKey = (ev: React.KeyboardEvent) => {
+    switch (ev.key) {
+      case "ArrowDown":
+      case "j":
+        select(selIdx + 1);
+        break;
+      case "ArrowUp":
+      case "k":
+        select(selIdx - 1);
+        break;
+      case "ArrowRight":
+      case "n":
+        flip(1);
+        break;
+      case "ArrowLeft":
+      case "p":
+        flip(-1);
+        break;
+      case "Home":
+        select(0);
+        break;
+      case "End":
+        select(entries.length - 1);
+        break;
+      default:
+        return;
+    }
+    ev.preventDefault();
+  };
+  const optId = (n: number) => `${idBase}-${n}`;
+
   return (
-    <div className="flex flex-col gap-1.5">
-      {entries.map((r, i) => {
-        const key = `${r.name}-${i}`;
-        return (
-          <RefiningRow
-            key={key}
-            entry={r}
-            open={open.has(key)}
-            onToggle={() => toggle(key)}
+    <>
+      <div className="sm:grid sm:grid-cols-[11fr_9fr]">
+        <div
+          role="listbox"
+          tabIndex={0}
+          aria-label="the gu book"
+          aria-activedescendant={selected ? optId(selected.n) : undefined}
+          onKeyDown={onKey}
+          className="min-h-[264px] outline-none focus-visible:ring-1 focus-visible:ring-hairline"
+        >
+          {rows.map((row) =>
+            row.kind === "header" ? (
+              <div
+                key={`h-${row.label}`}
+                className="flex items-baseline gap-2 text-[11px] leading-[22px] tracking-[0.2em] text-muted uppercase"
+              >
+                <span>{row.label}</span>
+                <span aria-hidden className="h-px flex-1 bg-hairline" />
+                <span className="tracking-normal tabular-nums">
+                  {row.count}
+                </span>
+              </div>
+            ) : (
+              <BookRow
+                key={row.entry.entry.name}
+                id={optId(row.entry.n)}
+                entry={row.entry}
+                selected={row.entry.n - 1 === selIdx}
+                onSelect={() => select(row.entry.n - 1)}
+              />
+            ),
+          )}
+        </div>
+        {selected && (
+          <BookPane
+            entry={selected}
+            today={today}
+            busy={busy}
+            castOpen={castOpen}
+            setCastOpen={setCastOpen}
+            onSince={onSince}
+            onCast={onCast}
           />
-        );
-      })}
+        )}
+      </div>
+      <div className="mt-2 flex items-baseline justify-between gap-3 text-[11px] tabular-nums text-muted">
+        <span>{bookStatus(entries.length, page)}</span>
+        <span className="flex items-baseline gap-2">
+          <span className="hidden text-muted/60 sm:inline">
+            ↑↓ move · ←→ page
+          </span>
+          <button
+            type="button"
+            onClick={() => flip(-1)}
+            disabled={page === 0}
+            aria-label="previous page"
+            className="px-1 hover:text-amber disabled:opacity-30"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={() => flip(1)}
+            disabled={page >= pages - 1}
+            aria-label="next page"
+            className="px-1 hover:text-amber disabled:opacity-30"
+          >
+            ›
+          </button>
+        </span>
+      </div>
+    </>
+  );
+}
+
+/** One line of the book: number, the refining mark, the name, and on desktop
+ *  the start date; the highlight bar is the terminal's, not a cursor glyph. */
+function BookRow({
+  id,
+  entry,
+  selected,
+  onSelect,
+}: {
+  id: string;
+  entry: BookEntry;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div
+      id={id}
+      role="option"
+      aria-selected={selected}
+      onClick={onSelect}
+      className={`-mx-1.5 flex cursor-pointer items-baseline gap-2 px-1.5 text-xs leading-[22px] hover:bg-fg/5 ${
+        selected ? "bg-fg/8 shadow-[inset_3px_0_0_var(--essence)]" : ""
+      }`}
+    >
+      <span className="w-5 shrink-0 text-[11px] tabular-nums text-muted/50">
+        {pad(entry.n)}
+      </span>
+      <span
+        aria-hidden
+        className={`w-3 shrink-0 text-[10px] ${
+          entry.since ? "text-(--essence)" : "text-muted/40"
+        }`}
+      >
+        {entry.since ? "▸" : "·"}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-fg/90">
+        {entry.entry.name}
+      </span>
+      {entry.since && (
+        <span className="hidden shrink-0 text-[11px] tabular-nums text-(--essence-soft) sm:inline">
+          since {sinceWord(entry.since)}
+        </span>
+      )}
     </div>
   );
 }
 
-/**
- * One entry in the queue: what it would be and at what rank on the row, its
- * type beside them where there is room; unfolded, what would prove it and what
- * it still wants. On the phone the type rides in the unfold instead.
- */
-function RefiningRow({
-  entry,
-  open,
-  onToggle,
-}: {
-  entry: ApertureRefinement;
-  open: boolean;
-  onToggle: () => void;
-}) {
+function PaneLine({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-baseline gap-2 text-left text-xs"
-      >
-        <Chevron open={open} />
-        <span className="min-w-0 flex-1 truncate text-fg/80 sm:w-[208px] sm:flex-none">
-          {entry.name}
-        </span>
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted sm:ml-0">
-          rank {entry.rank}
-        </span>
-        <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted/60 sm:block">
-          {entry.type}
-        </span>
-      </button>
-      {open && (
-        <div className="mt-0.5 mb-1 ml-5 flex flex-col gap-0.5 text-[11px] text-muted">
-          <p className="text-muted/60 sm:hidden">{entry.type}</p>
-          <p>{entry.test}</p>
-          {entry.needs && (
-            <p className="text-muted/70">needs · {entry.needs}</p>
-          )}
-        </div>
+    <p className="mt-0.5 flex gap-2">
+      <span className="w-9 shrink-0 text-muted/60">{label}</span>
+      <span className="min-w-0">{children}</span>
+    </p>
+  );
+}
+
+/**
+ * The selected entry, read in full, and the two marks the owner can make:
+ * refining (any entry — cleared by a second tap while unsealed; a start the
+ * seal carries is shown, not toggled) and cast (consumables only, through the
+ * small form). The rule beside the button is the rule from the ADR.
+ */
+function BookPane({
+  entry,
+  today,
+  busy,
+  castOpen,
+  setCastOpen,
+  onSince,
+  onCast,
+}: {
+  entry: BookEntry;
+  today: string;
+  busy: boolean;
+  castOpen: boolean;
+  setCastOpen: (open: boolean) => void;
+  onSince: (name: string, since: string | null) => void;
+  onCast: (name: string, cast: GuCastMark | null) => void;
+}) {
+  const e = entry.entry;
+  const consumable = /^consumable/i.test(e.type);
+  const tag = "text-[10px] text-muted/60";
+  return (
+    <div className="mt-3 text-[11px] leading-[1.55] text-muted sm:mt-0 sm:ml-3.5 sm:border-l sm:border-hairline sm:pl-3.5">
+      <p className="mb-0.5 text-xs text-fg">
+        <span className="text-[11px] tabular-nums text-muted/50">
+          {pad(entry.n)}
+        </span>{" "}
+        {e.name}
+      </p>
+      <PaneLine label="is">
+        rank {e.rank} · {e.type}
+        {entry.since && (
+          <>
+            {" "}
+            · refining since {sinceWord(entry.since)}
+            {entry.unsealed && " · unsealed"}
+          </>
+        )}
+      </PaneLine>
+      <PaneLine label="test">{e.test}</PaneLine>
+      {e.needs && <PaneLine label="needs">{e.needs}</PaneLine>}
+      <div className="mt-2.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1.5 border-t border-hairline/60 pt-2">
+        {e.since !== undefined ? (
+          <>
+            <span className="text-(--essence)">
+              ● refining · since {sinceWord(e.since)}
+            </span>
+            <span className={tag}>sealed</span>
+          </>
+        ) : entry.since ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onSince(e.name, null)}
+              disabled={busy}
+              className="text-(--essence) hover:text-amber disabled:opacity-50"
+            >
+              ● refining · since {sinceWord(entry.since)}
+            </button>
+            <span className={tag}>unsealed · folds in at the check-in</span>
+            <span className={tag}>tap to clear</span>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => onSince(e.name, today)}
+              disabled={busy}
+              className="hover:text-amber disabled:opacity-50"
+            >
+              ○ refining
+            </button>
+            <span className={tag}>
+              first material in hand + the plan to finish
+            </span>
+          </>
+        )}
+        {consumable && !castOpen && (
+          <button
+            type="button"
+            onClick={() => setCastOpen(true)}
+            disabled={busy}
+            className="ml-auto hover:text-amber disabled:opacity-50"
+          >
+            cast
+          </button>
+        )}
+      </div>
+      {consumable && castOpen && (
+        <CastForm
+          today={today}
+          busy={busy}
+          onCancel={() => setCastOpen(false)}
+          onConfirm={(cast) => {
+            setCastOpen(false);
+            onCast(e.name, cast);
+          }}
+        />
       )}
     </div>
+  );
+}
+
+/** The cast: what it cost, in dollars, and the day — today unless said otherwise. */
+function CastForm({
+  today,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  today: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (cast: GuCastMark) => void;
+}) {
+  const [dollars, setDollars] = useState("");
+  const [date, setDate] = useState(today);
+  const cents =
+    dollars.trim() === "" ? undefined : Math.round(Number(dollars) * 100);
+  const valid =
+    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+    (cents === undefined || (Number.isInteger(cents) && cents >= 0));
+  return (
+    <form
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        if (!valid) return;
+        onConfirm({ date, ...(cents !== undefined ? { stones: cents } : {}) });
+      }}
+      className="mt-2 flex flex-wrap items-center gap-2 text-xs"
+    >
+      <label className="flex items-center gap-1 text-muted">
+        $
+        <input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          value={dollars}
+          onChange={(ev) => setDollars(ev.target.value)}
+          placeholder="0.00"
+          aria-label="stones, in dollars"
+          className={`w-20 ${inputCls}`}
+        />
+      </label>
+      <input
+        type="date"
+        value={date}
+        onChange={(ev) => setDate(ev.target.value)}
+        aria-label="cast on"
+        className={inputCls}
+      />
+      <button type="submit" disabled={busy || !valid} className={btnCls}>
+        cast it
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="text-muted hover:text-amber"
+      >
+        cancel
+      </button>
+    </form>
   );
 }

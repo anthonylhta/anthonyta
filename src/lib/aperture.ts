@@ -302,7 +302,10 @@ const MAX_BEAT_CHARS = 400;
 const MAX_INHERITANCES = 12;
 const MAX_HELD_GU = 12;
 const MAX_CASTS = 60;
-const MAX_REFINING = 24;
+// The book is read ten to a page (lib/apertureview `bookPage`), so its size no
+// longer costs the page anything; the cap is an envelope-size guard, not a UI
+// one — 200 rows at the current row size stays well under 200 KB sealed.
+const MAX_REFINING = 200;
 /** The almanac's page — a year of dated feeds plus a dozen ambient ones. */
 const MAX_ALMANAC = 40;
 /** The mouths one feed can name. */
@@ -427,6 +430,12 @@ export interface ApertureRefinement {
   test: string;
   /** What is still missing. Absent = nothing named yet. */
   needs?: string;
+  /**
+   * The day active effort began — first material in hand and the plan to finish
+   * (the plan is `test`). Set by the check-in, which folds in the site's own
+   * marks (lib/gumarks); absent = known but not being refined. `YYYY-MM-DD`.
+   */
+  since?: string;
 }
 
 /**
@@ -944,14 +953,18 @@ function normRefinement(x: unknown): ApertureRefinement | null {
   // The test and what it still wants are the row's two prose lines — the killer
   // move's step ceiling, since they are read at the same width.
   if (!isProse(x.test, MAX_STEP_CHARS)) return null;
-  const { needs } = x;
+  const { needs, since } = x;
   if (needs !== undefined && !isProse(needs, MAX_STEP_CHARS)) return null;
+  // A start is a calendar day or nothing — a present-but-malformed one is a
+  // wrong fact, so it rejects the row like a bad feeding date rejects a gu.
+  if (since !== undefined && !isDay(since)) return null;
   return {
     name: x.name,
     rank: x.rank,
     type: x.type,
     test: x.test,
     ...(needs !== undefined ? { needs } : {}),
+    ...(since !== undefined ? { since } : {}),
   };
 }
 

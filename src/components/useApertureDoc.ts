@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useVault } from "@/app/files/useVault";
 import { APERTURE_CONTEXT, FIN_CONTEXT } from "@/lib/aevcontext";
 import { normalizeAperture, type ApertureDoc } from "@/lib/aperture";
+import type { EnvelopeMeta } from "@/lib/crypto";
 import { normalizeFinConfig, type FinConfig } from "@/lib/fin";
 
 /**
@@ -32,13 +33,20 @@ export interface ApertureRead {
     envelope: Uint8Array,
     context?: string,
   ) => Promise<{ bytes: Uint8Array }>;
+  /** The sealer, for a surface that writes a rider of its own (the gu book's
+   *  marks) under the same key. Throws when locked, like the vault's. */
+  sealItem: (
+    meta: EnvelopeMeta,
+    bytes: Uint8Array,
+    context?: string,
+  ) => Promise<Uint8Array>;
   doc: ApertureDoc | null;
   fin: FinConfig | null;
   dataErr: "unreachable" | "tamper" | null;
 }
 
 export function useApertureDoc(offline: boolean): ApertureRead {
-  const { status, openItem } = useVault(offline);
+  const { status, openItem, sealItem } = useVault(offline);
   const [doc, setDoc] = useState<ApertureDoc | null>(null);
   const [fin, setFin] = useState<FinConfig | null>(null);
   const [dataErr, setDataErr] = useState<"unreachable" | "tamper" | null>(null);
@@ -115,5 +123,5 @@ export function useApertureDoc(offline: boolean): ApertureRead {
     };
   }, [unlocked, openItem]);
 
-  return { status, openItem, doc, fin, dataErr };
+  return { status, openItem, sealItem, doc, fin, dataErr };
 }
