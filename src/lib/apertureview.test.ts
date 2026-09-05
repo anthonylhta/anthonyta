@@ -1830,7 +1830,11 @@ describe("apertureview — the sheet, a loud week", () => {
 describe("apertureview — the cast ledger", () => {
   const TODAY = "2026-09-06";
   const casts = [
-    { date: "2026-08-10", name: "Werri Beach + the Kiama blowhole", stones: 5000 },
+    {
+      date: "2026-08-10",
+      name: "Werri Beach + the Kiama blowhole",
+      stones: 5000,
+    },
     { date: "2026-07-19", name: "a gig", stones: 8900, type: "emotion" },
     { date: "2026-08-02", name: "a sauna", stones: 3500 },
     { date: "2026-08-02", name: "a day off the road" }, // same day, no stones
@@ -1869,7 +1873,9 @@ describe("apertureview — the cast ledger", () => {
       stones: 8500,
     });
     expect(
-      rows.map((r) => (r.kind === "header" ? `#${r.label}` : r.entry.cast.name)),
+      rows.map((r) =>
+        r.kind === "header" ? `#${r.label}` : r.entry.cast.name,
+      ),
     ).toEqual([
       "#sep 2026",
       "#aug 2026",

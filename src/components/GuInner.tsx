@@ -341,9 +341,7 @@ export function GuInner({
               {budget === null ? "—" : aud(budget / 100)}
             </span>{" "}
             this wk · spent{" "}
-            <span className="text-fg/80">
-              {aud(casts.month.stones / 100)}
-            </span>{" "}
+            <span className="text-fg/80">{aud(casts.month.stones / 100)}</span>{" "}
             this month · regenerates with the week
           </p>
           <LedgerBand
