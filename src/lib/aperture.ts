@@ -301,7 +301,9 @@ const MAX_ORIGIN_BEATS = 12;
 const MAX_BEAT_CHARS = 400;
 const MAX_INHERITANCES = 12;
 const MAX_HELD_GU = 12;
-const MAX_CASTS = 60;
+// The ledger is read ten to a page too (lib/apertureview `ledgerPage`, ADR 0176),
+// so like the book's this is an envelope-size guard, not a UI cap.
+const MAX_CASTS = 200;
 // The book is read ten to a page (lib/apertureview `bookPage`), so its size no
 // longer costs the page anything; the cap is an envelope-size guard, not a UI
 // one — 200 rows at the current row size stays well under 200 KB sealed.

@@ -886,7 +886,7 @@ describe("aperture — consumables", () => {
     });
     bad({
       budgetPct: 5,
-      casts: Array.from({ length: 61 }, () => ({
+      casts: Array.from({ length: 201 }, () => ({
         date: "2026-03-02",
         name: "x",
       })),

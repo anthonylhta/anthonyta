@@ -25,6 +25,9 @@ import {
   bookStatus,
   castReading,
   castsThisMonth,
+  ledgerEntries,
+  ledgerMonthLabel,
+  ledgerPage,
   codeSpans,
   compactDollars,
   conditionChipClass,
@@ -1821,5 +1824,105 @@ describe("apertureview — the sheet, a loud week", () => {
         latestDailyDay(["2026-03-04", "Harbour survey notes"], "2026-03-05"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("apertureview — the cast ledger", () => {
+  const TODAY = "2026-09-06";
+  const casts = [
+    { date: "2026-08-10", name: "Werri Beach + the Kiama blowhole", stones: 5000 },
+    { date: "2026-07-19", name: "a gig", stones: 8900, type: "emotion" },
+    { date: "2026-08-02", name: "a sauna", stones: 3500 },
+    { date: "2026-08-02", name: "a day off the road" }, // same day, no stones
+  ];
+
+  it("orders newest first, keeps the seal's order within a day, and numbers it", () => {
+    const led = ledgerEntries(casts);
+    expect(led.map((e) => [e.n, e.cast.name])).toEqual([
+      [1, "Werri Beach + the Kiama blowhole"],
+      [2, "a sauna"],
+      [3, "a day off the road"],
+      [4, "a gig"],
+    ]);
+    expect(led[0].month).toBe("2026-08");
+    expect(led[0].monthLabel).toBe("aug 2026");
+    expect(led[3].monthLabel).toBe("jul 2026");
+  });
+
+  it("words a month the almanac's way", () => {
+    expect(ledgerMonthLabel("2026-09")).toBe("sep 2026");
+    expect(ledgerMonthLabel("2027-01")).toBe("jan 2027");
+  });
+
+  it("opens the first page on today's month even when nothing was cast in it", () => {
+    const rows = ledgerPage(ledgerEntries(casts), 0, TODAY);
+    expect(rows[0]).toEqual({
+      kind: "header",
+      label: "sep 2026",
+      count: 0,
+      stones: 0,
+    });
+    expect(rows[1]).toEqual({
+      kind: "header",
+      label: "aug 2026",
+      count: 3,
+      stones: 8500,
+    });
+    expect(
+      rows.map((r) => (r.kind === "header" ? `#${r.label}` : r.entry.cast.name)),
+    ).toEqual([
+      "#sep 2026",
+      "#aug 2026",
+      "Werri Beach + the Kiama blowhole",
+      "a sauna",
+      "a day off the road",
+      "#jul 2026",
+      "a gig",
+    ]);
+  });
+
+  it("does not double today's header when the month has casts", () => {
+    const rows = ledgerPage(
+      ledgerEntries([{ date: "2026-09-02", name: "x", stones: 100 }, ...casts]),
+      0,
+      TODAY,
+    );
+    expect(rows.filter((r) => r.kind === "header").map((r) => r.label)).toEqual(
+      ["sep 2026", "aug 2026", "jul 2026"],
+    );
+    expect(rows[0]).toEqual({
+      kind: "header",
+      label: "sep 2026",
+      count: 1,
+      stones: 100,
+    });
+  });
+
+  it("reads an empty ledger as the running month alone", () => {
+    expect(ledgerPage([], 0, TODAY)).toEqual([
+      { kind: "header", label: "sep 2026", count: 0, stones: 0 },
+    ]);
+  });
+
+  it("pages ten casts and repeats a month's header across a page break", () => {
+    const many = Array.from({ length: 13 }, (_, i) => ({
+      date: `2026-08-${String(i + 1).padStart(2, "0")}`,
+      name: `aug-${i + 1}`,
+      stones: 100,
+    })).concat({ date: "2026-07-31", name: "jul-31", stones: 100 });
+    const led = ledgerEntries(many);
+    const p1 = ledgerPage(led, 0, TODAY);
+    expect(p1[0].kind).toBe("header"); // sep 2026, empty
+    expect(p1[1]).toEqual({
+      kind: "header",
+      label: "aug 2026",
+      count: 13,
+      stones: 1300,
+    });
+    expect(p1.filter((r) => r.kind === "cast")).toHaveLength(10);
+    const p2 = ledgerPage(led, 1, TODAY);
+    expect(
+      p2.map((r) => (r.kind === "header" ? `#${r.label}` : r.entry.cast.name)),
+    ).toEqual(["#aug 2026", "aug-3", "aug-2", "aug-1", "#jul 2026", "jul-31"]);
   });
 });
