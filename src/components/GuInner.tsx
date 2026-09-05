@@ -15,7 +15,6 @@ import {
 } from "@/components/SeqAlarm";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
-import type { ApertureCast } from "@/lib/aperture";
 import {
   almanacGroups,
   type AlmanacRead,
@@ -36,6 +35,9 @@ import {
   guCensus,
   type GuRead,
   guReads,
+  type LedgerEntry,
+  ledgerEntries,
+  ledgerPage,
 } from "@/lib/apertureview";
 import { recoveredThisWeek } from "@/lib/fin";
 import {
@@ -238,17 +240,17 @@ export function GuInner({
     [doc, today, repoPushes],
   );
   const census = useMemo(() => guCensus(blocks, held), [blocks, held]);
-  // The month's casts: the seal's, plus the site's own unsealed ones — a cast
-  // marked from the pane joins the meter at once and reads "unsealed" until
-  // Wednesday's seal carries it.
-  const month = useMemo(() => {
+  // The casts: the seal's, plus the site's own unsealed ones — a cast marked
+  // from the pane joins the meter and the ledger at once and reads "unsealed"
+  // until Wednesday's seal carries it. The month's figure feeds the meter; the
+  // ledger is every cast there has ever been (ADR 0176).
+  const casts = useMemo(() => {
     const pending =
       marks && doc ? unsealedCasts(marks, doc.sealed.refining ?? []) : [];
+    const all = [...(doc?.sealed.consumables?.casts ?? []), ...pending];
     return {
-      ...castsThisMonth(
-        [...(doc?.sealed.consumables?.casts ?? []), ...pending],
-        today,
-      ),
+      month: castsThisMonth(all, today),
+      ledger: ledgerEntries(all),
       unsealed: new Set(pending.map((c) => `${c.date}|${c.name}`)),
     };
   }, [doc, marks, today]);
@@ -321,7 +323,12 @@ export function GuInner({
       </Section>
 
       {consumables && (
-        <Section label="consumables">
+        <Section
+          label="consumables"
+          right={
+            casts.ledger.length > 0 ? `${casts.ledger.length} cast` : undefined
+          }
+        >
           {/* The allotment reads off `recoveredThisWeek`, which is a TRAILING
               seven days rather than a calendar week (lib/fin), so the line says
               "with the week" instead of naming a weekday: there is no Monday
@@ -334,23 +341,22 @@ export function GuInner({
               {budget === null ? "—" : aud(budget / 100)}
             </span>{" "}
             this wk · spent{" "}
-            <span className="text-fg/80">{aud(month.stones / 100)}</span> this
-            month · regenerates with the week
+            <span className="text-fg/80">{aud(casts.month.stones / 100)}</span>{" "}
+            this month · regenerates with the week
           </p>
-          {month.casts.length === 0 ? (
-            <p className="mt-2.5 text-xs text-muted">none cast this month</p>
-          ) : (
-            <CastsFold
-              casts={month.casts}
-              stones={month.stones}
-              unsealed={month.unsealed}
-              onClear={
-                busy
-                  ? undefined
-                  : (name) => saveMarks((b) => withCast(b, name, null))
-              }
-            />
-          )}
+          <LedgerBand
+            entries={casts.ledger}
+            unsealed={casts.unsealed}
+            today={today}
+            onClear={
+              busy
+                ? undefined
+                : (name) => saveMarks((b) => withCast(b, name, null))
+            }
+          />
+          <Flavor>
+            every cast, month by month — a ledger to be read, never a score
+          </Flavor>
         </Section>
       )}
 
@@ -610,78 +616,199 @@ function GuRow({ read }: { read: GuRead }) {
   );
 }
 
-/** The month's casts, folded under one row that carries their count and sum —
- *  open by itself when one of them is the site's own, still unsealed. */
-function CastsFold({
-  casts,
-  stones,
+/**
+ * The cast ledger (ADR 0176): every cast the seal holds, newest first, ten to a
+ * page, the month as the group header — the book's window with months where the
+ * book has ranks, and no pane, since a cast has nothing to unfold. The first
+ * page opens on the running month even when it is empty (`ledgerPage`), so the
+ * band never says "none"; the pager and the key hints appear only once there is
+ * a second page to turn to. A row the site marked itself reads "unsealed" with
+ * the way back, exactly as the fold did.
+ */
+function LedgerBand({
+  entries,
   unsealed,
+  today,
   onClear,
 }: {
-  casts: ApertureCast[];
-  stones: number;
+  entries: LedgerEntry[];
   unsealed: ReadonlySet<string>;
+  today: string;
   onClear?: (name: string) => void;
 }) {
-  const [open, setOpen] = useState(unsealed.size > 0);
+  const [selKey, setSelKey] = useState<string | null>(null);
+  const idBase = useId();
+  const keyOf = (e: LedgerEntry) => `${e.cast.date}|${e.cast.name}`;
+  const selIdx = Math.max(
+    0,
+    entries.findIndex((e) => keyOf(e) === selKey),
+  );
+  const page = Math.floor(selIdx / BOOK_PAGE);
+  const pages = bookPageCount(entries.length);
+  const selected = entries[selIdx];
+  const rows = ledgerPage(entries, page, today);
+
+  const select = (i: number) => {
+    if (entries.length === 0) return;
+    const clamped = Math.max(0, Math.min(entries.length - 1, i));
+    setSelKey(keyOf(entries[clamped]));
+  };
+  const flip = (d: number) => {
+    const next = Math.max(0, Math.min(pages - 1, page + d));
+    if (next !== page) select(next * BOOK_PAGE);
+  };
+  const onKey = (ev: React.KeyboardEvent) => {
+    switch (ev.key) {
+      case "ArrowDown":
+      case "j":
+        select(selIdx + 1);
+        break;
+      case "ArrowUp":
+      case "k":
+        select(selIdx - 1);
+        break;
+      case "ArrowRight":
+      case "n":
+        flip(1);
+        break;
+      case "ArrowLeft":
+      case "p":
+        flip(-1);
+        break;
+      case "Home":
+        select(0);
+        break;
+      case "End":
+        select(entries.length - 1);
+        break;
+      default:
+        return;
+    }
+    ev.preventDefault();
+  };
+  const optId = (n: number) => `${idBase}-${n}`;
+
   return (
-    <div className="mt-2.5">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-baseline gap-2 text-left text-xs"
+    <>
+      <div
+        role="listbox"
+        tabIndex={0}
+        aria-label="the cast ledger"
+        aria-activedescendant={selected ? optId(selected.n) : undefined}
+        onKeyDown={onKey}
+        className={`mt-2.5 outline-none ${pages > 1 ? "min-h-[264px]" : ""}`}
       >
-        <Chevron open={open} />
-        <span className="text-fg/90">{casts.length} cast this month</span>
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted">
-          {aud(stones / 100)}
-        </span>
-      </button>
-      {open && (
-        <div className="mt-1 mb-1 ml-5 flex flex-col gap-1">
-          {casts.map((c, i) => {
-            const pending = unsealed.has(`${c.date}|${c.name}`);
-            return (
-              <CastRow
-                key={`${c.date}-${i}`}
-                cast={c}
-                unsealed={pending}
-                onClear={pending && onClear ? () => onClear(c.name) : undefined}
-              />
-            );
-          })}
+        {rows.map((row) =>
+          row.kind === "header" ? (
+            <div
+              key={`h-${row.label}`}
+              className="flex items-baseline gap-2 text-[11px] leading-[22px] tracking-[0.2em] text-muted uppercase"
+            >
+              <span>{row.label}</span>
+              <span aria-hidden className="h-px flex-1 bg-hairline" />
+              <span className="tracking-normal tabular-nums">
+                {row.count === 0
+                  ? "—"
+                  : `${row.count} · ${aud(row.stones / 100)}`}
+              </span>
+            </div>
+          ) : (
+            <LedgerRow
+              key={keyOf(row.entry)}
+              id={optId(row.entry.n)}
+              entry={row.entry}
+              selected={row.entry.n - 1 === selIdx}
+              unsealed={unsealed.has(keyOf(row.entry))}
+              onSelect={() => select(row.entry.n - 1)}
+              onClear={
+                onClear && unsealed.has(keyOf(row.entry))
+                  ? () => onClear(row.entry.cast.name)
+                  : undefined
+              }
+            />
+          ),
+        )}
+      </div>
+      {pages > 1 && (
+        <div className="mt-2 flex items-baseline justify-between gap-3 text-[11px] tabular-nums text-muted">
+          <span>{bookStatus(entries.length, page)}</span>
+          <span className="flex items-baseline gap-2">
+            <span className="hidden text-muted/60 sm:inline">
+              ↑↓ move · ←→ page
+            </span>
+            <button
+              type="button"
+              onClick={() => flip(-1)}
+              disabled={page === 0}
+              aria-label="previous page"
+              className="px-1 hover:text-amber disabled:opacity-30"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              onClick={() => flip(1)}
+              disabled={page >= pages - 1}
+              aria-label="next page"
+              className="px-1 hover:text-amber disabled:opacity-30"
+            >
+              ›
+            </button>
+          </span>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-/** One cast: when, what, of what kind, and what it cost — and, for one the
- *  site marked itself, that it waits on the seal, with the way back. */
-function CastRow({
-  cast,
+/** One line of the ledger: the day of the month where the book prints its
+ *  number, the name, the kind on desktop, the stones on the right — and, for a
+ *  cast the site marked itself, that it waits on the seal, with the way back. */
+function LedgerRow({
+  id,
+  entry,
+  selected,
   unsealed,
+  onSelect,
   onClear,
 }: {
-  cast: ApertureCast;
+  id: string;
+  entry: LedgerEntry;
+  selected: boolean;
   unsealed: boolean;
+  onSelect: () => void;
   onClear?: () => void;
 }) {
+  const { cast } = entry;
   return (
-    <p className="flex flex-wrap items-baseline gap-x-2 text-xs tabular-nums">
-      <span className="text-muted">{cast.date}</span>
-      <span className="text-fg/90">{cast.name}</span>
-      {cast.type && <span className="text-muted/70">{cast.type}</span>}
+    <div
+      id={id}
+      role="option"
+      aria-selected={selected}
+      onClick={onSelect}
+      className={`-mx-1.5 flex cursor-pointer items-baseline gap-2 px-1.5 text-xs leading-[22px] hover:bg-fg/5 ${
+        selected ? "bg-fg/8 shadow-[inset_3px_0_0_var(--essence)]" : ""
+      }`}
+    >
+      <span className="w-5 shrink-0 text-[11px] tabular-nums text-muted/50">
+        {cast.date.slice(8, 10)}
+      </span>
+      <span aria-hidden className="w-3 shrink-0 text-[10px] text-muted/40">
+        ·
+      </span>
+      <span className="min-w-0 flex-1 truncate text-fg/90">{cast.name}</span>
       {unsealed && (
-        <span className="text-[10px] text-muted/60">
+        <span className="shrink-0 text-[10px] text-muted/60">
           unsealed
           {onClear && (
             <>
               {" · "}
               <button
                 type="button"
-                onClick={onClear}
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onClear();
+                }}
                 className="hover:text-amber"
               >
                 clear
@@ -690,10 +817,17 @@ function CastRow({
           )}
         </span>
       )}
-      {cast.stones !== undefined && (
-        <span className="ml-auto text-muted">{aud(cast.stones / 100)}</span>
+      {cast.type && (
+        <span className="hidden shrink-0 text-[11px] text-muted/70 sm:inline">
+          {cast.type}
+        </span>
       )}
-    </p>
+      {cast.stones !== undefined && (
+        <span className="shrink-0 text-[11px] tabular-nums text-muted">
+          {aud(cast.stones / 100)}
+        </span>
+      )}
+    </div>
   );
 }
 

@@ -703,6 +703,98 @@ export function castsThisMonth(
   };
 }
 
+// --- the cast ledger (ADR 0176) --------------------------------------------------
+
+/** One cast as the ledger reads it: the cast itself, its running number in
+ *  display order, and the month header it sits under. */
+export interface LedgerEntry {
+  cast: ApertureCast;
+  /** 1-based running number, newest first — a position, not an id. */
+  n: number;
+  /** `YYYY-MM`, the grouping key. */
+  month: string;
+  /** The header's word for that month: "sep 2026". */
+  monthLabel: string;
+}
+
+export type LedgerRow =
+  | { kind: "header"; label: string; count: number; stones: number }
+  | { kind: "cast"; entry: LedgerEntry };
+
+/** "YYYY-MM" → "sep 2026", in the almanac's month words. */
+export function ledgerMonthLabel(month: string): string {
+  const word = MONTH_WORDS[Number(month.slice(5, 7)) - 1] ?? month.slice(5, 7);
+  return `${word} ${month.slice(0, 4)}`;
+}
+
+/**
+ * Every cast in display order — newest day first, the seal's own order within
+ * a day — and numbered in that order. The whole record, not a window: the
+ * ledger is read by the page, so nothing is dropped for being old.
+ */
+export function ledgerEntries(casts: readonly ApertureCast[]): LedgerEntry[] {
+  return casts
+    .map((cast, i) => ({ cast, i }))
+    .sort((a, b) => b.cast.date.localeCompare(a.cast.date) || a.i - b.i)
+    .map((r, idx) => {
+      const month = r.cast.date.slice(0, 7);
+      return {
+        cast: r.cast,
+        n: idx + 1,
+        month,
+        monthLabel: ledgerMonthLabel(month),
+      };
+    });
+}
+
+/**
+ * One page of the ledger: `per` casts with a month header wherever the month
+ * changes — repeated at the top of a page that continues a month — each header
+ * carrying the month's count and stones. The FIRST page opens on today's month
+ * even when nothing has been cast in it: the running month is always there to
+ * be read, so the ledger never reads as empty and never as owed.
+ */
+export function ledgerPage(
+  entries: readonly LedgerEntry[],
+  page: number,
+  todayISO: string,
+  per = BOOK_PAGE,
+): LedgerRow[] {
+  const totals = new Map<string, { count: number; stones: number }>();
+  for (const e of entries) {
+    const t = totals.get(e.month) ?? { count: 0, stones: 0 };
+    t.count += 1;
+    t.stones += e.cast.stones ?? 0;
+    totals.set(e.month, t);
+  }
+  const out: LedgerRow[] = [];
+  let last: string | null = null;
+  const thisMonth = todayISO.slice(0, 7);
+  if (page === 0 && entries[0]?.month !== thisMonth) {
+    out.push({
+      kind: "header",
+      label: ledgerMonthLabel(thisMonth),
+      count: 0,
+      stones: 0,
+    });
+    last = thisMonth;
+  }
+  for (const entry of entries.slice(page * per, (page + 1) * per)) {
+    if (entry.month !== last) {
+      const t = totals.get(entry.month) ?? { count: 0, stones: 0 };
+      out.push({
+        kind: "header",
+        label: entry.monthLabel,
+        count: t.count,
+        stones: t.stones,
+      });
+      last = entry.month;
+    }
+    out.push({ kind: "cast", entry });
+  }
+  return out;
+}
+
 // --- the book (ADR 0175) ---------------------------------------------------------
 
 /** One entry of the gu book as the page reads it: the sealed row plus the
