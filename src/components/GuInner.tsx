@@ -976,7 +976,7 @@ function BookBand({
           aria-label="the gu book"
           aria-activedescendant={selected ? optId(selected.n) : undefined}
           onKeyDown={onKey}
-          className="min-h-[264px] outline-none focus-visible:ring-1 focus-visible:ring-hairline"
+          className="min-h-[264px] outline-none"
         >
           {rows.map((row) =>
             row.kind === "header" ? (
