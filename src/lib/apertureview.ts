@@ -1594,6 +1594,60 @@ export function evidenceDaysThisWeek(values: number[]): number {
   return values.slice(-7).filter((v) => v > 0).length;
 }
 
+/** The calendar day before `ymd` — UTC-midnight math, so a DST shift never eats
+ *  or repeats a day (the same walk `activity.ts` windows its series with). */
+function prevDay(ymd: string): string {
+  const date = new Date(`${ymd}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Weekday first letters by `getUTCDay()` index. Sunday and Saturday both read
+ *  "S": the strip is read as a shape, and disambiguating it would cost a column. */
+const WEEKDAY_LETTERS = "SMTWTFS";
+
+/** One cell of the sea strip: the Sydney day, its weekday letter, whether any
+ *  mark landed on it. */
+export interface SeaDay {
+  day: string;
+  label: string;
+  on: boolean;
+}
+
+/** The sea's fill this week: the trailing seven days, oldest → today. */
+export interface SeaFill {
+  days: SeaDay[];
+  filled: number;
+}
+
+/**
+ * The sea's fill — aptitude is the share of the aperture the primeval sea fills,
+ * and this is the one reading the site can take of it: which of the trailing seven
+ * days carried ANY dao mark. It ORs the ledgers' own daily series and derives
+ * nothing else. It is the band's one cross-path figure, and is allowed only
+ * because a DAY is the same substance for every path, where a mark is not.
+ */
+export function seaFill(
+  series: readonly (readonly number[])[],
+  today: string,
+): SeaFill {
+  const window: string[] = [];
+  let cursor = today;
+  for (let i = 0; i < 7; i++) {
+    window.push(cursor);
+    cursor = prevDay(cursor);
+  }
+  window.reverse();
+  // Every series ends at today, so the cells align from the END — a series
+  // shorter than seven days reads off the front of the window as nothing.
+  const days = window.map((day, i) => ({
+    day,
+    label: WEEKDAY_LETTERS[new Date(`${day}T00:00:00Z`).getUTCDay()],
+    on: series.some((s) => (s[s.length - 7 + i] ?? 0) > 0),
+  }));
+  return { days, filled: days.filter((d) => d.on).length };
+}
+
 /**
  * The soul's raw count: how many DISTINCT journal days the vault holds — one
  * recorded day is one man soul (the soul band's evidence figure). Same discipline
