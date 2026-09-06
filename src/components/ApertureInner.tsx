@@ -37,6 +37,8 @@ import {
 } from "@/lib/aperturerecord";
 import {
   agoLabel,
+  bookPageCount,
+  bookStatus,
   castReading,
   codeSpans,
   compactDollars,
@@ -57,6 +59,8 @@ import {
   pathAnchor,
   pathEvidence,
   recordedDays,
+  rulingEntries,
+  rulingsPage,
   signedCount,
   splitLead,
   splitTrials,
@@ -146,10 +150,6 @@ const GRADE_LADDER: readonly string[] = [
 /** Weeks in a month, for turning a weekly burn into a runway a person reads in
  *  months. The average, not 4 — a 4-week month would flatter the number. */
 const WEEKS_PER_MONTH = 52 / 12;
-
-/** How many rulings stand open before the rest go behind a `+n more` — enough to
- *  read the last check-in's reasoning without the band becoming the page. */
-const RULINGS_SHOWN = 3;
 
 /** A figure in cents as the page prints it, or the honest dash. Null means "not
  *  knowable here" — never a zero the page made up. */
@@ -401,7 +401,13 @@ export function ApertureInner({
   const [openHarvest, setOpenHarvest] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [showRulings, setShowRulings] = useState(false);
+  /** Which rulings are open, by ledger key. Null is UNTOUCHED, and untouched
+   *  reads the newest ruling open: the band's job is to hand over the last
+   *  check-in's reasoning without a tap. The set exists once a row is toggled. */
+  const [openRulings, setOpenRulings] = useState<ReadonlySet<string> | null>(
+    null,
+  );
+  const [rulingPage, setRulingPage] = useState(0);
 
   // Render-phase adjustment (not an effect): dropping everything decrypted the
   // moment the vault stops being unlocked, per the lint-blessed reset pattern.
@@ -418,7 +424,8 @@ export function ApertureInner({
       setJobs(null);
       setShowResolved(false);
       setOpenHarvest(new Set());
-      setShowRulings(false);
+      setOpenRulings(null);
+      setRulingPage(0);
     }
   }
 
@@ -576,15 +583,23 @@ export function ApertureInner({
   const harvest = [...(doc.sealed.enlightenments ?? [])].sort((a, b) =>
     b.date.localeCompare(a.date),
   );
-  const rulings = [...(doc.sealed.rulings ?? [])].sort((a, b) =>
-    b.date.localeCompare(a.date),
-  );
+  const rulingRows = rulingEntries(doc.sealed.rulings ?? []);
+  const rulingPages = bookPageCount(rulingRows.length);
+  const openRulingSet =
+    openRulings ?? new Set(rulingRows[0] ? [rulingRows[0].key] : []);
   const toggleHarvest = (key: string) =>
     setOpenHarvest((prev) => {
       const next = new Set(prev);
       if (!next.delete(key)) next.add(key);
       return next;
     });
+  // Seeded from the set as READ, not from a functional `prev`: on the first tap
+  // prev is null, and the newest-open default would be lost with it.
+  const toggleRuling = (key: string) => {
+    const next = new Set(openRulingSet);
+    if (!next.delete(key)) next.add(key);
+    setOpenRulings(next);
+  };
 
   // The server's evidence, plus the series only this browser can produce. The
   // band consumes them identically — a sealed strip is not a special kind of row,
@@ -1080,33 +1095,83 @@ export function ApertureInner({
       )}
 
       {/* The decisions behind the figures, under the history they explain: the
-          record says what each seal READ, and these say why it read that way. */}
-      {rulings.length > 0 && (
+          record says what each seal READ, and these say why it read that way —
+          read by the page like the cast ledger, since the whole record now
+          stands. One headline a row under its seal day, tapped to unfold the
+          ruling as written, and the newest already open. */}
+      {rulingRows.length > 0 && (
         <>
           <ZoneHeader
             label="rulings"
             seal="判"
-            right={`last ${rulings.length}`}
+            right={`${rulingRows.length} sealed`}
           />
-          <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
-            {(showRulings ? rulings : rulings.slice(0, RULINGS_SHOWN)).map(
-              (r, i) => (
-                <p key={i} className="text-[11px] leading-relaxed text-muted">
-                  <span className="tabular-nums text-muted/60">{r.date}</span> ·{" "}
-                  {r.text}
-                </p>
-              ),
-            )}
-            {rulings.length > RULINGS_SHOWN && (
-              <button
-                type="button"
-                onClick={() => setShowRulings(!showRulings)}
-                className="self-start text-[11px] text-muted transition-colors hover:text-(--essence)"
-              >
-                {showRulings
-                  ? "▴ fewer"
-                  : `+${rulings.length - RULINGS_SHOWN} more ▸`}
-              </button>
+          <div className="border-b border-hairline px-4 py-2.5">
+            <div className={rulingPages > 1 ? "min-h-[264px]" : ""}>
+              {rulingsPage(rulingRows, rulingPage).map((row) =>
+                row.kind === "header" ? (
+                  <div
+                    key={`h-${row.label}`}
+                    className="flex items-baseline gap-2 text-[11px] leading-[22px] tracking-[0.2em] text-muted uppercase"
+                  >
+                    <span>{row.label}</span>
+                    <span aria-hidden className="h-px flex-1 bg-hairline" />
+                    <span className="tracking-normal normal-case tabular-nums">
+                      {row.count} {row.count === 1 ? "ruling" : "rulings"}
+                    </span>
+                  </div>
+                ) : (
+                  <div key={row.entry.key}>
+                    <button
+                      type="button"
+                      onClick={() => toggleRuling(row.entry.key)}
+                      aria-expanded={openRulingSet.has(row.entry.key)}
+                      className="flex w-full items-baseline gap-2 text-left text-xs leading-[22px]"
+                    >
+                      <span className="w-2.5 shrink-0 text-muted/40">
+                        {openRulingSet.has(row.entry.key) ? "▾" : "▸"}
+                      </span>
+                      <span
+                        className={`min-w-0 flex-1 truncate ${row.entry.weekFold ? "text-muted/60" : "text-fg/90"}`}
+                      >
+                        {row.entry.headline}
+                      </span>
+                    </button>
+                    {openRulingSet.has(row.entry.key) && (
+                      <div className="mt-1 mb-1 ml-5">
+                        <p className="text-[11px] leading-relaxed text-fg/80">
+                          {row.entry.ruling.text}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ),
+              )}
+            </div>
+            {rulingPages > 1 && (
+              <div className="mt-2 flex items-baseline justify-between gap-3 text-[11px] tabular-nums text-muted">
+                <span>{bookStatus(rulingRows.length, rulingPage)}</span>
+                <span className="flex items-baseline gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRulingPage(rulingPage - 1)}
+                    disabled={rulingPage === 0}
+                    aria-label="previous page"
+                    className="px-1 hover:text-amber disabled:opacity-30"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRulingPage(rulingPage + 1)}
+                    disabled={rulingPage >= rulingPages - 1}
+                    aria-label="next page"
+                    className="px-1 hover:text-amber disabled:opacity-30"
+                  >
+                    ›
+                  </button>
+                </span>
+              </div>
             )}
           </div>
         </>

@@ -7,6 +7,7 @@ import {
   type ApertureDoc,
   type ApertureGu,
   type ApertureRefinement,
+  type ApertureRuling,
   type ApertureStage,
   type ApertureStreak,
   type ApertureTrial,
@@ -791,6 +792,97 @@ export function ledgerPage(
       last = entry.month;
     }
     out.push({ kind: "cast", entry });
+  }
+  return out;
+}
+
+// --- the ledger of rulings (ADR 0177) --------------------------------------------
+
+/**
+ * The row's headline. A ruling is sealed without a title, so the row shows its
+ * opening clause — cut at the last clause boundary that leaves something worth
+ * reading, rather than mid-word — and the check-in's own `title` overrides it
+ * whenever the emission carried one.
+ */
+export function rulingHeadline(r: ApertureRuling, cap = 72): string {
+  if (r.title !== undefined) return r.title;
+  const t = r.text.replace(/\s+/g, " ").trim();
+  if (t.length <= cap) return t;
+  const cut = t.slice(0, cap);
+  let best = -1;
+  for (const b of [". ", "; ", " — ", " · ", ": ", ", "])
+    best = Math.max(best, cut.lastIndexOf(b));
+  // Under 28 characters the clause is a fragment, not a lead: hard-cut instead.
+  if (best >= 28) return `${cut.slice(0, best).replace(/[ .;:,—·]+$/, "")} …`;
+  return `${cut.trimEnd()}…`;
+}
+
+/** One ruling as the ledger reads it: the ruling itself, its running number in
+ *  display order, and the line the row prints closed. */
+export interface RulingEntry {
+  ruling: ApertureRuling;
+  /** 1-based running number, newest first — a position, not an id. */
+  n: number;
+  /** `date|n`, stable across a page flip, so the open set survives one. */
+  key: string;
+  headline: string;
+  /** The week's fold opens with those words in every emission so far, and the
+   *  row dims for it so doctrine reads first. A tone aid, never a rule the site
+   *  enforces — a fold worded any other way simply reads as doctrine. */
+  weekFold: boolean;
+}
+
+export type RulingRow =
+  | { kind: "header"; label: string; count: number }
+  | { kind: "entry"; entry: RulingEntry };
+
+/**
+ * Every ruling in display order — newest day first, the seal's own order within
+ * a day — and numbered in that order. The whole record, not a window: the
+ * ledger is read by the page, so nothing is dropped for being old.
+ */
+export function rulingEntries(
+  rulings: readonly ApertureRuling[],
+): RulingEntry[] {
+  return rulings
+    .map((ruling, i) => ({ ruling, i }))
+    .sort((a, b) => b.ruling.date.localeCompare(a.ruling.date) || a.i - b.i)
+    .map((r, idx) => ({
+      ruling: r.ruling,
+      n: idx + 1,
+      key: `${r.ruling.date}|${idx + 1}`,
+      headline: rulingHeadline(r.ruling),
+      weekFold: r.ruling.text.startsWith("CHECK-IN SEALED"),
+    }));
+}
+
+/**
+ * One page of the ledger: its `per` rulings with a day header wherever the day
+ * changes — repeated at the top of a page whose first entry continues a day
+ * from the page before, so no page opens without saying where it is. The header
+ * carries the day's TOTAL, not the part of it this page holds. Headers ride
+ * outside the count; a page is ten ENTRIES.
+ */
+export function rulingsPage(
+  entries: readonly RulingEntry[],
+  page: number,
+  per = BOOK_PAGE,
+): RulingRow[] {
+  const counts = new Map<string, number>();
+  for (const e of entries)
+    counts.set(e.ruling.date, (counts.get(e.ruling.date) ?? 0) + 1);
+  const out: RulingRow[] = [];
+  let last: string | null = null;
+  for (const entry of entries.slice(page * per, (page + 1) * per)) {
+    if (entry.ruling.date !== last) {
+      out.push({
+        kind: "header",
+        label: entry.ruling.date,
+        count: counts.get(entry.ruling.date) ?? 0,
+      });
+      last = entry.ruling.date;
+    }
+    out.push({ kind: "entry", entry });
   }
   return out;
 }

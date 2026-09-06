@@ -28,6 +28,9 @@ import {
   ledgerEntries,
   ledgerMonthLabel,
   ledgerPage,
+  rulingEntries,
+  rulingHeadline,
+  rulingsPage,
   codeSpans,
   compactDollars,
   conditionChipClass,
@@ -1930,5 +1933,106 @@ describe("apertureview — the cast ledger", () => {
     expect(
       p2.map((r) => (r.kind === "header" ? `#${r.label}` : r.entry.cast.name)),
     ).toEqual(["#aug 2026", "aug-3", "aug-2", "aug-1", "#jul 2026", "jul-31"]);
+  });
+});
+
+describe("apertureview — the ledger of rulings", () => {
+  const r = (date: string, text: string, title?: string) => ({
+    date,
+    text,
+    ...(title !== undefined ? { title } : {}),
+  });
+
+  it("returns a short ruling whole, and collapses its whitespace", () => {
+    expect(rulingHeadline(r("2026-09-02", "the streak counts the day."))).toBe(
+      "the streak counts the day.",
+    );
+    expect(
+      rulingHeadline(r("2026-09-02", "  the streak\n  counts   the day. ")),
+    ).toBe("the streak counts the day.");
+  });
+
+  it("cuts a long ruling at its last clause boundary, and hard-cuts one without", () => {
+    // Past 72 characters: the row keeps everything up to the LAST boundary
+    // inside the cut — the most it can say whole — and says there is more.
+    expect(
+      rulingHeadline(
+        r(
+          "2026-09-02",
+          "the seal is the killer move: its cast count is the number of seals, exact on any day it is read.",
+        ),
+      ),
+    ).toBe(
+      "the seal is the killer move: its cast count is the number of seals …",
+    );
+    // No boundary past the floor — cut at the cap rather than print a fragment.
+    expect(
+      rulingHeadline(
+        r(
+          "2026-09-02",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbb",
+        ),
+      ),
+    ).toBe(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…",
+    );
+  });
+
+  it("prefers the check-in's own headline over the derived lead", () => {
+    expect(
+      rulingHeadline(
+        r(
+          "2026-09-02",
+          "the seal is the killer move: its cast count is the number of seals.",
+          "the seal, named",
+        ),
+      ),
+    ).toBe("the seal, named");
+  });
+
+  it("orders newest first, keeps the seal's order within a day, and numbers it", () => {
+    const led = rulingEntries([
+      r("2026-08-25", "reading stays mortal."),
+      r("2026-09-02", "CHECK-IN SEALED — the week's fold."),
+      r("2026-09-02", "harvest doctrine ratified."),
+    ]);
+    expect(led.map((e) => [e.n, e.headline])).toEqual([
+      [1, "CHECK-IN SEALED — the week's fold."],
+      [2, "harvest doctrine ratified."],
+      [3, "reading stays mortal."],
+    ]);
+    expect(led.map((e) => e.key)).toEqual([
+      "2026-09-02|1",
+      "2026-09-02|2",
+      "2026-08-25|3",
+    ]);
+    expect(led.map((e) => e.weekFold)).toEqual([true, false, false]);
+  });
+
+  it("pages ten rulings and repeats a day's header across a page break", () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      r("2026-09-02", `ruling ${i + 1}.`),
+    ).concat(r("2026-08-25", "the older one."));
+    const led = rulingEntries(many);
+    const p1 = rulingsPage(led, 0);
+    // The header carries the day's TOTAL, not the ten this page holds.
+    expect(p1[0]).toEqual({ kind: "header", label: "2026-09-02", count: 12 });
+    expect(p1.filter((row) => row.kind === "entry")).toHaveLength(10);
+    const p2 = rulingsPage(led, 1);
+    expect(
+      p2.map((row) =>
+        row.kind === "header" ? `#${row.label}` : row.entry.headline,
+      ),
+    ).toEqual([
+      "#2026-09-02",
+      "ruling 11.",
+      "ruling 12.",
+      "#2026-08-25",
+      "the older one.",
+    ]);
+  });
+
+  it("reads its status line in the book's words", () => {
+    expect(bookStatus(18, 0)).toBe("1-10/18 · 56%");
   });
 });

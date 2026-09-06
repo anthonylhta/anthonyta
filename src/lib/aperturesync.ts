@@ -407,7 +407,7 @@ const MAX_ENLIGHTENMENTS = 50;
 const MAX_PARAGRAPHS = 60;
 const MAX_PARAGRAPH_CHARS = 4000;
 const MAX_TITLE_CHARS = 200;
-const MAX_RULINGS = 30;
+const MAX_RULINGS = 200;
 const MAX_RULING_CHARS = 4000;
 
 /** Printable prose with a ceiling — a title, a paragraph, a ruling. */
@@ -459,6 +459,7 @@ function walkRuling(x: unknown, at: string): Fail {
   return first(
     needDay(x.date, `${at}.date`),
     needProse(MAX_RULING_CHARS)(x.text, `${at}.text`),
+    ifPresent(x.title, `${at}.title`, needProse(MAX_TITLE_CHARS)),
   );
 }
 
