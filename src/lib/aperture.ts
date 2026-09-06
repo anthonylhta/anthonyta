@@ -391,6 +391,13 @@ export interface ApertureKillerMove {
   evidence?: "record" | "backup";
   /** The honest line under the steps — what the reading can and cannot claim. */
   note?: string;
+  /** Which step is the core gu, 1-based — the one that sets the move's
+   *  direction, the rest shaping it. The unfold marks it; absent = no step in
+   *  this casting stands above the others. */
+  core?: number;
+  /** The revision, bumped only when a re-seal changes the steps. The row prints
+   *  it from v2 on: a first definition has no revision to announce. */
+  version?: number;
 }
 
 /**
@@ -866,18 +873,25 @@ function normKillerMove(x: unknown): ApertureKillerMove | null {
   // A move with no steps is not a move — the unfold would be bare chrome.
   if (steps === null || steps.length === 0 || steps.length > MAX_MOVE_STEPS)
     return null;
-  const { evidence, note } = x;
+  const { evidence, note, core, version } = x;
   // The evidence source is a CLOSED vocabulary: the site derives the reading
   // from it, so a value this build doesn't know is a frame breach, not data.
   if (evidence !== undefined && evidence !== "record" && evidence !== "backup")
     return null;
   if (note !== undefined && !isProse(note, MAX_STEP_CHARS)) return null;
+  // The core is an index into THIS move's steps, so it is checked against them
+  // rather than against a constant ceiling.
+  if (core !== undefined && (!isPosInt(core) || core > steps.length))
+    return null;
+  if (version !== undefined && !isPosInt(version)) return null;
   return {
     name: x.name,
     chain: x.chain,
     steps,
     ...(evidence !== undefined ? { evidence } : {}),
     ...(note !== undefined ? { note } : {}),
+    ...(core !== undefined ? { core } : {}),
+    ...(version !== undefined ? { version } : {}),
   };
 }
 
