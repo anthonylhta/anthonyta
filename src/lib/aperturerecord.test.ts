@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { apertureHistDay, apertureHistPath } from "./aevcontext";
-import { type ApertureDoc } from "./aperture";
+import { type ApertureDoc, type AperturePath } from "./aperture";
 import {
+  marksTrends,
   planRecordFetch,
   RECORD_FETCH_CAP,
   recordRows,
@@ -325,6 +326,130 @@ describe("strikeTrends", () => {
     ).toEqual([]);
     expect(
       strikeTrends([{ day: "2026-07-26", doc: strikeSeal({ petitions: 0 }) }]),
+    ).toEqual([]);
+  });
+});
+
+// A seal carrying a WHOLE paths tree — marks trends are about which ledgers each
+// seal had OPENED, which the `doc` helper's one bare path can't say. Invented
+// like everything else here.
+function marksSeal(paths: AperturePath[]): ApertureDoc {
+  const base = doc({});
+  return { ...base, sealed: { ...base.sealed, paths } };
+}
+
+describe("marksTrends", () => {
+  it("reads oldest → newest whatever order the fetches resolved in", () => {
+    const seal = (count: number) =>
+      marksSeal([
+        { name: "Cartography", marks: { count, unit: "survey days" } },
+      ]);
+    const trends = marksTrends([
+      { day: "2026-07-26", doc: seal(19) },
+      { day: "2026-07-05", doc: seal(5) },
+      { day: "2026-07-12", doc: seal(12) },
+    ]);
+    // Lowercased into the band's register, and no target ever: marks have no
+    // ceiling to read against.
+    expect(trends).toEqual([
+      {
+        name: "cartography",
+        values: [5, 12, 19],
+        first: 5,
+        last: 19,
+        target: null,
+      },
+    ]);
+  });
+
+  it("gives a sub-path's ledger a strip of its own, under its own name", () => {
+    const seal = (body: number, portage: number) =>
+      marksSeal([
+        {
+          name: "Body",
+          marks: { count: body, unit: "sessions" },
+          sub: [
+            { name: "Portage", marks: { count: portage, unit: "carries" } },
+          ],
+        },
+      ]);
+    const trends = marksTrends([
+      { day: "2026-07-12", doc: seal(4, 1) },
+      { day: "2026-07-26", doc: seal(9, 3) },
+    ]);
+    // Reading order — a path before its subs — and never summed into the parent:
+    // sessions and carries are different substances.
+    expect(trends).toEqual([
+      { name: "body", values: [4, 9], first: 4, last: 9, target: null },
+      { name: "portage", values: [1, 3], first: 1, last: 3, target: null },
+    ]);
+  });
+
+  it("skips a seal from before a ledger opened rather than zeroing it", () => {
+    const trends = marksTrends([
+      {
+        day: "2026-07-05",
+        doc: marksSeal([
+          { name: "Cartography", marks: { count: 5, unit: "survey days" } },
+          { name: "Portage" },
+        ]),
+      },
+      {
+        day: "2026-07-12",
+        doc: marksSeal([
+          { name: "Cartography", marks: { count: 12, unit: "survey days" } },
+          { name: "Portage", marks: { count: 1, unit: "carries" } },
+        ]),
+      },
+      {
+        day: "2026-07-26",
+        doc: marksSeal([
+          { name: "Cartography", marks: { count: 19, unit: "survey days" } },
+          { name: "Portage", marks: { count: 3, unit: "carries" } },
+        ]),
+      },
+    ]);
+    // First-seen order walking oldest → newest, so cartography leads the newcomer.
+    expect(trends.map((t) => t.name)).toEqual(["cartography", "portage"]);
+    expect(trends[1]).toMatchObject({ values: [1, 3], first: 1, last: 3 });
+  });
+
+  it("drops a ledger seen once — one reading is not a trend", () => {
+    const trends = marksTrends([
+      {
+        day: "2026-07-12",
+        doc: marksSeal([
+          { name: "Cartography", marks: { count: 12, unit: "survey days" } },
+        ]),
+      },
+      {
+        day: "2026-07-26",
+        doc: marksSeal([
+          { name: "Cartography", marks: { count: 19, unit: "survey days" } },
+          { name: "Portage", marks: { count: 3, unit: "carries" } },
+        ]),
+      },
+    ]);
+    expect(trends.map((t) => t.name)).toEqual(["cartography"]);
+  });
+
+  it("makes no trends from an empty, ledgerless or single-seal history", () => {
+    expect(marksTrends([])).toEqual([]);
+    expect(
+      marksTrends([
+        { day: "2026-07-12", doc: marksSeal([{ name: "Cartography" }]) },
+        { day: "2026-07-26", doc: marksSeal([{ name: "Cartography" }]) },
+      ]),
+    ).toEqual([]);
+    expect(
+      marksTrends([
+        {
+          day: "2026-07-26",
+          doc: marksSeal([
+            { name: "Cartography", marks: { count: 19, unit: "survey days" } },
+          ]),
+        },
+      ]),
     ).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import { essenceOf, type ApertureDoc } from "./aperture";
 import { diffChanges } from "./aperturesync";
+import { daoRows } from "./apertureview";
 
 /**
  * aperturerecord — the pure spine of the sheet's "the record" band: the archived
@@ -188,6 +189,26 @@ export function strikeTrends(
   return trendsOver(
     entries,
     (doc) => doc.sealed.breakthrough.recentStrikes,
+    () => null,
+  );
+}
+
+/**
+ * The same reading over each path's DAO MARKS (ADR 0167's named follow-up):
+ * the sealed count in the path's own unit, seal by seal. Each strip is one path
+ * against its own past and nothing else — different paths' marks are different
+ * substances, so no target, no total, and no two strips share an axis. A path
+ * whose ledger opened last week is a single reading, not a trend, and waits.
+ */
+export function marksTrends(
+  entries: { day: string; doc: ApertureDoc }[],
+): RecordTrend[] {
+  return trendsOver(
+    entries,
+    (doc) =>
+      Object.fromEntries(
+        daoRows(doc.sealed.paths).map((r) => [r.name, r.count]),
+      ),
     () => null,
   );
 }

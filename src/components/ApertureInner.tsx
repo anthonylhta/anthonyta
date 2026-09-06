@@ -28,6 +28,7 @@ import {
   type ApertureVitalGu,
 } from "@/lib/aperture";
 import {
+  marksTrends,
   planRecordFetch,
   recordRows,
   recordTrends,
@@ -177,6 +178,9 @@ interface RecordState {
   trends: RecordTrend[];
   /** The same reading over the wall's strike counters, week by sealed week. */
   strikes: RecordTrend[];
+  /** Each path's dao marks across the fetched seals — one path against its own
+   *  past, never across paths. */
+  marks: RecordTrend[];
   /** Well-formed archived days beyond the fetch cap — counted, never fetched. */
   older: number;
   /** Fetched days that would not serve, decrypt or normalize. */
@@ -263,6 +267,7 @@ async function recordSeries(
       rows: recordRows(entries),
       trends: recordTrends(entries),
       strikes: strikeTrends(entries),
+      marks: marksTrends(entries),
       older: plan.older,
       unreadable: plan.fetch.length - entries.length,
     };
@@ -1106,6 +1111,26 @@ export function ApertureInner({
                     values={t.values}
                     delta={t.last - t.first}
                     plot={`${t.name} strikes across seals`}
+                    right={`${t.first} → ${t.last}`}
+                  />
+                ))}
+              </>
+            )}
+            {/* The dao ledgers, read the same way — each path against its own
+                past. No target and no shared axis: different paths' marks are
+                different substances. */}
+            {record.marks.length > 0 && (
+              <>
+                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                  marks · seal by seal
+                </p>
+                {record.marks.map((t) => (
+                  <TrendRow
+                    key={t.name}
+                    label={t.name}
+                    values={t.values}
+                    delta={t.last - t.first}
+                    plot={`${t.name} dao marks across seals`}
                     right={`${t.first} → ${t.last}`}
                   />
                 ))}
