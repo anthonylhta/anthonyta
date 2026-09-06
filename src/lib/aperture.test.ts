@@ -593,6 +593,61 @@ describe("aperture — the soul", () => {
   });
 });
 
+describe("aperture — the survival mode", () => {
+  // The declared pause: entered by ruling, ended by a named method. The site
+  // prints it once and derives nothing from it, so the frame's whole job is to
+  // insist the declaration is complete — a mode with no exit is canon, not this.
+  const zombie = {
+    name: "immortal zombie",
+    since: "2026-11-03",
+    exit: "the surgeon's clearance and the first logged session",
+  };
+
+  it("accepts a well-formed mode", () => {
+    const declared = withSealed({ mode: zombie });
+    expect(normalizeAperture(declared)).toEqual(declared);
+  });
+
+  it("accepts the week's note beside it, and keeps an absent one absent", () => {
+    const noted = withSealed({
+      mode: { ...zombie, note: "the counters are held at the seal" },
+    });
+    expect(normalizeAperture(noted)).toEqual(noted);
+    expect(
+      normalizeAperture(withSealed({ mode: zombie }))?.sealed.mode,
+    ).not.toHaveProperty("note");
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("mode");
+  });
+
+  it("drops an unknown key inside the mode", () => {
+    const out = normalizeAperture(
+      withSealed({ mode: { ...zombie, resolved: true } }),
+    );
+    expect(out?.sealed.mode).toEqual(zombie);
+  });
+
+  it("hard-rejects a present-but-malformed mode", () => {
+    const bad = (patch: Record<string, unknown> | string) =>
+      expect(
+        normalizeAperture(
+          withSealed({
+            mode: typeof patch === "string" ? patch : { ...zombie, ...patch },
+          }),
+        ),
+      ).toBeNull();
+    bad("immortal zombie"); // a name where a declaration should be
+    bad({ name: "zombie" }); // a mode this build doesn't know is a frame breach
+    bad({ since: "3 Nov 2026" }); // a date, but not a day
+    bad({ exit: "" }); // a mode cannot be declared without a way out
+    bad({ note: 3 }); // the line beside it is prose or nothing
+  });
+});
+
 describe("aperture — killer moves", () => {
   // The named composite rituals: definitions sealed whole at the check-in, the
   // site deriving only the cast reading beside them. Same absent-vs-malformed

@@ -592,6 +592,7 @@ export function ApertureInner({
   const inheritances = doc.sealed.inheritances;
   const { open, resolved } = splitTrials(trials);
   const harden = hardenLines(doc.sealed.streaks);
+  const mode = doc.sealed.mode;
   const strikes = Object.entries(breakthrough.recentStrikes);
   const hasWallBody =
     breakthrough.event !== "" ||
@@ -744,6 +745,25 @@ export function ApertureInner({
         </div>
       )}
 
+      {/* The declared survival mode (ADR 0181), stated once and plainly, above what
+          the next seal waits on: while it stands the seal holds every counter and
+          nothing grows, so everything below is a held reading. The exit is a method
+          the check-in rules executed — never a control here. */}
+      {mode && (
+        <div className="border-b border-hairline px-4 py-2.5">
+          <p className="text-xs text-muted">
+            <span className="text-fg/90">{mode.name}</span>
+            <span className="text-muted/60"> · since </span>
+            <span className="tabular-nums">{mode.since}</span>
+            <span className="text-muted/60"> · exit · </span>
+            {mode.exit}
+          </p>
+          {mode.note && (
+            <p className="mt-1 text-[11px] italic text-muted/60">{mode.note}</p>
+          )}
+        </div>
+      )}
+
       {/* What the NEXT seal is waiting on, in the check-in's own words. It sits
           under the plaintext sea rather than inside it because the line is SEALED:
           it names conditions and dates, and the glance stays rank and stage alone.
@@ -826,8 +846,10 @@ export function ApertureInner({
               ))}
             </div>
             {/* When each hardening streak comes due — BELOW the chips, not inside
-                them: a hardening chip already reaches the edge of a phone. */}
-            {harden.length > 0 && (
+                them: a hardening chip already reaches the edge of a phone. A
+                "hardens ~date" during a declared pause is a promise the pause has
+                already broken, so the line waits for the exit. */}
+            {!mode && harden.length > 0 && (
               <p className="mt-2 text-[11px] tabular-nums text-muted">
                 {harden.join(" · ")}
               </p>
