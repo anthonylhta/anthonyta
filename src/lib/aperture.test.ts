@@ -1125,6 +1125,15 @@ describe("aperture — the harvest and the rulings", () => {
     ]);
   });
 
+  it("keeps a ruling's sealed headline, and leaves an absent one absent", () => {
+    const titled = { date: "2026-03-01", text: "held.", title: "the streak" };
+    const out = normalizeAperture(
+      withSealed({ rulings: [titled, { date: "2026-03-08", text: "held." }] }),
+    );
+    expect(out?.sealed.rulings?.[0]).toEqual(titled);
+    expect(out?.sealed.rulings?.[1]).not.toHaveProperty("title");
+  });
+
   it("hard-rejects a malformed enlightenment", () => {
     const bad = (patch: Record<string, unknown>) =>
       expect(
@@ -1156,6 +1165,9 @@ describe("aperture — the harvest and the rulings", () => {
     bad({ date: "2026-03-01", text: 3 });
     bad({ date: "2026-03-01", text: "x".repeat(4001) });
     bad({ date: "1 March 2026", text: "held." });
+    bad({ date: "2026-03-01", text: "held.", title: "" });
+    bad({ date: "2026-03-01", text: "held.", title: 3 });
+    bad({ date: "2026-03-01", text: "held.", title: "x".repeat(201) });
     bad("2026-03-01 · held.");
     expect(normalizeAperture(withSealed({ rulings: "held." }))).toBeNull();
   });
@@ -1176,9 +1188,9 @@ describe("aperture — the harvest and the rulings", () => {
       normalizeAperture(withSealed({ enlightenments: entries(51) })),
     ).toBeNull();
     expect(
-      normalizeAperture(withSealed({ rulings: rulings(30) })),
+      normalizeAperture(withSealed({ rulings: rulings(200) })),
     ).not.toBeNull();
-    expect(normalizeAperture(withSealed({ rulings: rulings(31) }))).toBeNull();
+    expect(normalizeAperture(withSealed({ rulings: rulings(201) }))).toBeNull();
 
     const paragraphs = (n: number) => ({
       enlightenments: [

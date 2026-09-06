@@ -524,14 +524,14 @@ describe("aperturesync — rejection diagnosis", () => {
       ...raw,
       sealed: {
         ...raw.sealed,
-        rulings: Array.from({ length: 31 }, () => ({
+        rulings: Array.from({ length: 201 }, () => ({
           date: "2026-03-01",
           text: "held.",
         })),
       },
     };
     expect(explainRejected(many)).toBe(
-      "sealed.rulings must hold at most 30 entries (found 31)",
+      "sealed.rulings must hold at most 200 entries (found 201)",
     );
     const long = {
       ...raw,
@@ -562,6 +562,9 @@ describe("aperturesync — rejection diagnosis", () => {
     expect(explainRejected(ruling({ date: "2026-03-08", text: 3 }))).toBe(
       "sealed.rulings[1].text must be a non-empty string (found 3)",
     );
+    expect(
+      explainRejected(ruling({ date: "2026-03-08", text: "held.", title: 3 })),
+    ).toBe("sealed.rulings[1].title must be a non-empty string (found 3)");
     expect(explainRejected(ruling("2026-03-08 · held."))).toBe(
       'sealed.rulings[1] must be an object (found "2026-03-08 · held.")',
     );

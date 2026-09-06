@@ -277,6 +277,10 @@ export interface ApertureEnlightenment {
 export interface ApertureRuling {
   date: string;
   text: string;
+  /** The check-in's own headline for the row, at most `MAX_TITLE_CHARS`. Absent
+   *  on every ruling sealed before the ledger existed, and the site derives a
+   *  lead from the text when it is (`rulingHeadline`). */
+  title?: string;
 }
 
 /**
@@ -286,12 +290,16 @@ export interface ApertureRuling {
  * looks wrong. Over any of them is a HARD REJECT like every other frame breach —
  * the sync script's walk names which one, so an over-long check-in is caught at
  * seal time rather than at read time.
+ *
+ * The rulings cap is the ledger's number (ADR 0177): the band reads them by
+ * the page, so the count sets no height on the page and the cap is only the
+ * envelope guard it was always meant to be.
  */
 const MAX_ENLIGHTENMENTS = 50;
 const MAX_PARAGRAPHS = 60;
 const MAX_PARAGRAPH_CHARS = 4000;
 const MAX_TITLE_CHARS = 200;
-const MAX_RULINGS = 30;
+const MAX_RULINGS = 200;
 const MAX_RULING_CHARS = 4000;
 const MAX_KILLER_MOVES = 12;
 const MAX_MOVE_STEPS = 12;
@@ -837,7 +845,15 @@ function normEnlightenment(x: unknown): ApertureEnlightenment | null {
 function normRuling(x: unknown): ApertureRuling | null {
   if (!isObj(x)) return null;
   if (!isDay(x.date) || !isProse(x.text, MAX_RULING_CHARS)) return null;
-  return { date: x.date, text: x.text };
+  const { title } = x;
+  // The headline is printed as the row when there is one; an absent one stays
+  // absent, so the site derives its own lead rather than reading an empty line.
+  if (title !== undefined && !isProse(title, MAX_TITLE_CHARS)) return null;
+  return {
+    date: x.date,
+    text: x.text,
+    ...(title !== undefined ? { title } : {}),
+  };
 }
 
 function normKillerMove(x: unknown): ApertureKillerMove | null {
