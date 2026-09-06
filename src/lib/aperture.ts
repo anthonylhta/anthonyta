@@ -304,6 +304,7 @@ const MAX_RULING_CHARS = 4000;
 const MAX_KILLER_MOVES = 12;
 const MAX_MOVE_STEPS = 12;
 const MAX_STEP_CHARS = 400;
+const MAX_HUMAN_GU = 12;
 const MAX_GU_HOUSES = 8;
 const MAX_ORIGIN_BEATS = 12;
 const MAX_BEAT_CHARS = 400;
@@ -398,6 +399,25 @@ export interface ApertureKillerMove {
   /** The revision, bumped only when a re-seal changes the steps. The row prints
    *  it from v2 on: a first definition has no revision to announce. */
   version?: number;
+}
+
+/** One trait gu of the human path (ADR 0180): minted only by ruling from the
+ *  owner's own record, never borrowed — every field prints verbatim. */
+export interface ApertureHumanGu {
+  /** "hope", "courage" — the row's name. */
+  name: string;
+  /** The rank word the row prints after the name — "rank 1", "legend". */
+  rank: string;
+  /** What it is, in the check-in's words — "the gu that opened the aperture". */
+  kind: string;
+  /** The day it was refined, `YYYY-MM-DD` — the dated fact the row points at. */
+  refined: string;
+  /** The origin line under the row — the record it was minted from. */
+  origin: string;
+  /** The lapse clause, whole, in the check-in's words — "never leaves",
+   *  "leaves only if the search is abandoned". Absent = nothing printed:
+   *  abandonment is the entry no longer being emitted, never a verdict. */
+  leaves?: string;
 }
 
 /**
@@ -564,6 +584,9 @@ export interface ApertureSealed {
    *  readings derived by the site from evidence. Absent on every document
    *  sealed before the band existed, and the band simply doesn't render. */
   killerMoves?: ApertureKillerMove[];
+  /** The human path's trait gu (ADR 0180) — minted from the owner's own record.
+   *  Absent on every document sealed before the band existed. */
+  humanGu?: ApertureHumanGu[];
   /** The houses, first = the hub itself (it carries the derived census and
    *  absorbs the rented footnote as its essence line). Absent on every document
    *  sealed before the band existed. */
@@ -895,6 +918,30 @@ function normKillerMove(x: unknown): ApertureKillerMove | null {
   };
 }
 
+function normHumanGu(x: unknown): ApertureHumanGu | null {
+  if (!isObj(x)) return null;
+  if (
+    !isProse(x.name, MAX_TITLE_CHARS) ||
+    !isProse(x.rank, MAX_TITLE_CHARS) ||
+    !isProse(x.kind, MAX_TITLE_CHARS) ||
+    !isDay(x.refined) ||
+    !isProse(x.origin, MAX_STEP_CHARS)
+  )
+    return null;
+  const { leaves } = x;
+  // The lapse clause is printed whole or not at all — an absent one means the
+  // row says nothing about leaving, never that the trait has lapsed.
+  if (leaves !== undefined && !isProse(leaves, MAX_STEP_CHARS)) return null;
+  return {
+    name: x.name,
+    rank: x.rank,
+    kind: x.kind,
+    refined: x.refined,
+    origin: x.origin,
+    ...(leaves !== undefined ? { leaves } : {}),
+  };
+}
+
 function normInheritance(x: unknown): ApertureInheritance | null {
   if (!isObj(x)) return null;
   if (!isProse(x.source, MAX_TITLE_CHARS) || !isProse(x.gave, MAX_TITLE_CHARS))
@@ -1113,6 +1160,10 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (killerMoves === null) return null;
   if (killerMoves !== undefined && killerMoves.length > MAX_KILLER_MOVES)
     return null;
+  const humanGu =
+    x.humanGu === undefined ? undefined : normArray(x.humanGu, normHumanGu);
+  if (humanGu === null) return null;
+  if (humanGu !== undefined && humanGu.length > MAX_HUMAN_GU) return null;
   const guHouses =
     x.guHouses === undefined ? undefined : normArray(x.guHouses, normGuHouse);
   if (guHouses === null) return null;
@@ -1156,6 +1207,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(profile !== undefined ? { profile } : {}),
     ...(soul !== undefined ? { soul } : {}),
     ...(killerMoves !== undefined ? { killerMoves } : {}),
+    ...(humanGu !== undefined ? { humanGu } : {}),
     ...(guHouses !== undefined ? { guHouses } : {}),
     ...(inheritances !== undefined ? { inheritances } : {}),
     ...(held !== undefined ? { held } : {}),
