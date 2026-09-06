@@ -67,6 +67,7 @@ import {
   pathAnchor,
   pathEvidence,
   recordedDays,
+  seaFill,
   sealedAgo,
   signedCount,
   splitLead,
@@ -860,6 +861,68 @@ describe("apertureview — daoRows + evidenceDaysThisWeek", () => {
     expect(evidenceDaysThisWeek([9, 9, 9, 1, 0, 2, 0, 3, 1, 0])).toBe(4);
     expect(evidenceDaysThisWeek([1, 2])).toBe(2);
     expect(evidenceDaysThisWeek([])).toBe(0);
+  });
+});
+
+describe("apertureview — seaFill", () => {
+  it("walks the seven days oldest → today, each under its weekday letter", () => {
+    const sea = seaFill([], "2026-09-06");
+    expect(sea.days.map((d) => d.day)).toEqual([
+      "2026-08-31",
+      "2026-09-01",
+      "2026-09-02",
+      "2026-09-03",
+      "2026-09-04",
+      "2026-09-05",
+      "2026-09-06",
+    ]);
+    expect(sea.days.map((d) => d.label).join(" ")).toBe("M T W T F S S");
+  });
+
+  it("fills a day when ANY path left a mark on it", () => {
+    const sea = seaFill(
+      [
+        [1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 2],
+      ],
+      "2026-09-06",
+    );
+    expect(sea.days.map((d) => d.on)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(sea.filled).toBe(2);
+  });
+
+  it("aligns a short series from the end — its last day is today", () => {
+    const sea = seaFill([[5, 5]], "2026-09-06");
+    expect(sea.days.map((d) => d.on)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+    ]);
+    expect(sea.filled).toBe(2);
+  });
+
+  it("counts a mark of any size — levels, grams and sessions all just land", () => {
+    expect(seaFill([[0, 0, 0, 0, 0, 0, 1]], "2026-09-06").filled).toBe(1);
+    expect(seaFill([[0, 0, 0, 0, 0, 0, 148]], "2026-09-06").filled).toBe(1);
+  });
+
+  it("reads seven empty cells when no path carries a series", () => {
+    const sea = seaFill([], "2026-09-06");
+    expect(sea.days).toHaveLength(7);
+    expect(sea.days.every((d) => !d.on)).toBe(true);
+    expect(sea.filled).toBe(0);
   });
 });
 

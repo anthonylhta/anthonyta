@@ -61,6 +61,7 @@ import {
   recordedDays,
   rulingEntries,
   rulingsPage,
+  seaFill,
   signedCount,
   splitLead,
   splitTrials,
@@ -69,6 +70,7 @@ import {
   trialsSummary,
   type EvidenceSeries,
   type PathSeries,
+  type SeaFill,
 } from "@/lib/apertureview";
 import {
   absorbedThisWeek,
@@ -508,7 +510,7 @@ export function ApertureInner({
   // series — the sealed count and the live week side by side, never derived
   // from each other. A node without a series just prints without the column.
   const dao = useMemo(() => {
-    if (!doc) return [];
+    if (!doc) return { rows: [], sea: null };
     const accrual = (activity: string | null): number | null => {
       if (activity === null) return null;
       if (activity === "gym")
@@ -524,10 +526,29 @@ export function ApertureInner({
       ];
       return s ? evidenceDaysThisWeek(s.levels) : null;
     };
-    return daoRows(doc.sealed.paths).map((r) => ({
-      ...r,
-      wk: accrual(r.activity),
-    }));
+    // The strip reads the same three sources the accrual does, per day rather
+    // than summed — the sea is those series ORed, never a fourth reading.
+    const daily = (activity: string | null): number[] | null => {
+      if (activity === null) return null;
+      if (activity === "gym")
+        return gymCfg ? sessionCounts(gymCfg, 7, today) : null;
+      if (activity === "meals")
+        return mealsCfg ? trailingProtein(mealsCfg, today, 7) : null;
+      return (
+        (series as Record<string, EvidenceSeries | undefined>)[activity]
+          ?.levels ?? null
+      );
+    };
+    const nodes = daoRows(doc.sealed.paths);
+    const list = nodes
+      .map((r) => daily(r.activity))
+      .filter((s): s is number[] => s !== null);
+    return {
+      rows: nodes.map((r) => ({ ...r, wk: accrual(r.activity) })),
+      // No series at all is no strip, not an empty one: seven blank cells would
+      // read as a week nothing landed in.
+      sea: list.length > 0 ? seaFill(list, today) : null,
+    };
   }, [doc, gymCfg, mealsCfg, series, today]);
 
   switch (detailStatus(status, dataErr, doc)) {
@@ -1424,7 +1445,7 @@ export function ApertureInner({
 
       {/* 道 — the dao-mark composition (ADR 0167), directly under the paths it
           reads from. Absent until a seal opens a ledger on some path. */}
-      {dao.length > 0 && <DaoBand rows={dao} />}
+      {dao.rows.length > 0 && <DaoBand rows={dao.rows} sea={dao.sea} />}
 
       {/* 府 — the colophon: the page ends with the thing that holds everything
           above it. When the house stands it absorbs the bare rented footnote as
@@ -1987,12 +2008,15 @@ function GuHouseBand({
  * unit, the sealed count with the live week beside it. No bars and no total —
  * different substances don't share an axis, and re-summing across units would
  * sneak the comparison back in. The only comparison the units permit is each
- * path against its own past (the record's job, seal by seal).
+ * path against its own past (the record's job, seal by seal). Above the rows,
+ * the sea's fill: the one figure the whole band shares, because it counts days.
  */
 function DaoBand({
   rows,
+  sea,
 }: {
   rows: { name: string; count: number; unit: string; wk: number | null }[];
+  sea: SeaFill | null;
 }) {
   return (
     <div className="border-t border-hairline">
@@ -2002,6 +2026,44 @@ function DaoBand({
         right={`${rows.length} path${rows.length === 1 ? "" : "s"}`}
       />
       <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        {/* The sea's fill — the band's one cross-path figure, and the only one the
+            units permit: a DAY is the same substance for every path, where a mark
+            is not. Today's cell keeps its outline whether or not it filled. */}
+        {sea && (
+          <div className="flex items-start gap-2 border-b border-hairline/60 pb-2">
+            <span className="hidden w-[88px] shrink-0 pt-px text-[11px] text-muted sm:block">
+              the sea
+            </span>
+            <div className="flex min-w-0 flex-1 gap-1" aria-hidden>
+              {sea.days.map((d, i) => (
+                <div
+                  key={d.day}
+                  className="flex min-w-0 flex-1 flex-col gap-[3px]"
+                >
+                  <span
+                    className={`h-3 rounded-[1px] border ${
+                      i === 6
+                        ? "border-fg/30"
+                        : d.on
+                          ? "border-(--essence)/40"
+                          : "border-hairline"
+                    } ${d.on ? "bg-(--essence)/20" : ""}`}
+                  />
+                  <span
+                    className={`text-center text-[10px] tracking-[0.06em] ${
+                      i === 6 ? "text-fg/70" : "text-muted/45"
+                    }`}
+                  >
+                    {d.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <span className="shrink-0 pt-px text-[11px] tabular-nums text-muted">
+              {sea.filled}/7 this wk
+            </span>
+          </div>
+        )}
         {rows.map((r) => (
           <p
             key={r.name}
@@ -2031,6 +2093,8 @@ function DaoBand({
         <p className="mt-1 text-[11px] italic text-muted/60">
           each path&apos;s marks in its own substance — never converted, never
           compared.
+          {sea &&
+            " the sea refills on its own curve; the pace worth holding is a shade under it."}
         </p>
       </div>
     </div>
