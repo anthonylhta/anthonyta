@@ -1659,8 +1659,10 @@ function FormationsBand({ rows }: { rows: FormationRow[] }) {
  * arrive sealed and print verbatim; the right-hand reading is the ONLY thing
  * the site adds, derived per move from the evidence its `evidence` source
  * actually holds (`castReading`) — a band that remembers and documents, never
- * a nag: cadence pressure stays on the needs-doing board. Unmounts with the
- * document, so the unfold state dies with the key like everything sealed.
+ * a nag: cadence pressure stays on the needs-doing board. A move may name its
+ * core step and carry a version: the row prints `vN` from v2 on, the unfold
+ * marks the core. Unmounts with the document, so the unfold state dies with the
+ * key like everything sealed.
  */
 function KillerMovesBand({
   moves,
@@ -1709,12 +1711,22 @@ function KillerMovesBand({
               <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted sm:block">
                 {m.chain}
               </span>
-              <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted">
-                {castReading(
-                  m.evidence,
-                  { recordTotal, sealedAt, backupAt },
-                  nowMs,
+              {/* One right-aligned group, so the version travels with the reading
+                  on the phone too, where the chain is hidden and the row has
+                  free space between the name and the edge. */}
+              <span className="ml-auto flex shrink-0 items-baseline gap-2">
+                {m.version !== undefined && m.version > 1 && (
+                  <span className="text-[10px] tabular-nums text-muted/60">
+                    v{m.version}
+                  </span>
                 )}
+                <span className="text-[11px] tabular-nums text-muted">
+                  {castReading(
+                    m.evidence,
+                    { recordTotal, sealedAt, backupAt },
+                    nowMs,
+                  )}
+                </span>
               </span>
             </button>
             {open.has(m.name) && (
@@ -1724,6 +1736,14 @@ function KillerMovesBand({
                     <span className="shrink-0 tabular-nums text-muted/60">
                       {i + 1}
                     </span>
+                    {m.core === i + 1 && (
+                      <span
+                        aria-label="the core gu"
+                        className="mr-1 text-[9px] text-(--essence-soft)"
+                      >
+                        ◆
+                      </span>
+                    )}
                     <span>
                       {codeSpans(s).map((seg, j) =>
                         seg.code ? (

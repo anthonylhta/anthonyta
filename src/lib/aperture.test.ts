@@ -639,6 +639,31 @@ describe("aperture — killer moves", () => {
     bad([{ ...move, note: "" }]); // an empty note is malformed, not silence
     bad(Array.from({ length: 13 }, (_, i) => ({ ...move, name: `m${i}` }))); // past the ceiling
   });
+
+  it("keeps a core step and a version, and leaves both absent when unsealed", () => {
+    const revised = withSealed({
+      killerMoves: [{ ...move, core: 2, version: 3 }],
+    });
+    expect(normalizeAperture(revised)).toEqual(revised);
+    // A move that names neither carries neither key — absent stays absent.
+    const out = normalizeAperture(withSealed({ killerMoves: [move] }));
+    expect(out?.sealed.killerMoves?.[0]).not.toHaveProperty("core");
+    expect(out?.sealed.killerMoves?.[0]).not.toHaveProperty("version");
+  });
+
+  it("hard-rejects a malformed core or version", () => {
+    const bad = (patch: Record<string, unknown>) =>
+      expect(
+        normalizeAperture(withSealed({ killerMoves: [{ ...move, ...patch }] })),
+      ).toBeNull();
+    bad({ core: 0 }); // steps are 1-based — there is no step zero
+    bad({ core: 3 }); // past this move's two steps
+    bad({ core: 1.5 }); // an index is an integer
+    bad({ core: "1" }); // a number, not the look of one
+    bad({ version: 0 }); // a definition opens at v1
+    bad({ version: 2.5 }); // a revision is an integer
+    bad({ version: "2" }); // same discipline as core
+  });
 });
 
 describe("aperture — gu houses", () => {
