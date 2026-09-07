@@ -9,9 +9,12 @@ import {
   isAttainment,
   isConditionStatus,
   isSealStale,
+  isPlatformCorpse,
+  isPlatformStage,
   isTrialState,
   isTrialTier,
   normalizeAperture,
+  PLATFORM_CORPSES,
   normalizeApertureGlance,
 } from "./aperture";
 
@@ -785,6 +788,130 @@ describe("aperture — the human path", () => {
   });
 });
 
+describe("aperture — the platform", () => {
+  // The mind ladder, the method's pages and the skill's panel. Every word is
+  // ruled at a check-in and printed verbatim; the frame is the whole guard, so
+  // a corpse or a stage this build doesn't know rejects the document.
+  const realms = [
+    {
+      corpse: "本我",
+      stage: "cut",
+      since: "2026-08-06",
+      origin: "the night of the void passed with a guard",
+    },
+    {
+      corpse: "自我",
+      stage: "half a foot in",
+      origin: "three beliefs audited to their higher answer",
+    },
+  ];
+  const skill = {
+    name: "画地为牢",
+    grade: "自我",
+    line: "the circle I drew",
+    level: 1,
+    points: { barsMet: 2, baitHeld: 1 },
+    effects: [
+      "a bar spoken inside the circle binds him",
+      "no skill fired from outside reaches anyone inside",
+    ],
+    flaw: "he cannot be pulled — the circle acts on nothing he has not spoken",
+  };
+  const platform = {
+    realms,
+    next: "the return, or a quarter without one",
+    base: { feeling: "anger", stance: "water" },
+    method: ["name it while it is happening", "sort inner from outer"],
+    skill,
+    circle: [
+      {
+        said: "one new restaurant this week",
+        on: "2026-09-03",
+        due: "2026-09-10",
+        met: "2026-09-05",
+      },
+    ],
+  };
+
+  it("accepts the full shape and a bare pair of realms", () => {
+    const full = withSealed({ platform });
+    expect(normalizeAperture(full)).toEqual(full);
+    const bare = withSealed({ platform: { realms } });
+    expect(normalizeAperture(bare)).toEqual(bare);
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("platform");
+  });
+
+  it("drops an unknown key inside a realm and inside the skill", () => {
+    const out = normalizeAperture(
+      withSealed({
+        platform: {
+          realms: [{ ...realms[0], mutated: 1 }],
+          skill: { ...skill, mutated: 1 },
+        },
+      }),
+    );
+    expect(out?.sealed.platform?.realms).toEqual([realms[0]]);
+    expect(out?.sealed.platform?.skill).toEqual(skill);
+  });
+
+  it("hard-rejects a malformed ladder", () => {
+    const bad = (p: unknown) =>
+      expect(normalizeAperture(withSealed({ platform: p }))).toBeNull();
+    bad({ realms: [{ ...realms[0], corpse: "真我" }] }); // a fourth corpse
+    bad({ realms: [{ ...realms[0], stage: "ascended" }] }); // a fifth stage
+    bad({ realms: [realms[0], { ...realms[0], stage: "mortal" }] }); // twice the same layer
+    bad({
+      realms: [
+        ...realms,
+        { ...realms[0], corpse: "超我" },
+        { ...realms[0], corpse: "本我" },
+      ],
+    }); // past three
+    bad({ realms: [] }); // a ladder with no rung is not a ladder
+    bad({ realms: [{ ...realms[0], since: "6 Aug 2026" }] }); // the dated fact is YYYY-MM-DD
+    bad({ realms: [{ ...realms[0], origin: "" }] }); // a stage either says what it was read off or isn't sealed
+  });
+
+  it("hard-rejects a malformed panel", () => {
+    const bad = (patch: Record<string, unknown>) =>
+      expect(
+        normalizeAperture(
+          withSealed({ platform: { realms, skill: { ...skill, ...patch } } }),
+        ),
+      ).toBeNull();
+    bad({ level: 0 }); // the panel opens at one star
+    bad({ level: 10 }); // and stops at nine
+    bad({ points: { barsMet: -1, baitHeld: 0 } }); // never lost, so never negative
+    bad({ points: { barsMet: 1 } }); // both reads or neither
+    bad({ effects: [] }); // bare brackets are not a panel
+    bad({ effects: ["a", "b", "c", "d", "e"] }); // 效果一…四 and no further
+    bad({ flaw: "x".repeat(401) }); // past the line's ceiling
+  });
+
+  it("caps the pages and the met bars", () => {
+    const many = (key: "method" | "circle", n: number, row: unknown) =>
+      withSealed({
+        platform: { realms, [key]: Array.from({ length: n }, () => row) },
+      });
+    const page = "a line of the method";
+    expect(normalizeAperture(many("method", 12, page))).not.toBeNull();
+    expect(normalizeAperture(many("method", 13, page))).toBeNull();
+    const bar = {
+      said: "gym 4/4",
+      on: "2026-08-20",
+      due: "2026-08-27",
+      met: "2026-08-27",
+    };
+    expect(normalizeAperture(many("circle", 200, bar))).not.toBeNull();
+    expect(normalizeAperture(many("circle", 201, bar))).toBeNull();
+  });
+});
+
 describe("aperture — gu houses", () => {
   // The colophon's input: name/type/origin sealed whole, printed verbatim; the
   // census beside the first house is derived and never rides the frame.
@@ -1238,6 +1365,23 @@ describe("aperture — the harvest and the rulings", () => {
     expect(normalizeAperture(harvested)).toEqual(harvested);
   });
 
+  it("carries a harvest's corpse and rejects a class it doesn't know", () => {
+    const classed = withSealed({
+      enlightenments: [{ ...entry, corpse: "emotion" }],
+    });
+    expect(normalizeAperture(classed)).toEqual(classed);
+    // The ladder reads the class, so an unknown word is a frame breach.
+    expect(
+      normalizeAperture(
+        withSealed({ enlightenments: [{ ...entry, corpse: "will" }] }),
+      ),
+    ).toBeNull();
+    // Absent stays absent — a harvest belonging to no corpse says nothing.
+    expect(
+      normalizeAperture(harvested)?.sealed.enlightenments?.[0],
+    ).not.toHaveProperty("corpse");
+  });
+
   it("accepts an entry that came out of no trial at all", () => {
     const out = normalizeAperture(
       withSealed({
@@ -1426,6 +1570,10 @@ describe("aperture — vocabulary guards", () => {
     for (const t of ["earthly", "heavenly", "grand"]) {
       expect(isTrialTier(t)).toBe(true);
     }
+    for (const c of PLATFORM_CORPSES) expect(isPlatformCorpse(c)).toBe(true);
+    for (const s of ["mortal", "half a foot in", "cut", "returned"]) {
+      expect(isPlatformStage(s)).toBe(true);
+    }
     for (const a of ATTAINMENTS) expect(isAttainment(a)).toBe(true);
   });
 
@@ -1441,6 +1589,10 @@ describe("aperture — vocabulary guards", () => {
     expect(isTrialTier("")).toBe(false);
     expect(isAttainment("quasi-mythic")).toBe(false);
     expect(isAttainment("")).toBe(false);
+    expect(isPlatformCorpse("真我")).toBe(false);
+    expect(isPlatformCorpse("")).toBe(false);
+    expect(isPlatformStage("ascended")).toBe(false);
+    expect(isPlatformStage("")).toBe(false);
   });
 });
 

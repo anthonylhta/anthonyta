@@ -1,7 +1,10 @@
 import {
   isApertureStage,
+  PLATFORM_CORPSES,
   type ApertureAlmanacEntry,
   type AperturePath,
+  type AperturePlatform,
+  type AperturePlatformRealm,
   type ApertureCast,
   type ApertureCondition,
   type ApertureDoc,
@@ -11,6 +14,8 @@ import {
   type ApertureStage,
   type ApertureStreak,
   type ApertureTrial,
+  type PlatformCorpse,
+  type PlatformStage,
 } from "./aperture";
 import { audCompact } from "./money";
 
@@ -1660,4 +1665,106 @@ export function recordedDays(titles: string[], today: string): number {
   for (const title of titles)
     if (DAILY_TITLE.test(title) && title <= today) days.add(title);
   return days.size;
+}
+
+// --- the platform band (the mind ladder + the skill) --------------------------
+
+/** The points needed to reach lv2…lv6 — the ladder the check-in proposed and
+ *  owns. Past the table there is no next threshold to print: the fraction's
+ *  denominator becomes an honest dash rather than a number nobody has ruled. */
+export const LEVEL_POINTS: readonly number[] = [10, 25, 50, 100, 200];
+
+/** The threshold for the level ABOVE `level`, or null past the table. */
+export function levelNext(level: number): number | null {
+  return LEVEL_POINTS[level - 1] ?? null;
+}
+
+/**
+ * What the mind must have done before a level may turn (skill doc §9.1's third
+ * amendment): the tool never runs ahead of the mind that wields it. Keyed by
+ * the level being reached — a level with no entry is one no gate has been ruled
+ * for, and the fraction alone decides.
+ */
+export const LEVEL_GATE: Record<
+  number,
+  { corpse: PlatformCorpse; stage: PlatformStage }
+> = {
+  2: { corpse: "本我", stage: "returned" },
+  3: { corpse: "自我", stage: "cut" },
+  4: { corpse: "自我", stage: "returned" },
+  5: { corpse: "超我", stage: "cut" },
+  6: { corpse: "超我", stage: "returned" },
+};
+
+/** The stage each corpse is CURRENTLY at, as one row's glyph — the ladder's
+ *  four states in order, so a gate asking for `cut` is satisfied by
+ *  `returned` too: nothing is ever subtracted, so a stage passed stays passed. */
+const STAGE_HEIGHT: Record<PlatformStage, number> = {
+  mortal: 0,
+  "half a foot in": 1,
+  cut: 2,
+  returned: 3,
+};
+
+/** The dot each stage wears — filled as the switch starts working both ways. */
+export const STAGE_GLYPH: Record<PlatformStage, string> = {
+  mortal: "○",
+  "half a foot in": "◔",
+  cut: "◑",
+  returned: "●",
+};
+
+/** What each corpse IS, in the ladder's words — the row's trailing reading. */
+export function realmLayer(corpse: PlatformCorpse): string {
+  if (corpse === "本我") return "the reactive layer";
+  if (corpse === "自我") return "the installed beliefs";
+  return "the relational binds";
+}
+
+/**
+ * The band header's right-hand word: the HIGHEST layer that has moved at all,
+ * read in canonical order — climbing 本我 says less about the platform than
+ * having reached into 超我 does. All mortal reads `mortal`, which is a real
+ * standing rather than an absence.
+ */
+export function platformHeader(
+  realms: readonly AperturePlatformRealm[],
+): string {
+  let out = "mortal";
+  for (const corpse of PLATFORM_CORPSES) {
+    const realm = realms.find((r) => r.corpse === corpse);
+    if (realm && realm.stage !== "mortal")
+      out = `${realm.corpse} · ${realm.stage}`;
+  }
+  return out;
+}
+
+/** The panel's level fraction, read: how many points stand, what the next level
+ *  asks for, and whether the fraction is FULL but held by the realms. */
+export interface SkillRead {
+  points: number;
+  /** The next level's threshold, or null past the ladder's table. */
+  next: number | null;
+  /** Full and waiting on the mind — the book's own `1（14/10）`. */
+  held: boolean;
+}
+
+/**
+ * The skill's own reading. The sealed `level` is authoritative and this never
+ * bumps it: points fill the fraction, and when the fraction fills while the
+ * realm gate is unmet the panel says `held` rather than pretending the upgrade
+ * turned. A level past the ladder's table has no threshold and so cannot be
+ * held — there is nothing yet ruled to be full of.
+ */
+export function skillRead(platform: AperturePlatform): SkillRead {
+  const skill = platform.skill;
+  if (!skill) return { points: 0, next: null, held: false };
+  const points = skill.points.barsMet + skill.points.baitHeld;
+  const next = levelNext(skill.level);
+  if (next === null || points < next) return { points, next, held: false };
+  const gate = LEVEL_GATE[skill.level + 1];
+  if (!gate) return { points, next, held: false };
+  const realm = platform.realms.find((r) => r.corpse === gate.corpse);
+  const height = realm ? STAGE_HEIGHT[realm.stage] : 0;
+  return { points, next, held: height < STAGE_HEIGHT[gate.stage] };
 }

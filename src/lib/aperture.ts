@@ -45,6 +45,20 @@ export type ConditionStatus =
  *  zombie, canon's life-extension route — no growth while it stands. */
 export type ApertureModeName = "immortal zombie";
 
+/** The three corpses of the mind ladder, in canonical order — the reactive
+ *  layer, the installed beliefs, the relational binds. Closed: the platform
+ *  band renders one row per corpse, so a fourth would have nowhere to sit. */
+export type PlatformCorpse = "本我" | "自我" | "超我";
+
+/** A corpse's stage — the round trip the ladder is made of. `cut` is the switch
+ *  working ONE way; `returned` is both ways, held for a quarter. Closed for the
+ *  same reason the mode name is: the site colours and glyphs off the word. */
+export type PlatformStage = "mortal" | "half a foot in" | "cut" | "returned";
+
+/** Which class of harvest an enlightenment was — the corpse it belongs to, in
+ *  the ladder's own words rather than the corpse glyph. */
+export type EnlightenmentCorpse = "emotion" | "sense" | "feeling";
+
 /** Where a trial sits: pending, banked for later, or already resolved. */
 export type TrialState = "active" | "stocked" | "passed" | "failed";
 
@@ -75,6 +89,22 @@ const CONDITION_STATUSES: readonly ConditionStatus[] = [
 ];
 
 const MODE_NAMES: readonly ApertureModeName[] = ["immortal zombie"];
+
+/** The corpses LOWEST → HIGHEST, and the order the band renders them in. */
+export const PLATFORM_CORPSES = ["本我", "自我", "超我"] as const;
+
+const PLATFORM_STAGES: readonly PlatformStage[] = [
+  "mortal",
+  "half a foot in",
+  "cut",
+  "returned",
+];
+
+const ENLIGHTENMENT_CORPSES: readonly EnlightenmentCorpse[] = [
+  "emotion",
+  "sense",
+  "feeling",
+];
 
 const TRIAL_STATES: readonly TrialState[] = [
   "active",
@@ -112,6 +142,16 @@ export function isApertureStage(x: unknown): x is ApertureStage {
 /** Whether `x` is a condition status this build knows — anything else renders muted. */
 export function isConditionStatus(x: unknown): x is ConditionStatus {
   return inVocab(CONDITION_STATUSES, x);
+}
+
+/** Whether `x` is a corpse of the mind ladder — a fourth is a frame breach. */
+export function isPlatformCorpse(x: unknown): x is PlatformCorpse {
+  return inVocab(PLATFORM_CORPSES, x);
+}
+
+/** Whether `x` is a ladder stage this build knows — a fifth is a frame breach. */
+export function isPlatformStage(x: unknown): x is PlatformStage {
+  return inVocab(PLATFORM_STAGES, x);
 }
 
 /** Whether `x` is a trial state this build knows — anything else renders muted. */
@@ -274,6 +314,11 @@ export interface ApertureEnlightenment {
   date: string;
   title: string;
   trial?: string;
+  /** Which corpse of the mind ladder the harvest belongs to, when the check-in
+   *  ruled one — the platform's evidence that a switch worked. Absent on every
+   *  entry harvested before the ladder existed, and on any that belongs to no
+   *  corpse. */
+  corpse?: EnlightenmentCorpse;
   /** At least one paragraph — an entry with no body is not an entry. */
   body: string[];
 }
@@ -311,6 +356,16 @@ const MAX_KILLER_MOVES = 12;
 const MAX_MOVE_STEPS = 12;
 const MAX_STEP_CHARS = 400;
 const MAX_HUMAN_GU = 12;
+/** One row per corpse and no more — the band renders the canonical three. */
+const MAX_PLATFORM_REALMS = 3;
+/** The panel prints one line per effect, so the ceiling is the book's own: a
+ *  skill sharpens into 效果一…效果四 and never past it. */
+const MAX_EFFECTS = 4;
+/** The highest level the panel can print — the book's nine stars. */
+const MAX_LEVEL = 9;
+/** The met bars a seal carries. The band reads five and counts the rest, so
+ *  like the rulings' this is an envelope guard rather than a UI one. */
+const MAX_CIRCLE = 200;
 const MAX_GU_HOUSES = 8;
 const MAX_ORIGIN_BEATS = 12;
 const MAX_BEAT_CHARS = 400;
@@ -424,6 +479,79 @@ export interface ApertureHumanGu {
    *  "leaves only if the search is abandoned". Absent = nothing printed:
    *  abandonment is the entry no longer being emitted, never a verdict. */
   leaves?: string;
+}
+
+/** One corpse's standing on the mind ladder. The stage word advances only at a
+ *  seal, by rule, and nothing is ever subtracted — a bad quarter changes no
+ *  word. The site prints the word and derives nothing from it. */
+export interface AperturePlatformRealm {
+  corpse: PlatformCorpse;
+  /** The day the CURRENT stage was ruled, when the check-in dated it. */
+  since?: string;
+  stage: PlatformStage;
+  /** The line under the row — the demonstration the stage was read off. */
+  origin: string;
+}
+
+/** One bar spoken inside the circle: a promise about his own future action,
+ *  owed by its date. `met` present = it was kept, on that day. */
+export interface AperturePlatformBar {
+  said: string;
+  /** The day it was spoken, `YYYY-MM-DD`. */
+  on: string;
+  /** The day it comes due. */
+  due: string;
+  /** The day it was met — absent on a bar the seal is still carrying open. */
+  met?: string;
+}
+
+/**
+ * The skill on the sheet, as its holder's panel prints it (the book's own
+ * display order). `level` is AUTHORITATIVE: points fill the fraction, but the
+ * upgrade turns only when the realms allow it, and that adjudication is the
+ * check-in's — the site never bumps a level, it only reads whether the
+ * fraction is full and held.
+ */
+export interface AperturePlatformSkill {
+  name: string;
+  /** The grade word beside the level — "自我", the corpse tier it acts at. */
+  grade: string;
+  /** The row's one-line reading, beside the name. */
+  line: string;
+  /** 1..9 — the book's nine stars. */
+  level: number;
+  /** The two positive-only reads the seal already makes; never spent, never
+   *  lost. Their sum is the fraction's numerator. */
+  points: { barsMet: number; baitHeld: number };
+  /** One line per 效果, in the panel's order — at least one, at most four. */
+  effects: string[];
+  /** 缺陷 — the one line the book never prints, and the reason the skill is
+   *  honest about what it cannot do. */
+  flaw: string;
+}
+
+/**
+ * 台 — the platform: the mind ladder's standing, the pages of the method, and
+ * the skill that stands on it (ADR: the platform band). Everything here is
+ * ruled at a check-in from the journal and printed verbatim; the only things
+ * the site derives are the header's word and the level fraction's reading.
+ */
+export interface AperturePlatform {
+  /** One to three rows, corpses unique. The band renders in canonical order
+   *  and prints a corpse the seal omits as `mortal` with no origin — an
+   *  unclimbed layer is a real state, not a missing one. */
+  realms: AperturePlatformRealm[];
+  /** What the next seal is watching for on this axis, in the check-in's words. */
+  next?: string;
+  /** 底色 — the engine feeling and the stance it takes, ruled once and rarely
+   *  re-ruled (三心合一, the strongest form). */
+  base?: { feeling: string; stance: string };
+  /** The pages of the method, one line each — the killer-move step caps. */
+  method?: string[];
+  skill?: AperturePlatformSkill;
+  /** The met bars the seal carries — the panel's history under `bars spoken`.
+   *  Open bars live in the E2EE circle store, never here. */
+  circle?: AperturePlatformBar[];
 }
 
 /**
@@ -615,6 +743,9 @@ export interface ApertureSealed {
   /** The human path's trait gu (ADR 0180) — minted from the owner's own record.
    *  Absent on every document sealed before the band existed. */
   humanGu?: ApertureHumanGu[];
+  /** The mind ladder, the method and the skill that stands on it. Absent on
+   *  every document sealed before the band existed. */
+  platform?: AperturePlatform;
   /** The houses, first = the hub itself (it carries the derived census and
    *  absorbs the rented footnote as its essence line). Absent on every document
    *  sealed before the band existed. */
@@ -883,10 +1014,14 @@ function normEnlightenment(x: unknown): ApertureEnlightenment | null {
   if (!isObj(x)) return null;
   if (!isDay(x.date)) return null;
   if (!isProse(x.title, MAX_TITLE_CHARS)) return null;
-  const { trial } = x;
+  const { trial, corpse } = x;
   // The title and the paragraphs are printed as the entry; the trial name is
   // printed only when there is one, so an empty one is silence, not bare chrome.
   if (trial !== undefined && !isStr(trial)) return null;
+  // The harvest's class is a CLOSED vocabulary — the ladder reads it, so a word
+  // this build doesn't know is a frame breach rather than a muted literal.
+  if (corpse !== undefined && !inVocab(ENLIGHTENMENT_CORPSES, corpse))
+    return null;
   const body = normArray(x.body, (v) =>
     isProse(v, MAX_PARAGRAPH_CHARS) ? v : null,
   );
@@ -896,6 +1031,7 @@ function normEnlightenment(x: unknown): ApertureEnlightenment | null {
     date: x.date,
     title: x.title,
     ...(trial !== undefined ? { trial } : {}),
+    ...(corpse !== undefined ? { corpse } : {}),
     body,
   };
 }
@@ -967,6 +1103,115 @@ function normHumanGu(x: unknown): ApertureHumanGu | null {
     refined: x.refined,
     origin: x.origin,
     ...(leaves !== undefined ? { leaves } : {}),
+  };
+}
+
+function normPlatformRealm(x: unknown): AperturePlatformRealm | null {
+  if (!isObj(x)) return null;
+  if (!isPlatformCorpse(x.corpse) || !isPlatformStage(x.stage)) return null;
+  if (!isProse(x.origin, MAX_STEP_CHARS)) return null;
+  const { since } = x;
+  // The date is printed beside the origin when the ruling carried one; a stage
+  // ruled without a date says nothing rather than inventing one.
+  if (since !== undefined && !isDay(since)) return null;
+  return {
+    corpse: x.corpse,
+    ...(since !== undefined ? { since } : {}),
+    stage: x.stage,
+    origin: x.origin,
+  };
+}
+
+function normPlatformBar(x: unknown): AperturePlatformBar | null {
+  if (!isObj(x)) return null;
+  if (!isProse(x.said, MAX_STEP_CHARS)) return null;
+  if (!isDay(x.on) || !isDay(x.due)) return null;
+  const { met } = x;
+  if (met !== undefined && !isDay(met)) return null;
+  return {
+    said: x.said,
+    on: x.on,
+    due: x.due,
+    ...(met !== undefined ? { met } : {}),
+  };
+}
+
+function normPlatformSkill(x: unknown): AperturePlatformSkill | null {
+  if (!isObj(x)) return null;
+  if (
+    !isProse(x.name, MAX_TITLE_CHARS) ||
+    !isProse(x.grade, MAX_TITLE_CHARS) ||
+    !isProse(x.line, MAX_TITLE_CHARS) ||
+    !isProse(x.flaw, MAX_STEP_CHARS)
+  )
+    return null;
+  if (!isPosInt(x.level) || x.level > MAX_LEVEL) return null;
+  const { points } = x;
+  if (!isObj(points)) return null;
+  if (!isNonNegInt(points.barsMet) || !isNonNegInt(points.baitHeld))
+    return null;
+  const effects = normArray(x.effects, (v) =>
+    isProse(v, MAX_STEP_CHARS) ? v : null,
+  );
+  // A skill with no effect line is not a skill — the panel would print bare
+  // brackets, exactly as a killer move with no steps would print a bare unfold.
+  if (effects === null || effects.length === 0 || effects.length > MAX_EFFECTS)
+    return null;
+  return {
+    name: x.name,
+    grade: x.grade,
+    line: x.line,
+    level: x.level,
+    points: { barsMet: points.barsMet, baitHeld: points.baitHeld },
+    effects,
+    flaw: x.flaw,
+  };
+}
+
+function normPlatform(x: unknown): AperturePlatform | null {
+  if (!isObj(x)) return null;
+  const realms = normArray(x.realms, normPlatformRealm);
+  if (realms === null || realms.length === 0) return null;
+  if (realms.length > MAX_PLATFORM_REALMS) return null;
+  // One row per corpse: the band renders the canonical three and would have to
+  // choose between two rows claiming the same layer.
+  if (new Set(realms.map((r) => r.corpse)).size !== realms.length) return null;
+  const { next, base } = x;
+  if (next !== undefined && !isProse(next, MAX_STEP_CHARS)) return null;
+  let baseOut: { feeling: string; stance: string } | undefined;
+  if (base !== undefined) {
+    if (!isObj(base)) return null;
+    if (
+      !isProse(base.feeling, MAX_TITLE_CHARS) ||
+      !isProse(base.stance, MAX_TITLE_CHARS)
+    )
+      return null;
+    baseOut = { feeling: base.feeling, stance: base.stance };
+  }
+  let method: string[] | undefined;
+  if (x.method !== undefined) {
+    const lines = normArray(x.method, (v) =>
+      isProse(v, MAX_STEP_CHARS) ? v : null,
+    );
+    // An empty page list is malformed rather than absent: the fold would open
+    // onto nothing.
+    if (lines === null || lines.length === 0 || lines.length > MAX_MOVE_STEPS)
+      return null;
+    method = lines;
+  }
+  const skill = x.skill === undefined ? undefined : normPlatformSkill(x.skill);
+  if (skill === null) return null;
+  const circle =
+    x.circle === undefined ? undefined : normArray(x.circle, normPlatformBar);
+  if (circle === null) return null;
+  if (circle !== undefined && circle.length > MAX_CIRCLE) return null;
+  return {
+    realms,
+    ...(next !== undefined ? { next } : {}),
+    ...(baseOut !== undefined ? { base: baseOut } : {}),
+    ...(method !== undefined ? { method } : {}),
+    ...(skill !== undefined ? { skill } : {}),
+    ...(circle !== undefined ? { circle } : {}),
   };
 }
 
@@ -1211,6 +1456,9 @@ function normSealed(x: unknown): ApertureSealed | null {
     x.humanGu === undefined ? undefined : normArray(x.humanGu, normHumanGu);
   if (humanGu === null) return null;
   if (humanGu !== undefined && humanGu.length > MAX_HUMAN_GU) return null;
+  const platform =
+    x.platform === undefined ? undefined : normPlatform(x.platform);
+  if (platform === null) return null;
   const guHouses =
     x.guHouses === undefined ? undefined : normArray(x.guHouses, normGuHouse);
   if (guHouses === null) return null;
@@ -1256,6 +1504,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     ...(soul !== undefined ? { soul } : {}),
     ...(killerMoves !== undefined ? { killerMoves } : {}),
     ...(humanGu !== undefined ? { humanGu } : {}),
+    ...(platform !== undefined ? { platform } : {}),
     ...(guHouses !== undefined ? { guHouses } : {}),
     ...(inheritances !== undefined ? { inheritances } : {}),
     ...(held !== undefined ? { held } : {}),
