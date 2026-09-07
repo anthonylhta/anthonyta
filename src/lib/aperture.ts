@@ -41,6 +41,10 @@ export type ConditionStatus =
   | "failing"
   | "suspended";
 
+/** The survival modes a seal can declare (ADR 0181). One so far: the immortal
+ *  zombie, canon's life-extension route — no growth while it stands. */
+export type ApertureModeName = "immortal zombie";
+
 /** Where a trial sits: pending, banked for later, or already resolved. */
 export type TrialState = "active" | "stocked" | "passed" | "failed";
 
@@ -69,6 +73,8 @@ const CONDITION_STATUSES: readonly ConditionStatus[] = [
   "failing",
   "suspended",
 ];
+
+const MODE_NAMES: readonly ApertureModeName[] = ["immortal zombie"];
 
 const TRIAL_STATES: readonly TrialState[] = [
   "active",
@@ -304,6 +310,7 @@ const MAX_RULING_CHARS = 4000;
 const MAX_KILLER_MOVES = 12;
 const MAX_MOVE_STEPS = 12;
 const MAX_STEP_CHARS = 400;
+const MAX_HUMAN_GU = 12;
 const MAX_GU_HOUSES = 8;
 const MAX_ORIGIN_BEATS = 12;
 const MAX_BEAT_CHARS = 400;
@@ -398,6 +405,25 @@ export interface ApertureKillerMove {
   /** The revision, bumped only when a re-seal changes the steps. The row prints
    *  it from v2 on: a first definition has no revision to announce. */
   version?: number;
+}
+
+/** One trait gu of the human path (ADR 0180): minted only by ruling from the
+ *  owner's own record, never borrowed — every field prints verbatim. */
+export interface ApertureHumanGu {
+  /** "hope", "courage" — the row's name. */
+  name: string;
+  /** The rank word the row prints after the name — "rank 1", "legend". */
+  rank: string;
+  /** What it is, in the check-in's words — "the gu that opened the aperture". */
+  kind: string;
+  /** The day it was refined, `YYYY-MM-DD` — the dated fact the row points at. */
+  refined: string;
+  /** The origin line under the row — the record it was minted from. */
+  origin: string;
+  /** The lapse clause, whole, in the check-in's words — "never leaves",
+   *  "leaves only if the search is abandoned". Absent = nothing printed:
+   *  abandonment is the entry no longer being emitted, never a verdict. */
+  leaves?: string;
 }
 
 /**
@@ -527,6 +553,25 @@ export interface ApertureSoul {
   strained: boolean;
 }
 
+/**
+ * A declared survival mode (ADR 0181): entered by ruling with a start day and
+ * the method that ends it. While it stands the check-in holds every counter,
+ * emits conditions `suspended`, accrues no marks and counts no strikes — the
+ * site prints the declaration once and derives nothing from it. The exit is
+ * the method EXECUTED, ruled at a check-in; there is nothing here to resolve.
+ */
+export interface ApertureMode {
+  name: ApertureModeName;
+  /** The day it was entered, `YYYY-MM-DD`. */
+  since: string;
+  /** The named exit method, whole, in the check-in's words — "the surgeon's
+   *  clearance and the first logged session". A mode has no exit only in
+   *  canon; here it cannot be declared without one. */
+  exit: string;
+  /** One honest line beside it, when the week has one. */
+  note?: string;
+}
+
 /** Everything behind the unlock. `streaks` is an open record keyed by streak name
  *  for the same reason as the strike counters: the names are data. */
 export interface ApertureSealed {
@@ -548,6 +593,9 @@ export interface ApertureSealed {
    * again whenever a week has nothing to say about what comes next.
    */
   next?: string;
+  /** The declared survival mode, if one stands — the state the next seal sits
+   *  in. Absent = none, on every document. */
+  mode?: ApertureMode;
   /** The harvest: what the trials yielded, newest first once the page has sorted
    *  them. Absent on every document sealed before the band existed. */
   enlightenments?: ApertureEnlightenment[];
@@ -564,6 +612,9 @@ export interface ApertureSealed {
    *  readings derived by the site from evidence. Absent on every document
    *  sealed before the band existed, and the band simply doesn't render. */
   killerMoves?: ApertureKillerMove[];
+  /** The human path's trait gu (ADR 0180) — minted from the owner's own record.
+   *  Absent on every document sealed before the band existed. */
+  humanGu?: ApertureHumanGu[];
   /** The houses, first = the hub itself (it carries the derived census and
    *  absorbs the rented footnote as its essence line). Absent on every document
    *  sealed before the band existed. */
@@ -895,6 +946,30 @@ function normKillerMove(x: unknown): ApertureKillerMove | null {
   };
 }
 
+function normHumanGu(x: unknown): ApertureHumanGu | null {
+  if (!isObj(x)) return null;
+  if (
+    !isProse(x.name, MAX_TITLE_CHARS) ||
+    !isProse(x.rank, MAX_TITLE_CHARS) ||
+    !isProse(x.kind, MAX_TITLE_CHARS) ||
+    !isDay(x.refined) ||
+    !isProse(x.origin, MAX_STEP_CHARS)
+  )
+    return null;
+  const { leaves } = x;
+  // The lapse clause is printed whole or not at all — an absent one means the
+  // row says nothing about leaving, never that the trait has lapsed.
+  if (leaves !== undefined && !isProse(leaves, MAX_STEP_CHARS)) return null;
+  return {
+    name: x.name,
+    rank: x.rank,
+    kind: x.kind,
+    refined: x.refined,
+    origin: x.origin,
+    ...(leaves !== undefined ? { leaves } : {}),
+  };
+}
+
 function normInheritance(x: unknown): ApertureInheritance | null {
   if (!isObj(x)) return null;
   if (!isProse(x.source, MAX_TITLE_CHARS) || !isProse(x.gave, MAX_TITLE_CHARS))
@@ -1072,6 +1147,23 @@ function normSoul(x: unknown): ApertureSoul | null {
   };
 }
 
+function normMode(x: unknown): ApertureMode | null {
+  if (!isObj(x)) return null;
+  // The mode name is a CLOSED vocabulary, the same rule `evidence` keeps: a mode
+  // this build doesn't know is a frame breach, not data.
+  if (!inVocab(MODE_NAMES, x.name)) return null;
+  if (!isDay(x.since)) return null;
+  if (!isProse(x.exit, MAX_STEP_CHARS)) return null;
+  const { note } = x;
+  if (note !== undefined && !isProse(note, MAX_STEP_CHARS)) return null;
+  return {
+    name: x.name,
+    since: x.since,
+    exit: x.exit,
+    ...(note !== undefined ? { note } : {}),
+  };
+}
+
 function normSealed(x: unknown): ApertureSealed | null {
   if (!isObj(x)) return null;
   const streaks = normRecord(x.streaks, normStreak);
@@ -1106,6 +1198,8 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (profile === null) return null;
   const soul = x.soul === undefined ? undefined : normSoul(x.soul);
   if (soul === null) return null;
+  const mode = x.mode === undefined ? undefined : normMode(x.mode);
+  if (mode === null) return null;
   const killerMoves =
     x.killerMoves === undefined
       ? undefined
@@ -1113,6 +1207,10 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (killerMoves === null) return null;
   if (killerMoves !== undefined && killerMoves.length > MAX_KILLER_MOVES)
     return null;
+  const humanGu =
+    x.humanGu === undefined ? undefined : normArray(x.humanGu, normHumanGu);
+  if (humanGu === null) return null;
+  if (humanGu !== undefined && humanGu.length > MAX_HUMAN_GU) return null;
   const guHouses =
     x.guHouses === undefined ? undefined : normArray(x.guHouses, normGuHouse);
   if (guHouses === null) return null;
@@ -1150,12 +1248,14 @@ function normSealed(x: unknown): ApertureSealed | null {
     trials,
     breakthrough,
     ...(next !== undefined ? { next } : {}),
+    ...(mode !== undefined ? { mode } : {}),
     ...(enlightenments !== undefined ? { enlightenments } : {}),
     ...(rulings !== undefined ? { rulings } : {}),
     ...(rented !== undefined ? { rented } : {}),
     ...(profile !== undefined ? { profile } : {}),
     ...(soul !== undefined ? { soul } : {}),
     ...(killerMoves !== undefined ? { killerMoves } : {}),
+    ...(humanGu !== undefined ? { humanGu } : {}),
     ...(guHouses !== undefined ? { guHouses } : {}),
     ...(inheritances !== undefined ? { inheritances } : {}),
     ...(held !== undefined ? { held } : {}),
