@@ -57,6 +57,7 @@ import {
   detailStatus,
   evidenceDaysThisWeek,
   guHeldCount,
+  guHeldCounts,
   hardenLines,
   imminentMajorTrial,
   isImminent,
@@ -369,6 +370,7 @@ async function mealsConfig(
 
 export function ApertureInner({
   offline,
+  hiddenBands,
   formations,
   backupAt,
   series,
@@ -378,6 +380,11 @@ export function ApertureInner({
   today,
 }: {
   offline: boolean;
+  /** The bands this reading is not drawing today, off the owner's layout config
+   *  (the `aperture` surface, hide-only). Hiding never un-gates a band: a hidden
+   *  key drops a band that would have rendered, and shows nothing that wouldn't
+   *  have. */
+  hiddenBands: string[];
   /** The formations band's rows, judged on the server off plaintext evidence
    *  (ADR 0167) — the island renders them verbatim. */
   formations: FormationRow[];
@@ -401,6 +408,7 @@ export function ApertureInner({
    *  draws and the ones it derives in the browser can't sit on different days. */
   today: string;
 }) {
+  const hidden = new Set(hiddenBands);
   const { status, openItem, sealItem, doc, fin, dataErr } =
     useApertureDoc(offline);
   /** The sealed gym log, once it lands — the training strip and the vessel's
@@ -423,13 +431,16 @@ export function ApertureInner({
   const [openHarvest, setOpenHarvest] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  /** Which rulings are open, by ledger key. Null is UNTOUCHED, and untouched
-   *  reads the newest ruling open: the band's job is to hand over the last
-   *  check-in's reasoning without a tap. The set exists once a row is toggled. */
-  const [openRulings, setOpenRulings] = useState<ReadonlySet<string> | null>(
-    null,
+  /** Which rulings are open, by ledger key — every one starts closed, like the
+   *  harvest above it: the ledger reads as a list of what was ruled, and opens
+   *  into the reasoning only when asked. */
+  const [openRulings, setOpenRulings] = useState<ReadonlySet<string>>(
+    new Set(),
   );
   const [rulingPage, setRulingPage] = useState(0);
+  /** Whether the record's strips are open. Folded at rest: the seal-by-seal
+   *  reading is history, and history is looked up rather than read daily. */
+  const [recordOpen, setRecordOpen] = useState(false);
 
   // Render-phase adjustment (not an effect): dropping everything decrypted the
   // moment the vault stops being unlocked, per the lint-blessed reset pattern.
@@ -446,8 +457,9 @@ export function ApertureInner({
       setJobs(null);
       setShowResolved(false);
       setOpenHarvest(new Set());
-      setOpenRulings(null);
+      setOpenRulings(new Set());
       setRulingPage(0);
+      setRecordOpen(false);
     }
   }
 
@@ -635,21 +647,18 @@ export function ApertureInner({
   );
   const rulingRows = rulingEntries(doc.sealed.rulings ?? []);
   const rulingPages = bookPageCount(rulingRows.length);
-  const openRulingSet =
-    openRulings ?? new Set(rulingRows[0] ? [rulingRows[0].key] : []);
   const toggleHarvest = (key: string) =>
     setOpenHarvest((prev) => {
       const next = new Set(prev);
       if (!next.delete(key)) next.add(key);
       return next;
     });
-  // Seeded from the set as READ, not from a functional `prev`: on the first tap
-  // prev is null, and the newest-open default would be lost with it.
-  const toggleRuling = (key: string) => {
-    const next = new Set(openRulingSet);
-    if (!next.delete(key)) next.add(key);
-    setOpenRulings(next);
-  };
+  const toggleRuling = (key: string) =>
+    setOpenRulings((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   // The server's evidence, plus the series only this browser can produce. The
   // band consumes them identically — a sealed strip is not a special kind of row,
@@ -745,6 +754,15 @@ export function ApertureInner({
   const recordTotal = record
     ? record.rows.length + record.unreadable + record.older
     : 0;
+  // The one reading the folded record shows: the journal streak's span, since it
+  // is the streak every other count is kept beside — or, on a history that never
+  // carried one, whichever streak the seals did carry.
+  const recordLead =
+    record?.trends.find((t) => t.name === "journal") ??
+    record?.trends[0] ??
+    null;
+  // Where the gu are, path by path — the line that stands in for the cards.
+  const guCounts = guHeldCounts(paths);
 
   // The one trial grave enough to be read at the TOP of the page rather than in
   // the trials band below it — see `imminentMajorTrial`.
@@ -808,7 +826,7 @@ export function ApertureInner({
       {/* The status bands, in the register the sheet reads them in — the wall and
           the conditions first, then everything that was only ever readable at
           length. */}
-      {(hasWallBody || breakthrough.wall) && (
+      {!hidden.has("wall") && (hasWallBody || breakthrough.wall) && (
         <>
           <ZoneHeader
             label="the wall"
@@ -848,7 +866,7 @@ export function ApertureInner({
         </>
       )}
 
-      {conditions.length > 0 && (
+      {!hidden.has("conditions") && conditions.length > 0 && (
         <>
           <ZoneHeader
             label="conditions"
@@ -886,7 +904,7 @@ export function ApertureInner({
         </>
       )}
 
-      {paths.length > 0 && (
+      {!hidden.has("paths") && paths.length > 0 && (
         <>
           <ZoneHeader
             label="paths"
@@ -904,10 +922,31 @@ export function ApertureInner({
               />
             ))}
           </div>
+          {/* Where the gu are, in one line — what the cards below used to say a
+              card at a time. It rides with the paths whether or not the cards
+              are drawn, because the count belongs beside the evidence and the
+              compendium is one tap away either way. */}
+          {guCounts.length > 0 && (
+            <div className="border-b border-hairline px-4 py-2">
+              <p className="text-[11px] text-muted">
+                gu held ·{" "}
+                {guCounts.map((g) => (
+                  <Fragment key={g.name}>
+                    {g.name}{" "}
+                    <span className="tabular-nums text-fg/80">{g.count}</span>
+                    {" · "}
+                  </Fragment>
+                ))}
+                <Link href="/gu" className="transition-colors hover:text-amber">
+                  → /gu
+                </Link>
+              </p>
+            </div>
+          )}
         </>
       )}
 
-      {(open.length > 0 || resolved.length > 0) && (
+      {!hidden.has("trials") && (open.length > 0 || resolved.length > 0) && (
         <>
           <ZoneHeader
             label="trials"
@@ -1023,7 +1062,7 @@ export function ApertureInner({
           the other half of the same reading: a trial is what happened, an
           enlightenment is what was taken from it. Every entry starts closed, so
           the band reads as a list and opens into a passage only when asked. */}
-      {harvest.length > 0 && (
+      {!hidden.has("harvest") && harvest.length > 0 && (
         <>
           <ZoneHeader
             label="the harvest"
@@ -1079,14 +1118,18 @@ export function ApertureInner({
       {/* 傳 — what was handed down and what is being left behind, directly
           after the harvest: an enlightenment is a yield, an inheritance is the
           whole field. Absent on every document sealed before the band existed. */}
-      {inheritances &&
+      {!hidden.has("inheritances") &&
+        inheritances &&
         inheritances.received.length + (inheritances.left?.length ?? 0) > 0 && (
           <InheritancesBand inheritances={inheritances} />
         )}
 
-      {/* Every day the LISTING knew about, drawn or accounted for: rows on
-          screen, the capped-out tail, and the ones that wouldn't open. */}
-      {record && recordTotal > 0 && (
+      {/* Every seal the LISTING knew about, counted in the header and read in the
+          strips below it — the per-seal rows moved out when the rulings ledger
+          started explaining each seal in its own words. Folded at rest: the
+          history is a lookup, and the one line at rest says where the longest
+          streak started and where it stands. */}
+      {!hidden.has("record") && record && recordTotal > 0 && (
         <>
           <ZoneHeader
             label="the record"
@@ -1094,111 +1137,105 @@ export function ApertureInner({
             right={`${recordTotal} seal${recordTotal === 1 ? "" : "s"}`}
           />
           <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
-            {record.rows.map((r, i) => (
-              <p key={r.day} className="text-xs">
-                <span
-                  aria-hidden
-                  className={`mr-1.5 inline-block h-[7px] w-[7px] bg-(--essence) ${i === 0 ? "" : "opacity-45"}`}
-                />
-                <span className="tabular-nums text-muted">{r.day}</span>{" "}
-                <span className="text-fg/90">
-                  rank {r.rank} · {r.stage}
+            <button
+              type="button"
+              onClick={() => setRecordOpen(!recordOpen)}
+              aria-expanded={recordOpen}
+              className="flex w-full items-baseline gap-2 text-left text-xs leading-[22px]"
+            >
+              <span className="w-2.5 shrink-0 text-muted/40">
+                {recordOpen ? "▾" : "▸"}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted">
+                streaks · strikes · marks · platform — seal by seal
+              </span>
+              {recordLead && (
+                <span className="shrink-0 text-[11px] tabular-nums text-muted/60">
+                  {recordLead.name} {recordLead.first} → {recordLead.last}
                 </span>
-                {r.essence !== null && (
-                  <span className="text-muted/60"> · {r.essence}</span>
-                )}
-                {r.delta !== null && (
-                  <span className="text-muted/60"> · {r.delta}</span>
-                )}
-              </p>
-            ))}
-            {(record.older > 0 || record.unreadable > 0) && (
-              <p className="text-[11px] text-muted/60">
-                {record.older > 0 && `+${record.older} earlier`}
-                {record.older > 0 && record.unreadable > 0 && " · "}
-                {record.unreadable > 0 &&
-                  `${record.unreadable} unreadable — reload to retry`}
-              </p>
-            )}
-            {/* The rows read a week at a time; these read the whole fetched
-                history at once — left to right in time, the opposite direction
-                to the list above. */}
-            {record.trends.length > 0 && (
+              )}
+            </button>
+            {recordOpen && (
               <>
-                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                  streaks · seal by seal
-                </p>
-                {record.trends.map((t) => (
-                  <TrendRow
-                    key={t.name}
-                    label={t.name}
-                    values={t.values}
-                    delta={t.last - t.first}
-                    plot={`${t.name} streak across seals`}
-                    right={`${t.first} → ${t.last}${
-                      t.target !== null ? ` / ${t.target}` : ""
-                    }`}
-                  />
-                ))}
-              </>
-            )}
-            {/* The wall's own counters, read the same way. No target: the wall
+                {/* The whole fetched history at once, left to right in time. */}
+                {record.trends.length > 0 && (
+                  <>
+                    <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                      streaks · seal by seal
+                    </p>
+                    {record.trends.map((t) => (
+                      <TrendRow
+                        key={t.name}
+                        label={t.name}
+                        values={t.values}
+                        delta={t.last - t.first}
+                        plot={`${t.name} streak across seals`}
+                        right={`${t.first} → ${t.last}${
+                          t.target !== null ? ` / ${t.target}` : ""
+                        }`}
+                      />
+                    ))}
+                  </>
+                )}
+                {/* The wall's own counters, read the same way. No target: the wall
                 breaks on an event, not on a number of strikes. */}
-            {record.strikes.length > 0 && (
-              <>
-                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                  strikes · week by seal
-                </p>
-                {record.strikes.map((t) => (
-                  <TrendRow
-                    key={t.name}
-                    label={t.name}
-                    values={t.values}
-                    delta={t.last - t.first}
-                    plot={`${t.name} strikes across seals`}
-                    right={`${t.first} → ${t.last}`}
-                  />
-                ))}
-              </>
-            )}
-            {/* The dao ledgers, read the same way — each path against its own
+                {record.strikes.length > 0 && (
+                  <>
+                    <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                      strikes · week by seal
+                    </p>
+                    {record.strikes.map((t) => (
+                      <TrendRow
+                        key={t.name}
+                        label={t.name}
+                        values={t.values}
+                        delta={t.last - t.first}
+                        plot={`${t.name} strikes across seals`}
+                        right={`${t.first} → ${t.last}`}
+                      />
+                    ))}
+                  </>
+                )}
+                {/* The dao ledgers, read the same way — each path against its own
                 past. No target and no shared axis: different paths' marks are
                 different substances. */}
-            {record.marks.length > 0 && (
-              <>
-                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                  marks · seal by seal
-                </p>
-                {record.marks.map((t) => (
-                  <TrendRow
-                    key={t.name}
-                    label={t.name}
-                    values={t.values}
-                    delta={t.last - t.first}
-                    plot={`${t.name} dao marks across seals`}
-                    right={`${t.first} → ${t.last}`}
-                  />
-                ))}
-              </>
-            )}
-            {/* The platform's points, read the same way. Both sources are
+                {record.marks.length > 0 && (
+                  <>
+                    <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                      marks · seal by seal
+                    </p>
+                    {record.marks.map((t) => (
+                      <TrendRow
+                        key={t.name}
+                        label={t.name}
+                        values={t.values}
+                        delta={t.last - t.first}
+                        plot={`${t.name} dao marks across seals`}
+                        right={`${t.first} → ${t.last}`}
+                      />
+                    ))}
+                  </>
+                )}
+                {/* The platform's points, read the same way. Both sources are
                 positive-only and never spent, so a flat strip is a week nothing
                 arrived in — not a loss. */}
-            {record.platform.length > 0 && (
-              <>
-                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                  platform · seal by seal
-                </p>
-                {record.platform.map((t) => (
-                  <TrendRow
-                    key={t.name}
-                    label={t.name}
-                    values={t.values}
-                    delta={t.last - t.first}
-                    plot={`${t.name} across seals`}
-                    right={`${t.first} → ${t.last}`}
-                  />
-                ))}
+                {record.platform.length > 0 && (
+                  <>
+                    <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                      platform · seal by seal
+                    </p>
+                    {record.platform.map((t) => (
+                      <TrendRow
+                        key={t.name}
+                        label={t.name}
+                        values={t.values}
+                        delta={t.last - t.first}
+                        plot={`${t.name} across seals`}
+                        right={`${t.first} → ${t.last}`}
+                      />
+                    ))}
+                  </>
+                )}
               </>
             )}
           </div>
@@ -1210,7 +1247,7 @@ export function ApertureInner({
           read by the page like the cast ledger, since the whole record now
           stands. One headline a row under its seal day, tapped to unfold the
           ruling as written, and the newest already open. */}
-      {rulingRows.length > 0 && (
+      {!hidden.has("rulings") && rulingRows.length > 0 && (
         <>
           <ZoneHeader
             label="rulings"
@@ -1236,11 +1273,11 @@ export function ApertureInner({
                     <button
                       type="button"
                       onClick={() => toggleRuling(row.entry.key)}
-                      aria-expanded={openRulingSet.has(row.entry.key)}
+                      aria-expanded={openRulings.has(row.entry.key)}
                       className="flex w-full items-baseline gap-2 text-left text-xs leading-[22px]"
                     >
                       <span className="w-2.5 shrink-0 text-muted/40">
-                        {openRulingSet.has(row.entry.key) ? "▾" : "▸"}
+                        {openRulings.has(row.entry.key) ? "▾" : "▸"}
                       </span>
                       <span
                         className={`min-w-0 flex-1 truncate ${row.entry.weekFold ? "text-muted/60" : "text-fg/90"}`}
@@ -1248,7 +1285,7 @@ export function ApertureInner({
                         {row.entry.headline}
                       </span>
                     </button>
-                    {openRulingSet.has(row.entry.key) && (
+                    {openRulings.has(row.entry.key) && (
                       <div className="mt-1 mb-1 ml-5">
                         <p className="text-[11px] leading-relaxed text-fg/80">
                           {row.entry.ruling.text}
@@ -1291,92 +1328,99 @@ export function ApertureInner({
       {/* 阵 — what the aperture sustains without its owner (ADR 0167). Always
           all five rows, unconditionally: this band's whole point is that an
           absent row can't go amber (the briefing-skip lesson). */}
-      <FormationsBand rows={formations} />
+      {!hidden.has("formations") && <FormationsBand rows={formations} />}
 
       {/* 杀 — what only the owner casts, directly under what runs without him:
           the two halves of the duality read top-to-bottom. Emission-gated like
           the soul — absent until a seal carries the definitions. */}
-      {doc.sealed.killerMoves && doc.sealed.killerMoves.length > 0 && (
-        <KillerMovesBand
-          moves={doc.sealed.killerMoves}
-          recordTotal={recordTotal}
-          sealedAt={doc.sealedAt}
-          backupAt={backupAt}
-        />
+      {!hidden.has("killerMoves") &&
+        doc.sealed.killerMoves &&
+        doc.sealed.killerMoves.length > 0 && (
+          <KillerMovesBand
+            moves={doc.sealed.killerMoves}
+            recordTotal={recordTotal}
+            sealedAt={doc.sealedAt}
+            backupAt={backupAt}
+          />
+        )}
+
+      {!hidden.has("stones") && (
+        <Section label="primeval stones">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+            <Stat
+              label="recovered this wk"
+              value={cents(recovered)}
+              tone="text-(--essence)"
+            />
+            <Stat
+              label="absorbed"
+              value={`${cents(absorbed)}${rate === null ? "" : ` · ${rate}%`}`}
+              // Green says "put away"; a dash has nothing to be green about.
+              tone={absorbed === null ? undefined : "text-up"}
+            />
+            <Stat
+              label="stones held"
+              value={cents(stones)}
+              tone="text-(--essence)"
+            />
+            <Stat label="runway" value={runway} />
+          </div>
+          {/* The same two readings, ten weeks deep. Absorbed is not here on purpose:
+              on a weekly buy it barely moves, so the rate is what a strip can say. */}
+          {(flow.recovered.length >= 2 || flow.rate.length >= 2) && (
+            <div className="mt-3">
+              <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                flow · last 10 weeks
+              </p>
+              {flow.recovered.length >= 2 && (
+                <TrendRow
+                  label="recovered"
+                  values={flow.recovered}
+                  delta={
+                    flow.recovered[flow.recovered.length - 1] -
+                    flow.recovered[0]
+                  }
+                  plot="recovered per week, last ten weeks"
+                  right={`${compactDollars(flow.recovered[0])} → ${compactDollars(
+                    flow.recovered[flow.recovered.length - 1],
+                  )}`}
+                />
+              )}
+              {flow.rate.length >= 2 && (
+                <TrendRow
+                  label="rate"
+                  values={flow.rate}
+                  delta={flow.rate[flow.rate.length - 1] - flow.rate[0]}
+                  plot="absorption rate per week, last ten weeks"
+                  right={`${flow.rate[0]}% → ${flow.rate[flow.rate.length - 1]}%`}
+                />
+              )}
+            </div>
+          )}
+          <Flavor>
+            mortal economics — stones earned, not produced. denominator ruled,
+            re-read quarterly — not measured.
+          </Flavor>
+        </Section>
       )}
 
-      <Section label="primeval stones">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-          <Stat
-            label="recovered this wk"
-            value={cents(recovered)}
-            tone="text-(--essence)"
-          />
-          <Stat
-            label="absorbed"
-            value={`${cents(absorbed)}${rate === null ? "" : ` · ${rate}%`}`}
-            // Green says "put away"; a dash has nothing to be green about.
-            tone={absorbed === null ? undefined : "text-up"}
-          />
-          <Stat
-            label="stones held"
-            value={cents(stones)}
-            tone="text-(--essence)"
-          />
-          <Stat label="runway" value={runway} />
-        </div>
-        {/* The same two readings, ten weeks deep. Absorbed is not here on purpose:
-            on a weekly buy it barely moves, so the rate is what a strip can say. */}
-        {(flow.recovered.length >= 2 || flow.rate.length >= 2) && (
-          <div className="mt-3">
-            <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-              flow · last 10 weeks
-            </p>
-            {flow.recovered.length >= 2 && (
-              <TrendRow
-                label="recovered"
-                values={flow.recovered}
-                delta={
-                  flow.recovered[flow.recovered.length - 1] - flow.recovered[0]
-                }
-                plot="recovered per week, last ten weeks"
-                right={`${compactDollars(flow.recovered[0])} → ${compactDollars(
-                  flow.recovered[flow.recovered.length - 1],
-                )}`}
-              />
-            )}
-            {flow.rate.length >= 2 && (
-              <TrendRow
-                label="rate"
-                values={flow.rate}
-                delta={flow.rate[flow.rate.length - 1] - flow.rate[0]}
-                plot="absorption rate per week, last ten weeks"
-                right={`${flow.rate[0]}% → ${flow.rate[flow.rate.length - 1]}%`}
-              />
-            )}
-          </div>
-        )}
-        <Flavor>
-          mortal economics — stones earned, not produced. denominator ruled,
-          re-read quarterly — not measured.
-        </Flavor>
-      </Section>
+      {!hidden.has("foundation") && (
+        <Section label="the foundation">
+          <p className="text-sm tabular-nums">
+            <span className="text-(--essence)">{cents(invested)}</span>{" "}
+            <span className="text-muted">{foundationYears}</span>
+          </p>
+          <p className="mt-1 text-[11px] text-muted/60">
+            produces: not yet measured
+          </p>
+          <Flavor>
+            the proto-blessed-land — what ascension turns into the land that
+            produces.
+          </Flavor>
+        </Section>
+      )}
 
-      <Section label="the foundation">
-        <p className="text-sm tabular-nums">
-          <span className="text-(--essence)">{cents(invested)}</span>{" "}
-          <span className="text-muted">{foundationYears}</span>
-        </p>
-        <p className="mt-1 text-[11px] text-muted/60">
-          produces: not yet measured
-        </p>
-        <Flavor>
-          the proto-blessed-land — what ascension turns into the land that
-          produces.
-        </Flavor>
-      </Section>
-
-      {hasVessel && (
+      {!hidden.has("vessel") && hasVessel && (
         <Section label="the vessel">
           {hasVesselStats && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
@@ -1519,12 +1563,12 @@ export function ApertureInner({
       {/* 魂 — the second axis beside rank, directly after the vessel: body, then
           soul, the two facets of the one being. Absent on every document sealed
           before the axis existed. */}
-      {soul && <SoulBand soul={soul} days={soulDays} />}
+      {!hidden.has("soul") && soul && <SoulBand soul={soul} days={soulDays} />}
 
       {/* 台 — the platform, between the soul and the human path: the mind that
           holds every other axis up. Absent on every document sealed before the
           band existed. */}
-      {doc.sealed.platform && (
+      {!hidden.has("platform") && doc.sealed.platform && (
         <PlatformBand
           platform={doc.sealed.platform}
           zombie={mode !== undefined}
@@ -1539,44 +1583,53 @@ export function ApertureInner({
           himself, above the one gu he is making. A trait is minted by ruling from
           the record and leaves by not being emitted — the site draws nothing for
           an absence. Absent on every document sealed before the band existed. */}
-      {humanGu && humanGu.length > 0 && <HumanPathBand gu={humanGu} />}
+      {!hidden.has("humanPath") && humanGu && humanGu.length > 0 && (
+        <HumanPathBand gu={humanGu} />
+      )}
 
-      <Section label="vital gu">
-        <VitalGuSlot gu={vitalGu} />
-      </Section>
+      {!hidden.has("vitalGu") && (
+        <Section label="vital gu">
+          <VitalGuSlot gu={vitalGu} />
+        </Section>
+      )}
 
-      <Section label="paths · gu held">
-        <div className="flex flex-col gap-2.5">
-          {paths.map((p, i) => (
-            <PathCard key={i} path={p} />
-          ))}
-        </div>
-      </Section>
+      {!hidden.has("guCards") && (
+        <Section label="paths · gu held">
+          <div className="flex flex-col gap-2.5">
+            {paths.map((p, i) => (
+              <PathCard key={i} path={p} />
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* 道 — the dao-mark composition (ADR 0167), directly under the paths it
           reads from. Absent until a seal opens a ledger on some path. */}
-      {dao.rows.length > 0 && <DaoBand rows={dao.rows} sea={dao.sea} />}
+      {!hidden.has("dao") && dao.rows.length > 0 && (
+        <DaoBand rows={dao.rows} sea={dao.sea} />
+      )}
 
       {/* 府 — the colophon: the page ends with the thing that holds everything
           above it. When the house stands it absorbs the bare rented footnote as
           its essence line (same sealed list, better home); until a seal names a
           house, the footnote renders as it always has. */}
-      {guHouses && guHouses.length > 0 ? (
-        <GuHouseBand
-          houses={guHouses}
-          formationsCount={formations.length}
-          movesCount={doc.sealed.killerMoves?.length ?? 0}
-          guHeld={guHeldCount(paths) + (doc.sealed.held?.length ?? 0)}
-          rented={rented}
-        />
-      ) : (
-        rented &&
-        rented.length > 0 && (
-          <p className="px-4 pb-4 text-[11px] text-muted">
-            rented · {rented.join(" · ")}
-          </p>
-        )
-      )}
+      {!hidden.has("guHouse") &&
+        (guHouses && guHouses.length > 0 ? (
+          <GuHouseBand
+            houses={guHouses}
+            formationsCount={formations.length}
+            movesCount={doc.sealed.killerMoves?.length ?? 0}
+            guHeld={guHeldCount(paths) + (doc.sealed.held?.length ?? 0)}
+            rented={rented}
+          />
+        ) : (
+          rented &&
+          rented.length > 0 && (
+            <p className="px-4 pb-4 text-[11px] text-muted">
+              rented · {rented.join(" · ")}
+            </p>
+          )
+        ))}
     </>
   );
 }
@@ -2056,7 +2109,8 @@ const SEALED_STORES = 10;
  * verbatim; the census beside the FIRST house (the hub itself) is derived from
  * counts already on the page — nothing fetched, nothing self-reported. Later
  * houses render as plain nameplates: only the house this page lives in gets
- * counted in its own gu. Never interactive, never a nag.
+ * counted in its own gu. Never a nag: the one control is the fold that keeps the
+ * colophon to a nameplate until the house is asked about.
  */
 function GuHouseBand({
   houses,
@@ -2071,6 +2125,15 @@ function GuHouseBand({
   guHeld: number;
   rented?: string[];
 }) {
+  /** Which houses are open, by name — the colophon reads as a nameplate at rest
+   *  and unfolds into how it came to stand and what it holds. */
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (name: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(name)) next.add(name);
+      return next;
+    });
   return (
     <div className="border-t border-hairline">
       <ZoneHeader
@@ -2079,52 +2142,70 @@ function GuHouseBand({
         right={houses.length > 1 ? `${houses.length} standing` : undefined}
       />
       <div className="flex flex-col gap-4 border-b border-hairline px-4 py-3">
-        {houses.map((h, i) => (
-          <div key={h.name}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-base text-fg">{h.name}</p>
-                <p className="mt-0.5 text-[11px] text-muted">{h.type}</p>
-              </div>
-              <span
-                aria-hidden
-                lang="zh"
-                className="shrink-0 font-[family-name:var(--font-zh)] text-[30px] leading-none text-(--essence) opacity-80"
-              >
-                宅
-              </span>
-            </div>
-            <p className="mt-2 max-w-[60ch] text-[11px] leading-relaxed text-muted">
-              {h.origin.join(" · ")}
-            </p>
-            {i === 0 && (
-              <>
-                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-                  <Stat
-                    label="sealed stores"
-                    value={`${SEALED_STORES}`}
-                    tone="text-(--essence)"
-                  />
-                  <Stat
-                    label="formations"
-                    value={`${formationsCount} standing`}
-                  />
-                  <Stat
-                    label="killer moves"
-                    value={movesCount > 0 ? `${movesCount} named` : "—"}
-                  />
-                  <Stat label="gu held" value={`${guHeld}`} />
+        {houses.map((h, i) => {
+          const shown = open.has(h.name);
+          return (
+            <div key={h.name}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-base text-fg">{h.name}</p>
+                  <p className="mt-0.5 text-[11px] text-muted">{h.type}</p>
                 </div>
-                {rented && rented.length > 0 && (
-                  <p className="mt-3 text-[11px] text-muted/75">
-                    <span className="text-muted">essence supplied:</span> rented
-                    — {rented.join(" · ")}
+                <span
+                  aria-hidden
+                  lang="zh"
+                  className="shrink-0 font-[family-name:var(--font-zh)] text-[30px] leading-none text-(--essence) opacity-80"
+                >
+                  宅
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => toggle(h.name)}
+                aria-expanded={shown}
+                className="mt-2 flex items-baseline gap-2 text-left text-xs leading-[22px]"
+              >
+                <span className="w-2.5 shrink-0 text-muted/40">
+                  {shown ? "▾" : "▸"}
+                </span>
+                <span className="text-muted">origin · census · essence</span>
+              </button>
+              {shown && (
+                <>
+                  <p className="mt-2 max-w-[60ch] text-[11px] leading-relaxed text-muted">
+                    {h.origin.join(" · ")}
                   </p>
-                )}
-              </>
-            )}
-          </div>
-        ))}
+                  {i === 0 && (
+                    <>
+                      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+                        <Stat
+                          label="sealed stores"
+                          value={`${SEALED_STORES}`}
+                          tone="text-(--essence)"
+                        />
+                        <Stat
+                          label="formations"
+                          value={`${formationsCount} standing`}
+                        />
+                        <Stat
+                          label="killer moves"
+                          value={movesCount > 0 ? `${movesCount} named` : "—"}
+                        />
+                        <Stat label="gu held" value={`${guHeld}`} />
+                      </div>
+                      {rented && rented.length > 0 && (
+                        <p className="mt-3 text-[11px] text-muted/75">
+                          <span className="text-muted">essence supplied:</span>{" "}
+                          rented — {rented.join(" · ")}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
         <p className="text-[11px] italic text-muted/60">
           many gu, one effect — the house outlives every casting.
         </p>

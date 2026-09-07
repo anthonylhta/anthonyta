@@ -57,6 +57,7 @@ import {
   guBlocks,
   guCensus,
   guHeldCount,
+  guHeldCounts,
   guReads,
   gutterPhrase,
   hardenLabel,
@@ -1449,6 +1450,35 @@ describe("apertureview — guHeldCount", () => {
   it("counts nothing for uninventoried paths", () => {
     expect(guHeldCount([{ name: "p" }])).toBe(0);
     expect(guHeldCount([])).toBe(0);
+  });
+});
+
+describe("apertureview — guHeldCounts", () => {
+  const path = (
+    name: string,
+    gu: number,
+    sub?: AperturePath[],
+  ): AperturePath => ({
+    name,
+    gu: Array.from({ length: gu }, (_, i) => ({ name: `g${i}` })),
+    ...(sub ? { sub } : {}),
+  });
+
+  it("reads a path then its subs, own gu only", () => {
+    expect(
+      guHeldCounts([path("Craft", 7, [path("Japanese", 2)]), path("Body", 3)]),
+    ).toEqual([
+      { name: "craft", count: 7 },
+      { name: "japanese", count: 2 },
+      { name: "body", count: 3 },
+    ]);
+  });
+
+  it("skips the paths holding nothing", () => {
+    expect(
+      guHeldCounts([{ name: "Wealth" }, path("Body", 0), path("Craft", 1)]),
+    ).toEqual([{ name: "craft", count: 1 }]);
+    expect(guHeldCounts([])).toEqual([]);
   });
 });
 

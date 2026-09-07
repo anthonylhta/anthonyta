@@ -20,10 +20,12 @@ import { getChoreReads } from "@/lib/connectors/chores";
 import { getGithub } from "@/lib/connectors/github";
 import { getSleep } from "@/lib/connectors/sleep";
 import { getSteps } from "@/lib/connectors/steps";
+import { getLayout } from "@/lib/connectors/layout";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { isSnapIndex, sydneyToday } from "@/lib/fin";
 import { getSnapIndex } from "@/lib/finstore";
 import { formationRows } from "@/lib/formations";
+import { hiddenSet } from "@/lib/layout";
 import {
   briefingRecordedDays,
   newestRecordedDay,
@@ -86,6 +88,7 @@ export default async function AperturePage() {
     indexRead,
     choreReads,
     pushRead,
+    layout,
   ] = await Promise.all([
     getApertureGlance(),
     getGithub(),
@@ -96,6 +99,7 @@ export default async function AperturePage() {
     getSnapIndex(),
     getChoreReads(),
     getPushRaw().catch(() => ({ state: "error" }) as const),
+    getLayout(),
   ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
   const membrane = glance ? membraneOf(glance.stage) : null;
@@ -244,6 +248,7 @@ export default async function AperturePage() {
 
         <ApertureInner
           offline={!r2Enabled()}
+          hiddenBands={[...hiddenSet(layout, "aperture")]}
           formations={formations}
           backupAt={choreReads.backupAt}
           series={series}
