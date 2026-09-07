@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  APERTURE_UNITS,
   CENTER_MODULES,
   CENTER_UNITS,
   EMPTY_LAYOUT,
+  LAYOUT_MAX_BYTES,
   LOBBY_MODULES,
   LOBBY_UNITS,
   canMove,
   hiddenSet,
+  modulesOf,
   moveUnit,
   normalizeLayout,
   orderedUnits,
@@ -46,7 +49,7 @@ describe("unit / module registries", () => {
   });
 
   it("use unique unit keys per surface", () => {
-    for (const units of [LOBBY_UNITS, CENTER_UNITS]) {
+    for (const units of [LOBBY_UNITS, CENTER_UNITS, APERTURE_UNITS]) {
       const keys = units.map((u) => u.key);
       expect(new Set(keys).size).toBe(keys.length);
     }
@@ -55,6 +58,21 @@ describe("unit / module registries", () => {
   it("give every command-center unit a zone; lobby units none", () => {
     expect(CENTER_UNITS.every((u) => u.zone)).toBe(true);
     expect(LOBBY_UNITS.every((u) => u.zone === undefined)).toBe(true);
+  });
+
+  it("gives the aperture one module per unit, and no zones", () => {
+    // The reading is hide-only: a unit that grouped two bands would hide them
+    // together, and a zone would imply somewhere to move them to.
+    expect(APERTURE_UNITS.every((u) => u.modules.length === 1)).toBe(true);
+    expect(APERTURE_UNITS.every((u) => u.zone === undefined)).toBe(true);
+  });
+
+  it("defaults only the three archive bands hidden", () => {
+    expect(
+      modulesOf("aperture")
+        .filter((m) => m.defaultHidden)
+        .map((m) => m.key),
+    ).toEqual(["stones", "foundation", "guCards"]);
   });
 
   it("declare the command-center units grouped by zone, in render order", () => {
@@ -83,7 +101,35 @@ describe("normalizeLayout", () => {
     expect(normalizeLayout(JSON.parse(JSON.stringify(c)))).toEqual(c);
   });
 
-  it("reads a legacy v1 config as v2 with empty order", () => {
+  it("round-trips a v3 config's aperture toggles", () => {
+    const c = cfg({ aperture: ["stones", "record"] });
+    expect(normalizeLayout(JSON.parse(JSON.stringify(c)))).toEqual(c);
+  });
+
+  it("reads a v2 config as v3 with no aperture toggles", () => {
+    expect(
+      normalizeLayout({
+        v: 2,
+        lobby: [],
+        center: ["health"],
+        lobbyOrder: [],
+        centerOrder: [],
+      }),
+    ).toEqual(cfg({ center: ["health"] }));
+  });
+
+  it("drops unknown aperture keys — a retired band can't be toggled", () => {
+    expect(
+      normalizeLayout({
+        v: 3,
+        lobby: [],
+        center: [],
+        aperture: ["stones", "no-such-band", "stones"],
+      }),
+    ).toEqual(cfg({ aperture: ["stones"] }));
+  });
+
+  it("reads a legacy v1 config as v3 with empty order", () => {
     expect(
       normalizeLayout({ v: 1, lobby: ["tft"], center: ["health"] }),
     ).toEqual(cfg({ lobby: ["tft"], center: ["health"] }));
@@ -196,13 +242,17 @@ describe("normalizeLayout", () => {
 
   it("rejects unrecognizable shapes", () => {
     expect(normalizeLayout(null)).toBeNull();
-    expect(normalizeLayout({ v: 3, lobby: [], center: [] })).toBeNull();
+    expect(normalizeLayout({ v: 4, lobby: [], center: [] })).toBeNull();
     expect(normalizeLayout({ v: 2, lobby: "tft", center: [] })).toBeNull();
     expect(normalizeLayout({ v: 2, lobby: [42], center: [] })).toBeNull();
     expect(normalizeLayout({ v: 2, lobby: [] })).toBeNull(); // center missing
     // present-but-malformed order is a hard reject
     expect(
       normalizeLayout({ v: 2, lobby: [], center: [], lobbyOrder: "x" }),
+    ).toBeNull();
+    // and so is a present-but-malformed aperture toggle list
+    expect(
+      normalizeLayout({ v: 3, lobby: [], center: [], aperture: "x" }),
     ).toBeNull();
   });
 });
@@ -224,6 +274,82 @@ describe("hiddenSet + setHidden", () => {
     c = setHidden(c, "lobby", "tft", false);
     expect(c.lobby).toEqual([]);
     expect(setHidden(c, "lobby", "no-such-key", true)).toEqual(c);
+  });
+});
+
+describe("the aperture surface — hide-only, defaults-aware", () => {
+  const APERTURE_DEFAULT_HIDDEN = ["stones", "foundation", "guCards"];
+
+  it("hides the three archive bands on an untouched config", () => {
+    expect([...hiddenSet(EMPTY_LAYOUT, "aperture")].sort()).toEqual(
+      [...APERTURE_DEFAULT_HIDDEN].sort(),
+    );
+  });
+
+  it("shows a default-hidden band once it is listed", () => {
+    const c = setHidden(EMPTY_LAYOUT, "aperture", "stones", false);
+    expect(c.aperture).toEqual(["stones"]);
+    expect(hiddenSet(c, "aperture").has("stones")).toBe(false);
+    // its two neighbours are untouched by the one toggle
+    expect(hiddenSet(c, "aperture").has("foundation")).toBe(true);
+    expect(hiddenSet(c, "aperture").has("guCards")).toBe(true);
+  });
+
+  it("hides a default-visible band once it is listed", () => {
+    const c = setHidden(EMPTY_LAYOUT, "aperture", "record", true);
+    expect(c.aperture).toEqual(["record"]);
+    expect(hiddenSet(c, "aperture").has("record")).toBe(true);
+  });
+
+  it("drops the key again when the toggle returns to default", () => {
+    // The list records departures, so a band toggled off and back on leaves no
+    // trace — the config an untouched owner has is the config he ends with.
+    let c = setHidden(EMPTY_LAYOUT, "aperture", "record", true);
+    c = setHidden(c, "aperture", "record", false);
+    expect(c.aperture).toEqual([]);
+    let d = setHidden(EMPTY_LAYOUT, "aperture", "stones", false);
+    d = setHidden(d, "aperture", "stones", true);
+    expect(d.aperture).toEqual([]);
+  });
+
+  it("is idempotent, and leaves the other surfaces alone", () => {
+    let c = cfg({ lobby: ["tft"], centerOrder: ["mortal"] });
+    c = setHidden(c, "aperture", "guCards", false);
+    c = setHidden(c, "aperture", "guCards", false);
+    expect(c.aperture).toEqual(["guCards"]);
+    expect(c.lobby).toEqual(["tft"]);
+    expect(c.centerOrder).toEqual(["mortal"]);
+    expect(setHidden(c, "aperture", "no-such-band", true)).toEqual(c);
+  });
+
+  it("renders in the framework's order, and never moves", () => {
+    expect(orderedUnits(EMPTY_LAYOUT, "aperture").map((u) => u.key)).toEqual(
+      APERTURE_UNITS.map((u) => u.key),
+    );
+    // a stale order field can't reach it either — there is no aperture order
+    expect(
+      orderedUnits(cfg({ centerOrder: ["mortal"] }), "aperture").map(
+        (u) => u.key,
+      ),
+    ).toEqual(APERTURE_UNITS.map((u) => u.key));
+    expect(moveUnit(EMPTY_LAYOUT, "aperture", "record", 1)).toEqual(
+      EMPTY_LAYOUT,
+    );
+    expect(canMove(EMPTY_LAYOUT, "aperture", "record", -1)).toBe(false);
+  });
+
+  it("fits a fully-toggled config inside the PUT's byte cap", () => {
+    const all = (surface: Parameters<typeof modulesOf>[0]) =>
+      modulesOf(surface).map((m) => m.key);
+    const full: LayoutConfig = {
+      v: 3,
+      lobby: all("lobby"),
+      center: all("center"),
+      aperture: all("aperture"),
+      lobbyOrder: LOBBY_UNITS.map((u) => u.key),
+      centerOrder: CENTER_UNITS.map((u) => u.key),
+    };
+    expect(JSON.stringify(full).length).toBeLessThan(LAYOUT_MAX_BYTES);
   });
 });
 

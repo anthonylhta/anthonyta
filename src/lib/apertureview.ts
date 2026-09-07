@@ -397,6 +397,33 @@ export function guHeldCount(paths: AperturePath[]): number {
   return n;
 }
 
+/** One path's own gu, counted for the line under the paths band. */
+export interface GuHeldCount {
+  /** The path's name as sealed, lowercased — the line reads as a sentence, not
+   *  as a list of headings. */
+  name: string;
+  count: number;
+}
+
+/**
+ * The gu-held line's whole content: every path and sub-path holding at least one
+ * gu, in the order the paths band reads them (a path, then its subs, then the
+ * next path). Own gu only — a parent does NOT absorb its subs' counts, because
+ * the line stands in for the cards, and each card counted itself.
+ *
+ * A path holding nothing is skipped rather than printed as a zero: the line says
+ * where the gu are, and "0" would only say where they aren't.
+ */
+export function guHeldCounts(paths: AperturePath[]): GuHeldCount[] {
+  const out: GuHeldCount[] = [];
+  for (const p of paths) {
+    const count = p.gu?.length ?? 0;
+    if (count > 0) out.push({ name: p.name.toLowerCase(), count });
+    if (p.sub) out.push(...guHeldCounts(p.sub));
+  }
+  return out;
+}
+
 // --- the gu compendium ---------------------------------------------------------
 
 /**

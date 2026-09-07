@@ -1,9 +1,10 @@
 /**
  * layout — the pure spine of the owner's layout config (roadmap 59). Each
- * adaptive surface (the public lobby, the private command center) renders its
- * modules from this config: which are HIDDEN, and in what ORDER. So "remove the
- * tft section" and "put weather above net worth" are data edits from /system,
- * not code changes.
+ * configurable surface (the public lobby, the private command center, and the
+ * /aperture reading) renders its modules from this config: which are HIDDEN,
+ * and — on the two adaptive surfaces — in what ORDER. So "remove the tft
+ * section" and "put weather above net worth" are data edits from /system, not
+ * code changes.
  *
  * The config is deliberately PLAINTEXT (stored at `meta/layout.json`): the
  * server must read the lobby's layout to render the public page for guests, and
@@ -21,19 +22,25 @@
  * `today` — the day's rows plus the exception rows that only speak when something
  * is wrong. A unit reorders within its own zone and never across one. The status
  * bands that used to sit between them are the aperture READING and live on
- * /aperture, which is not a configurable surface: it is complete or it is wrong.
- * The lobby has no zones (one flow).
+ * /aperture, which is HIDE-ONLY: its order is the framework's narrative, so a
+ * band can be closed but never moved. The lobby has no zones (one flow).
  *
  * Forward-compat that keeps deploys safe: the config names HIDDEN keys only (a
  * module added later is visible by default — a config predating it can't hide
  * it) and lists ORDER explicitly (a unit not in the order falls to its default
  * position, never lost). Unknown keys are dropped on normalize. A stored v1
- * config (hidden-only) reads as a v2 with empty order — identical rendering.
+ * config (hidden-only) reads as a v3 with empty order, and a v2 as a v3 with no
+ * aperture toggles — identical rendering in both cases.
  */
 
 export interface ModuleDef {
   key: string;
   label: string;
+  /** Hidden until the owner turns it ON. Only the aperture surface has any: the
+   *  fold pass left three bands off the reading by default, and the stored list
+   *  names TOGGLES away from default rather than hidden keys, so a band's
+   *  default can change later without rewriting anyone's config. */
+  defaultHidden?: true;
 }
 
 /** The reorderable zone a unit belongs to (command center only), in render
@@ -168,11 +175,52 @@ export const CENTER_UNITS: UnitDef[] = [
   },
 ];
 
-export type Surface = "lobby" | "center";
+/**
+ * The /aperture reading's bands, in the order the page renders them. HIDE-ONLY:
+ * the page is a narrative read top to bottom (the wall, then what is being done
+ * about it, then what it has yielded), so the order is the framework's and not
+ * the owner's — but a band he does not want to read every day is his to close.
+ *
+ * Three bands are `defaultHidden`: the fold pass judged them archive rather than
+ * reading (the two finance sections /portfolio owns in full, and the gu cards
+ * the /gu compendium owns). They are one toggle away, never gone.
+ */
+const APERTURE_BANDS: ModuleDef[] = [
+  { key: "wall", label: "the wall" },
+  { key: "conditions", label: "conditions" },
+  { key: "paths", label: "paths" },
+  { key: "trials", label: "trials" },
+  { key: "harvest", label: "the harvest" },
+  { key: "inheritances", label: "true inheritances" },
+  { key: "record", label: "the record" },
+  { key: "rulings", label: "rulings" },
+  { key: "formations", label: "formations" },
+  { key: "killerMoves", label: "killer moves" },
+  { key: "stones", label: "primeval stones", defaultHidden: true },
+  { key: "foundation", label: "the foundation", defaultHidden: true },
+  { key: "vessel", label: "the vessel" },
+  { key: "soul", label: "the soul" },
+  { key: "platform", label: "the platform" },
+  { key: "humanPath", label: "human path" },
+  { key: "vitalGu", label: "vital gu" },
+  { key: "guCards", label: "paths · gu held", defaultHidden: true },
+  { key: "dao", label: "the dao" },
+  { key: "guHouse", label: "the gu house" },
+];
+
+/** One band, one unit — the page has no groups and nothing reorders. */
+export const APERTURE_UNITS: UnitDef[] = APERTURE_BANDS.map((m) => ({
+  key: m.key,
+  label: m.label,
+  modules: [m],
+}));
+
+export type Surface = "lobby" | "center" | "aperture";
 
 const UNITS: Record<Surface, UnitDef[]> = {
   lobby: LOBBY_UNITS,
   center: CENTER_UNITS,
+  aperture: APERTURE_UNITS,
 };
 
 /** The hideable modules of a surface, flattened in default order. */
@@ -188,9 +236,15 @@ export const CENTER_MODULES = modulesOf("center");
 
 /** Hidden module keys + ordered unit keys, per surface. */
 export interface LayoutConfig {
-  v: 2;
+  v: 3;
   lobby: string[];
   center: string[];
+  /** The /aperture bands TOGGLED away from their default visibility — not the
+   *  hidden ones. A default-hidden band appears here once it is shown, and a
+   *  default-visible one once it is hidden, so an empty list is the fold pass
+   *  as designed. There is no `apertureOrder`: the reading's order is the
+   *  framework's, not the owner's. */
+  aperture: string[];
   /** Ordered lobby UNIT keys; unlisted units fall to default position. */
   lobbyOrder: string[];
   /** Ordered command-center UNIT keys (reorderable zones only). */
@@ -198,9 +252,10 @@ export interface LayoutConfig {
 }
 
 export const EMPTY_LAYOUT: LayoutConfig = {
-  v: 2,
+  v: 3,
   lobby: [],
   center: [],
+  aperture: [],
   lobbyOrder: [],
   centerOrder: [],
 };
@@ -211,6 +266,18 @@ export const LAYOUT_MAX_BYTES = 4096;
 const KNOWN_MODULES: Record<Surface, Set<string>> = {
   lobby: new Set(modulesOf("lobby").map((m) => m.key)),
   center: new Set(modulesOf("center").map((m) => m.key)),
+  aperture: new Set(modulesOf("aperture").map((m) => m.key)),
+};
+
+/** The modules a surface hides UNLESS the config says otherwise. */
+const DEFAULT_HIDDEN: Record<Surface, Set<string>> = {
+  lobby: new Set(),
+  center: new Set(),
+  aperture: new Set(
+    modulesOf("aperture")
+      .filter((m) => m.defaultHidden)
+      .map((m) => m.key),
+  ),
 };
 
 /** Reorderable unit keys per surface — fixed units (dropbox) are excluded, so a
@@ -222,6 +289,8 @@ const REORDERABLE: Record<Surface, Set<string>> = {
   center: new Set(
     UNITS.center.filter((u) => u.zone !== "fixed").map((u) => u.key),
   ),
+  // The reading is hide-only — nothing on /aperture moves.
+  aperture: new Set(),
 };
 
 function normalizeKeys(x: unknown, known: Set<string>): string[] | null {
@@ -243,7 +312,7 @@ function normalizeKeys(x: unknown, known: Set<string>): string[] | null {
 export function normalizeLayout(x: unknown): LayoutConfig | null {
   if (typeof x !== "object" || x === null) return null;
   const o = x as Record<string, unknown>;
-  if (o.v !== 1 && o.v !== 2) return null;
+  if (o.v !== 1 && o.v !== 2 && o.v !== 3) return null;
 
   const lobby = normalizeKeys(o.lobby, KNOWN_MODULES.lobby);
   const center = normalizeKeys(o.center, KNOWN_MODULES.center);
@@ -258,14 +327,26 @@ export function normalizeLayout(x: unknown): LayoutConfig | null {
     o.v === 1 ? [] : normalizeKeys(o.centerOrder ?? [], REORDERABLE.center);
   if (!lobbyOrder || !centerOrder) return null;
 
-  return { v: 2, lobby, center, lobbyOrder, centerOrder };
+  // The /aperture toggles arrived with v3; anything older reads as the fold
+  // pass's own defaults, which is exactly what an untouched config means.
+  const aperture =
+    o.v === 3 ? normalizeKeys(o.aperture ?? [], KNOWN_MODULES.aperture) : [];
+  if (!aperture) return null;
+
+  return { v: 3, lobby, center, aperture, lobbyOrder, centerOrder };
 }
 
 // --- visibility ---------------------------------------------------------------
 
-/** The render-side view: which module keys does `surface` hide right now. */
+/** The render-side view: which module keys does `surface` hide right now. The
+ *  aperture reads its list as TOGGLES against the fold pass's defaults (§
+ *  `LayoutConfig.aperture`); the other two list hidden keys outright. */
 export function hiddenSet(cfg: LayoutConfig, surface: Surface): Set<string> {
-  return new Set(surface === "lobby" ? cfg.lobby : cfg.center);
+  if (surface !== "aperture")
+    return new Set(surface === "lobby" ? cfg.lobby : cfg.center);
+  const hidden = new Set(DEFAULT_HIDDEN.aperture);
+  for (const key of cfg.aperture) if (!hidden.delete(key)) hidden.add(key);
+  return hidden;
 }
 
 /** One toggle, pure: hide or show `key` on `surface`. Unknown keys no-op. */
@@ -276,6 +357,18 @@ export function setHidden(
   hidden: boolean,
 ): LayoutConfig {
   if (!KNOWN_MODULES[surface].has(key)) return cfg;
+  if (surface === "aperture") {
+    // The list holds departures from default, so asking for the default state
+    // REMOVES the key rather than recording it — a config that agrees with the
+    // fold pass stays empty however many times it is toggled back and forth.
+    const listed = hidden !== DEFAULT_HIDDEN.aperture.has(key);
+    const next = listed
+      ? cfg.aperture.includes(key)
+        ? cfg.aperture
+        : [...cfg.aperture, key]
+      : cfg.aperture.filter((k) => k !== key);
+    return { ...cfg, aperture: next };
+  }
   const current = surface === "lobby" ? cfg.lobby : cfg.center;
   const next = hidden
     ? current.includes(key)
@@ -290,7 +383,10 @@ export function setHidden(
 // --- ordering -----------------------------------------------------------------
 
 function orderArr(cfg: LayoutConfig, surface: Surface): string[] {
-  return surface === "lobby" ? cfg.lobbyOrder : cfg.centerOrder;
+  if (surface === "lobby") return cfg.lobbyOrder;
+  // The aperture has no order of its own — every unit falls to its default
+  // position, which for a hide-only surface is the only position there is.
+  return surface === "center" ? cfg.centerOrder : [];
 }
 
 /**
