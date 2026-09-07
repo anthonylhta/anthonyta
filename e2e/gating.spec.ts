@@ -45,6 +45,7 @@ test.describe("guest gating", () => {
     "/aperture", // the owner-only inward page (stones, gu, attainment)
     "/gu", // the owner-only gu compendium (feeding, consumables, the book)
     "/api/gu-marks", // E2EE gu-book marks envelope — refining-since + casts (ADR 0175)
+    "/api/circle", // E2EE circle envelope — the open bar and the ones met since the seal
   ]) {
     test(`${path} is 404 for a guest`, async ({ request }) => {
       expect((await request.get(path)).status()).toBe(404);

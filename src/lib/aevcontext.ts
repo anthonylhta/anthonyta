@@ -32,6 +32,9 @@ export const JOBS_CONTEXT = "meta/jobs";
 /** The gu book's marks — refining-since and cast, written by the owner from /gu
  *  and folded into the seal by the check-in (ADR 0175). */
 export const GU_MARKS_CONTEXT = "meta/gu-marks";
+/** The circle's live ledger — the open bar and the ones met since the last
+ *  seal, written by the owner from /aperture and folded in at the check-in. */
+export const CIRCLE_CONTEXT = "meta/circle";
 /** The MK-rotation journal (ADR 0090/0103) — AEV2 from birth; no AEV1 legacy. */
 export const ROTATION_CONTEXT = "meta/rotation";
 /** The aperture status envelope — AEV2 from birth; its single writer is the
