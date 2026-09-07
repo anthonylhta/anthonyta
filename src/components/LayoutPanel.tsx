@@ -30,12 +30,14 @@ const CENTER_ZONES: { zone: Zone; label: string }[] = [
 ];
 
 /**
- * The /system layout panel (roadmap 59) — terminal-style controls for the two
- * adaptive surfaces: an `[x]` toggle to hide each module, and ▲▼ arrows to
+ * The /system layout panel (roadmap 59) — terminal-style controls for the three
+ * configurable surfaces: an `[x]` toggle to hide each module, and ▲▼ arrows to
  * reorder blocks WITHIN a zone (the command center's `pinned` row and grouped
- * blocks move as a unit; the lobby is one flow). Save PUTs the plaintext config
- * and the render cache revalidates, so the change is live on the next page load
- * — including for guests on the lobby. "preview lobby" opens the guest view.
+ * blocks move as a unit; the lobby is one flow). The /aperture reading takes the
+ * toggles alone — its order is the framework's narrative, so there is nowhere to
+ * move a band to. Save PUTs the plaintext config and the render cache
+ * revalidates, so the change is live on the next page load — including for
+ * guests on the lobby. "preview lobby" opens the guest view.
  */
 export function LayoutPanel({ offline }: { offline: boolean }) {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -121,6 +123,12 @@ export function LayoutPanel({ offline }: { offline: boolean }) {
       <SurfaceEditor
         title="command center — private"
         surface="center"
+        cfg={cfg}
+        onChange={setCfg}
+      />
+      <SurfaceEditor
+        title="/aperture — the reading"
+        surface="aperture"
         cfg={cfg}
         onChange={setCfg}
       />
@@ -215,36 +223,44 @@ function UnitRow({
 }) {
   const hidden = hiddenSet(cfg, surface);
   const reorderable = unit.zone !== "fixed";
+  // The aperture reading takes no arrow column at all — not even the pinned dot,
+  // which would read as "this one can't move" beside bands that all can't.
+  const ordered = surface !== "aperture";
   return (
     <div className="flex items-start gap-2 py-0.5">
-      <span className="flex shrink-0 items-center pt-0.5">
-        {reorderable ? (
-          <>
-            <button
-              type="button"
-              aria-label={`move ${unit.label} up`}
-              className={arrow}
-              disabled={!canMove(cfg, surface, unit.key, -1)}
-              onClick={() => onChange(moveUnit(cfg, surface, unit.key, -1))}
+      {ordered && (
+        <span className="flex shrink-0 items-center pt-0.5">
+          {reorderable ? (
+            <>
+              <button
+                type="button"
+                aria-label={`move ${unit.label} up`}
+                className={arrow}
+                disabled={!canMove(cfg, surface, unit.key, -1)}
+                onClick={() => onChange(moveUnit(cfg, surface, unit.key, -1))}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                aria-label={`move ${unit.label} down`}
+                className={arrow}
+                disabled={!canMove(cfg, surface, unit.key, 1)}
+                onClick={() => onChange(moveUnit(cfg, surface, unit.key, 1))}
+              >
+                ↓
+              </button>
+            </>
+          ) : (
+            <span
+              className="px-1 text-muted/25"
+              title="pinned — not reorderable"
             >
-              ↑
-            </button>
-            <button
-              type="button"
-              aria-label={`move ${unit.label} down`}
-              className={arrow}
-              disabled={!canMove(cfg, surface, unit.key, 1)}
-              onClick={() => onChange(moveUnit(cfg, surface, unit.key, 1))}
-            >
-              ↓
-            </button>
-          </>
-        ) : (
-          <span className="px-1 text-muted/25" title="pinned — not reorderable">
-            ·
-          </span>
-        )}
-      </span>
+              ·
+            </span>
+          )}
+        </span>
+      )}
       <span className="flex min-w-0 flex-wrap gap-x-4 gap-y-0.5">
         {unit.modules.map((m) => {
           const visible = !hidden.has(m.key);
@@ -260,6 +276,14 @@ function UnitRow({
             >
               <span className="tabular-nums">[{visible ? "x" : " "}]</span>{" "}
               {m.label}
+              {/* A band the fold pass left closed: the toggle reads the same, but
+                  its unchecked state is the design rather than an owner's edit. */}
+              {m.defaultHidden && (
+                <span className="text-[11px] text-muted/50">
+                  {" "}
+                  off by default
+                </span>
+              )}
             </button>
           );
         })}
