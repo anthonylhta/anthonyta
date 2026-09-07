@@ -69,7 +69,7 @@ export const SECTIONS: ResumeSection[] = [
     entries: [
       {
         title: "AI Trainer & Evaluator",
-        when: "jan 2025 – now",
+        when: "2025 – present · intermittent",
         sub: "Outlier AI",
         where: "remote",
         bullets: [
