@@ -593,6 +593,61 @@ describe("aperture — the soul", () => {
   });
 });
 
+describe("aperture — the survival mode", () => {
+  // The declared pause: entered by ruling, ended by a named method. The site
+  // prints it once and derives nothing from it, so the frame's whole job is to
+  // insist the declaration is complete — a mode with no exit is canon, not this.
+  const zombie = {
+    name: "immortal zombie",
+    since: "2026-11-03",
+    exit: "the surgeon's clearance and the first logged session",
+  };
+
+  it("accepts a well-formed mode", () => {
+    const declared = withSealed({ mode: zombie });
+    expect(normalizeAperture(declared)).toEqual(declared);
+  });
+
+  it("accepts the week's note beside it, and keeps an absent one absent", () => {
+    const noted = withSealed({
+      mode: { ...zombie, note: "the counters are held at the seal" },
+    });
+    expect(normalizeAperture(noted)).toEqual(noted);
+    expect(
+      normalizeAperture(withSealed({ mode: zombie }))?.sealed.mode,
+    ).not.toHaveProperty("note");
+  });
+
+  it("normalizes a document without one exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("mode");
+  });
+
+  it("drops an unknown key inside the mode", () => {
+    const out = normalizeAperture(
+      withSealed({ mode: { ...zombie, resolved: true } }),
+    );
+    expect(out?.sealed.mode).toEqual(zombie);
+  });
+
+  it("hard-rejects a present-but-malformed mode", () => {
+    const bad = (patch: Record<string, unknown> | string) =>
+      expect(
+        normalizeAperture(
+          withSealed({
+            mode: typeof patch === "string" ? patch : { ...zombie, ...patch },
+          }),
+        ),
+      ).toBeNull();
+    bad("immortal zombie"); // a name where a declaration should be
+    bad({ name: "zombie" }); // a mode this build doesn't know is a frame breach
+    bad({ since: "3 Nov 2026" }); // a date, but not a day
+    bad({ exit: "" }); // a mode cannot be declared without a way out
+    bad({ note: 3 }); // the line beside it is prose or nothing
+  });
+});
+
 describe("aperture — killer moves", () => {
   // The named composite rituals: definitions sealed whole at the check-in, the
   // site deriving only the cast reading beside them. Same absent-vs-malformed
@@ -663,6 +718,70 @@ describe("aperture — killer moves", () => {
     bad({ version: 0 }); // a definition opens at v1
     bad({ version: 2.5 }); // a revision is an integer
     bad({ version: "2" }); // same discipline as core
+  });
+});
+
+describe("aperture — the human path", () => {
+  // Trait gu: minted by ruling from the owner's own record and printed verbatim.
+  // Not a path card — nothing here is derived, so the frame is the whole guard.
+  const hope = {
+    name: "hope",
+    rank: "rank 1",
+    kind: "the gu that opened the aperture",
+    refined: "2026-05-14",
+    origin: "the aperture opened — the day the journal became unconditional",
+    leaves: "never leaves",
+  };
+  const courage = {
+    name: "courage",
+    rank: "rank 1",
+    kind: "the gu that walks at the wall",
+    refined: "2026-08-13",
+    origin: "the first trial taken on rather than waited out",
+  };
+
+  it("accepts a trait with a lapse clause and one without", () => {
+    const full = withSealed({ humanGu: [hope, courage] });
+    expect(normalizeAperture(full)).toEqual(full);
+    // An absent clause stays absent — the row says nothing about leaving.
+    const out = normalizeAperture(full);
+    expect(out?.sealed.humanGu?.[1]).not.toHaveProperty("leaves");
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("humanGu");
+  });
+
+  it("drops an unknown key inside a trait", () => {
+    const out = normalizeAperture(
+      withSealed({ humanGu: [{ ...hope, mutated: 1 }] }),
+    );
+    expect(out?.sealed.humanGu).toEqual([hope]);
+  });
+
+  it("hard-rejects a present-but-malformed list", () => {
+    const bad = (gu: unknown) =>
+      expect(normalizeAperture(withSealed({ humanGu: gu }))).toBeNull();
+    bad("hope"); // a word where a list should be
+    bad([{ ...hope, refined: "14 May 2026" }]); // the dated fact is YYYY-MM-DD
+    bad([{ ...hope, name: "" }]); // a trait either has a name or isn't one
+    bad([{ ...hope, leaves: 3 }]); // the clause is prose, not a number
+    bad([{ ...hope, origin: "x".repeat(401) }]); // past the origin's ceiling
+    bad(["hope"]); // a trait is an object, never a bare line
+  });
+
+  it("takes a full sheet of traits and rejects one past the ceiling", () => {
+    const many = (n: number) =>
+      withSealed({
+        humanGu: Array.from({ length: n }, (_, i) => ({
+          ...hope,
+          name: `trait ${i}`,
+        })),
+      });
+    expect(normalizeAperture(many(12))).toEqual(many(12));
+    expect(normalizeAperture(many(13))).toBeNull();
   });
 });
 
