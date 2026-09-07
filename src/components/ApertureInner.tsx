@@ -21,6 +21,7 @@ import {
   type ApertureDoc,
   type ApertureGu,
   type ApertureGuHouse,
+  type ApertureHumanGu,
   type ApertureInheritance,
   type ApertureInheritances,
   type ApertureKillerMove,
@@ -586,8 +587,16 @@ export function ApertureInner({
 
   // `ready` — narrowed by the switch above, but TS can't see it through the helper.
   if (!doc) return null;
-  const { conditions, paths, vitalGu, trials, breakthrough, rented, soul } =
-    doc.sealed;
+  const {
+    conditions,
+    paths,
+    vitalGu,
+    trials,
+    breakthrough,
+    rented,
+    soul,
+    humanGu,
+  } = doc.sealed;
   const guHouses = doc.sealed.guHouses;
   const inheritances = doc.sealed.inheritances;
   const { open, resolved } = splitTrials(trials);
@@ -1431,6 +1440,12 @@ export function ApertureInner({
           before the axis existed. */}
       {soul && <SoulBand soul={soul} days={soulDays} />}
 
+      {/* 人 — the human path, between the soul and the vital gu: what he holds of
+          himself, above the one gu he is making. A trait is minted by ruling from
+          the record and leaves by not being emitted — the site draws nothing for
+          an absence. Absent on every document sealed before the band existed. */}
+      {humanGu && humanGu.length > 0 && <HumanPathBand gu={humanGu} />}
+
       <Section label="vital gu">
         <VitalGuSlot gu={vitalGu} />
       </Section>
@@ -2017,6 +2032,42 @@ function GuHouseBand({
         ))}
         <p className="text-[11px] italic text-muted/60">
           many gu, one effect — the house outlives every casting.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 人 — the human path (ADR 0180): the trait gu minted from the record, each a
+ * name, its rank word and kind, and one origin line under it. Deliberately not
+ * a path card — no attainment, no peak, no marks, no clock: a trait is not fed,
+ * it is held or it is gone. Everything prints verbatim; the site derives nothing.
+ */
+function HumanPathBand({ gu }: { gu: ApertureHumanGu[] }) {
+  return (
+    <div className="border-t border-hairline">
+      <ZoneHeader label="human path" seal="人" right={`${gu.length} held`} />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        {gu.map((g) => (
+          <div key={g.name}>
+            <p className="flex flex-wrap items-baseline gap-x-2 text-xs">
+              <span aria-hidden className="text-(--essence)">
+                ●
+              </span>
+              <span className="text-fg/90">{g.name}</span>
+              <span className="text-[11px] text-muted/60">{g.rank}</span>
+              <span className="text-[11px] text-muted">— {g.kind}</span>
+            </p>
+            <p className="ml-4 text-[11px] text-muted">
+              {g.origin} · <span className="text-fg/80">{g.refined}</span>
+              {g.leaves && ` · ${g.leaves}`}
+            </p>
+          </div>
+        ))}
+        <p className="mt-1 text-[11px] italic text-muted/60">
+          minted from the record — a trait you cannot borrow; it leaves when its
+          condition lapses, and hope never does.
         </p>
       </div>
     </div>

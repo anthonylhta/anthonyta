@@ -666,6 +666,70 @@ describe("aperture — killer moves", () => {
   });
 });
 
+describe("aperture — the human path", () => {
+  // Trait gu: minted by ruling from the owner's own record and printed verbatim.
+  // Not a path card — nothing here is derived, so the frame is the whole guard.
+  const hope = {
+    name: "hope",
+    rank: "rank 1",
+    kind: "the gu that opened the aperture",
+    refined: "2026-05-14",
+    origin: "the aperture opened — the day the journal became unconditional",
+    leaves: "never leaves",
+  };
+  const courage = {
+    name: "courage",
+    rank: "rank 1",
+    kind: "the gu that walks at the wall",
+    refined: "2026-08-13",
+    origin: "the first trial taken on rather than waited out",
+  };
+
+  it("accepts a trait with a lapse clause and one without", () => {
+    const full = withSealed({ humanGu: [hope, courage] });
+    expect(normalizeAperture(full)).toEqual(full);
+    // An absent clause stays absent — the row says nothing about leaving.
+    const out = normalizeAperture(full);
+    expect(out?.sealed.humanGu?.[1]).not.toHaveProperty("leaves");
+  });
+
+  it("normalizes a document without any exactly as before", () => {
+    const out = normalizeAperture(doc);
+    expect(out).toEqual(doc);
+    expect(out?.sealed).not.toHaveProperty("humanGu");
+  });
+
+  it("drops an unknown key inside a trait", () => {
+    const out = normalizeAperture(
+      withSealed({ humanGu: [{ ...hope, mutated: 1 }] }),
+    );
+    expect(out?.sealed.humanGu).toEqual([hope]);
+  });
+
+  it("hard-rejects a present-but-malformed list", () => {
+    const bad = (gu: unknown) =>
+      expect(normalizeAperture(withSealed({ humanGu: gu }))).toBeNull();
+    bad("hope"); // a word where a list should be
+    bad([{ ...hope, refined: "14 May 2026" }]); // the dated fact is YYYY-MM-DD
+    bad([{ ...hope, name: "" }]); // a trait either has a name or isn't one
+    bad([{ ...hope, leaves: 3 }]); // the clause is prose, not a number
+    bad([{ ...hope, origin: "x".repeat(401) }]); // past the origin's ceiling
+    bad(["hope"]); // a trait is an object, never a bare line
+  });
+
+  it("takes a full sheet of traits and rejects one past the ceiling", () => {
+    const many = (n: number) =>
+      withSealed({
+        humanGu: Array.from({ length: n }, (_, i) => ({
+          ...hope,
+          name: `trait ${i}`,
+        })),
+      });
+    expect(normalizeAperture(many(12))).toEqual(many(12));
+    expect(normalizeAperture(many(13))).toBeNull();
+  });
+});
+
 describe("aperture — gu houses", () => {
   // The colophon's input: name/type/origin sealed whole, printed verbatim; the
   // census beside the first house is derived and never rides the frame.
