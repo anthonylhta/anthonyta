@@ -41,6 +41,10 @@ export type ConditionStatus =
   | "failing"
   | "suspended";
 
+/** The survival modes a seal can declare (ADR 0181). One so far: the immortal
+ *  zombie, canon's life-extension route — no growth while it stands. */
+export type ApertureModeName = "immortal zombie";
+
 /** Where a trial sits: pending, banked for later, or already resolved. */
 export type TrialState = "active" | "stocked" | "passed" | "failed";
 
@@ -69,6 +73,8 @@ const CONDITION_STATUSES: readonly ConditionStatus[] = [
   "failing",
   "suspended",
 ];
+
+const MODE_NAMES: readonly ApertureModeName[] = ["immortal zombie"];
 
 const TRIAL_STATES: readonly TrialState[] = [
   "active",
@@ -547,6 +553,25 @@ export interface ApertureSoul {
   strained: boolean;
 }
 
+/**
+ * A declared survival mode (ADR 0181): entered by ruling with a start day and
+ * the method that ends it. While it stands the check-in holds every counter,
+ * emits conditions `suspended`, accrues no marks and counts no strikes — the
+ * site prints the declaration once and derives nothing from it. The exit is
+ * the method EXECUTED, ruled at a check-in; there is nothing here to resolve.
+ */
+export interface ApertureMode {
+  name: ApertureModeName;
+  /** The day it was entered, `YYYY-MM-DD`. */
+  since: string;
+  /** The named exit method, whole, in the check-in's words — "the surgeon's
+   *  clearance and the first logged session". A mode has no exit only in
+   *  canon; here it cannot be declared without one. */
+  exit: string;
+  /** One honest line beside it, when the week has one. */
+  note?: string;
+}
+
 /** Everything behind the unlock. `streaks` is an open record keyed by streak name
  *  for the same reason as the strike counters: the names are data. */
 export interface ApertureSealed {
@@ -568,6 +593,9 @@ export interface ApertureSealed {
    * again whenever a week has nothing to say about what comes next.
    */
   next?: string;
+  /** The declared survival mode, if one stands — the state the next seal sits
+   *  in. Absent = none, on every document. */
+  mode?: ApertureMode;
   /** The harvest: what the trials yielded, newest first once the page has sorted
    *  them. Absent on every document sealed before the band existed. */
   enlightenments?: ApertureEnlightenment[];
@@ -1119,6 +1147,23 @@ function normSoul(x: unknown): ApertureSoul | null {
   };
 }
 
+function normMode(x: unknown): ApertureMode | null {
+  if (!isObj(x)) return null;
+  // The mode name is a CLOSED vocabulary, the same rule `evidence` keeps: a mode
+  // this build doesn't know is a frame breach, not data.
+  if (!inVocab(MODE_NAMES, x.name)) return null;
+  if (!isDay(x.since)) return null;
+  if (!isProse(x.exit, MAX_STEP_CHARS)) return null;
+  const { note } = x;
+  if (note !== undefined && !isProse(note, MAX_STEP_CHARS)) return null;
+  return {
+    name: x.name,
+    since: x.since,
+    exit: x.exit,
+    ...(note !== undefined ? { note } : {}),
+  };
+}
+
 function normSealed(x: unknown): ApertureSealed | null {
   if (!isObj(x)) return null;
   const streaks = normRecord(x.streaks, normStreak);
@@ -1153,6 +1198,8 @@ function normSealed(x: unknown): ApertureSealed | null {
   if (profile === null) return null;
   const soul = x.soul === undefined ? undefined : normSoul(x.soul);
   if (soul === null) return null;
+  const mode = x.mode === undefined ? undefined : normMode(x.mode);
+  if (mode === null) return null;
   const killerMoves =
     x.killerMoves === undefined
       ? undefined
@@ -1201,6 +1248,7 @@ function normSealed(x: unknown): ApertureSealed | null {
     trials,
     breakthrough,
     ...(next !== undefined ? { next } : {}),
+    ...(mode !== undefined ? { mode } : {}),
     ...(enlightenments !== undefined ? { enlightenments } : {}),
     ...(rulings !== undefined ? { rulings } : {}),
     ...(rented !== undefined ? { rented } : {}),
