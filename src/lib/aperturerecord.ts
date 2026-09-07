@@ -212,3 +212,27 @@ export function marksTrends(
     () => null,
   );
 }
+
+/**
+ * The same reading over the PLATFORM's two point sources — bars met and bait
+ * held, seal by seal. Both are positive-only and never spent, so a strip only
+ * ever climbs or stands still; that flatness is the reading, not a defect. A
+ * seal carrying no platform contributes nothing rather than a zero, so the row
+ * lights itself at the second seal that carries the skill.
+ */
+export function platformTrends(
+  entries: { day: string; doc: ApertureDoc }[],
+): RecordTrend[] {
+  return trendsOver(
+    entries,
+    (doc): Record<string, number> => {
+      const skill = doc.sealed.platform?.skill;
+      if (!skill) return {};
+      return {
+        "bait held": skill.points.baitHeld,
+        "bars met": skill.points.barsMet,
+      };
+    },
+    () => null,
+  );
+}
