@@ -17,6 +17,7 @@ import {
   isAdjudicationPending,
   isAttainment,
   normalizeAperture,
+  PLATFORM_CORPSES,
   type AperturePath,
   type ApertureDoc,
   type ApertureGu,
@@ -25,12 +26,14 @@ import {
   type ApertureInheritance,
   type ApertureInheritances,
   type ApertureKillerMove,
+  type AperturePlatform,
   type ApertureSoul,
   type ApertureVitalGu,
 } from "@/lib/aperture";
 import {
   marksTrends,
   planRecordFetch,
+  platformTrends,
   recordRows,
   recordTrends,
   strikeTrends,
@@ -60,13 +63,17 @@ import {
   latestDailyDay,
   pathAnchor,
   pathEvidence,
+  platformHeader,
+  realmLayer,
   recordedDays,
   rulingEntries,
   rulingsPage,
   seaFill,
   signedCount,
+  skillRead,
   splitLead,
   splitTrials,
+  STAGE_GLYPH,
   tierGlyph,
   trialCountdown,
   trialsSummary,
@@ -108,7 +115,9 @@ import type { FormationRow, FormationStatus } from "@/lib/formations";
 import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
+import type { EnvelopeMeta } from "@/lib/crypto";
 import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
+import { CircleLedger } from "./CircleLedger";
 import { useApertureDoc } from "./useApertureDoc";
 
 /**
@@ -182,6 +191,9 @@ interface RecordState {
   /** Each path's dao marks across the fetched seals — one path against its own
    *  past, never across paths. */
   marks: RecordTrend[];
+  /** The platform's two point sources — bars met and bait held, seal by seal.
+   *  Positive-only, so the strips only ever climb or stand still. */
+  platform: RecordTrend[];
   /** Well-formed archived days beyond the fetch cap — counted, never fetched. */
   older: number;
   /** Fetched days that would not serve, decrypt or normalize. */
@@ -269,6 +281,7 @@ async function recordSeries(
       trends: recordTrends(entries),
       strikes: strikeTrends(entries),
       marks: marksTrends(entries),
+      platform: platformTrends(entries),
       older: plan.older,
       unreadable: plan.fetch.length - entries.length,
     };
@@ -388,7 +401,8 @@ export function ApertureInner({
    *  draws and the ones it derives in the browser can't sit on different days. */
   today: string;
 }) {
-  const { status, openItem, doc, fin, dataErr } = useApertureDoc(offline);
+  const { status, openItem, sealItem, doc, fin, dataErr } =
+    useApertureDoc(offline);
   /** The sealed gym log, once it lands — the training strip and the vessel's
    *  figures are both derived from it below. */
   const [gymCfg, setGymCfg] = useState<GymConfig | null>(null);
@@ -1167,6 +1181,26 @@ export function ApertureInner({
                 ))}
               </>
             )}
+            {/* The platform's points, read the same way. Both sources are
+                positive-only and never spent, so a flat strip is a week nothing
+                arrived in — not a loss. */}
+            {record.platform.length > 0 && (
+              <>
+                <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                  platform · seal by seal
+                </p>
+                {record.platform.map((t) => (
+                  <TrendRow
+                    key={t.name}
+                    label={t.name}
+                    values={t.values}
+                    delta={t.last - t.first}
+                    plot={`${t.name} across seals`}
+                    right={`${t.first} → ${t.last}`}
+                  />
+                ))}
+              </>
+            )}
           </div>
         </>
       )}
@@ -1486,6 +1520,20 @@ export function ApertureInner({
           soul, the two facets of the one being. Absent on every document sealed
           before the axis existed. */}
       {soul && <SoulBand soul={soul} days={soulDays} />}
+
+      {/* 台 — the platform, between the soul and the human path: the mind that
+          holds every other axis up. Absent on every document sealed before the
+          band existed. */}
+      {doc.sealed.platform && (
+        <PlatformBand
+          platform={doc.sealed.platform}
+          zombie={mode !== undefined}
+          sealedAt={doc.sealedAt}
+          today={today}
+          openItem={openItem}
+          sealItem={sealItem}
+        />
+      )}
 
       {/* 人 — the human path, between the soul and the vital gu: what he holds of
           himself, above the one gu he is making. A trait is minted by ruling from
@@ -1994,12 +2042,12 @@ function InheritanceEntry({
 }
 
 /**
- * The nine sealed envelope stores of the aevcontext config family (fin,
- * transit, todo, totp, gym, meals, agenda, jobs, gu-marks) — the gu-house
- * census's one code constant. A tenth store bumps this by hand: the census is
- * a colophon, not an inventory system.
+ * The ten sealed envelope stores of the aevcontext config family (fin,
+ * transit, todo, totp, gym, meals, agenda, jobs, gu-marks, circle) — the
+ * gu-house census's one code constant. An eleventh store bumps this by hand:
+ * the census is a colophon, not an inventory system.
  */
-const SEALED_STORES = 9;
+const SEALED_STORES = 10;
 
 /**
  * 府 — the gu house band, the page's colophon (canon: a gu house IS a
@@ -2082,6 +2130,278 @@ function GuHouseBand({
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * 台 — the platform: the mind ladder's three layers, the pages of the method,
+ * and the skill that stands on them. The ladder is the mental measure and the
+ * skill is a tool capped by it, so the band reads top-down in exactly that
+ * order and the panel says `held` rather than turning a level the realms have
+ * not allowed (skill doc §9.1).
+ *
+ * Everything above `bars spoken` is the seal, printed verbatim; the only
+ * derivations are the header's word and the level fraction's reading. The
+ * ledger below it is the one live thing on the band — its own island, its own
+ * envelope (`CircleLedger`).
+ *
+ * A corpse the seal omits renders as `mortal` with no origin: an unclimbed
+ * layer is a real standing, and leaving the row out would read as the ladder
+ * having only two rungs.
+ */
+function PlatformBand({
+  platform,
+  zombie,
+  sealedAt,
+  today,
+  openItem,
+  sealItem,
+}: {
+  platform: AperturePlatform;
+  /** A declared survival mode stands — the panel greys and says so, exactly as
+   *  the book greys a banned skill. Nothing else about it is derived here. */
+  zombie: boolean;
+  sealedAt: string;
+  today: string;
+  openItem: (
+    envelope: Uint8Array,
+    context?: string,
+  ) => Promise<{ bytes: Uint8Array }>;
+  sealItem: (
+    meta: EnvelopeMeta,
+    bytes: Uint8Array,
+    context?: string,
+  ) => Promise<Uint8Array>;
+}) {
+  const [pagesOpen, setPagesOpen] = useState(false);
+  const [skillOpen, setSkillOpen] = useState(false);
+  const { realms, next, base, method, skill } = platform;
+  const read = skillRead(platform);
+  return (
+    <div className="border-t border-hairline">
+      <ZoneHeader
+        label="the platform"
+        seal="台"
+        right={platformHeader(realms)}
+      />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        {PLATFORM_CORPSES.map((corpse) => {
+          const realm = realms.find((r) => r.corpse === corpse);
+          const stage = realm?.stage ?? "mortal";
+          const climbed = stage === "cut" || stage === "returned";
+          // An unclimbed layer reads dimmer than a climbed one — the row is
+          // still there, and still true, but it is not what the band is about.
+          const nameTone = climbed
+            ? "text-fg/90"
+            : stage === "mortal"
+              ? "text-muted/70"
+              : "text-fg/80";
+          return (
+            <div key={corpse}>
+              <p className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                <span
+                  aria-hidden
+                  className={
+                    climbed
+                      ? "text-(--essence)"
+                      : stage === "half a foot in"
+                        ? "text-(--essence)/60"
+                        : "text-muted/40"
+                  }
+                >
+                  {STAGE_GLYPH[stage]}
+                </span>
+                <span
+                  lang="zh"
+                  className={`font-[family-name:var(--font-zh)] ${nameTone}`}
+                >
+                  {corpse}
+                </span>
+                <span className={nameTone}>{stage}</span>
+                <span className="text-[11px] text-muted">
+                  — {realmLayer(corpse)}
+                </span>
+              </p>
+              {realm && (
+                <p className="ml-4 text-[11px] text-muted">
+                  {realm.origin}
+                  {realm.since && (
+                    <>
+                      {" · "}
+                      <span className="text-fg/80">{realm.since}</span>
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
+          );
+        })}
+        {next && (
+          <p className="text-[11px] tabular-nums text-muted">
+            <span className="text-muted/60">next · </span>
+            {next}
+          </p>
+        )}
+        {base && (
+          <p className="text-[11px] tabular-nums text-muted">
+            <span
+              aria-hidden
+              lang="zh"
+              className="mr-1 font-[family-name:var(--font-zh)] text-muted/60"
+            >
+              底色
+            </span>
+            · {base.feeling} · {base.stance}
+          </p>
+        )}
+        {method && method.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setPagesOpen((v) => !v)}
+              aria-expanded={pagesOpen}
+              className="flex w-full items-baseline gap-2 text-left text-xs leading-[22px]"
+            >
+              <span aria-hidden className="text-[10px] text-muted/60">
+                {pagesOpen ? "▾" : "▸"}
+              </span>
+              <span className="text-muted">
+                the pages · his · {method.length} lines
+              </span>
+            </button>
+            {pagesOpen && (
+              <div className="mt-0.5 ml-5 flex flex-col gap-1 text-[11px] text-muted">
+                {method.map((line, i) => (
+                  <p key={i} className="flex items-baseline gap-2">
+                    <span className="shrink-0 tabular-nums text-muted/50">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <span>{line}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {skill && (
+          <div className="mt-1 border-t border-hairline/60 pt-2">
+            <button
+              type="button"
+              onClick={() => setSkillOpen((v) => !v)}
+              aria-expanded={skillOpen}
+              className="flex w-full flex-wrap items-baseline gap-x-2 text-left text-xs leading-[22px]"
+            >
+              <span aria-hidden className="text-(--essence)">
+                ◆
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted/60">
+                the skill
+              </span>
+              <span
+                lang="zh"
+                className="font-[family-name:var(--font-zh)] text-fg/90"
+              >
+                {skill.name}
+              </span>
+              <span className="text-[11px] tabular-nums text-muted/60">
+                lv{skill.level} · {skill.grade}
+              </span>
+              <span className="text-[11px] text-muted">— {skill.line}</span>
+              <span
+                aria-hidden
+                className="ml-auto w-2.5 shrink-0 text-muted/40"
+              >
+                {skillOpen ? "▾" : "▸"}
+              </span>
+            </button>
+            {skillOpen && (
+              <div className="mt-1.5 mb-1 ml-4 flex flex-col border-l border-hairline pl-3">
+                <PanelLine label="名称：" muted={zombie}>
+                  杀谎者
+                </PanelLine>
+                <PanelLine label="技能：" muted={zombie}>
+                  {skill.name}
+                </PanelLine>
+                <PanelLine label="等级：" muted={zombie}>
+                  {skill.level}（{read.points}/{read.next ?? "—"}）
+                  {read.held && " · held"}
+                </PanelLine>
+                {/* The book greys a banned skill and prints the countdown on the
+                    level line; the mode has no clock, so the line says what it
+                    is waiting on instead of inventing one. */}
+                {zombie && (
+                  <PanelLine label="封印：" muted>
+                    until the exit is ruled
+                  </PanelLine>
+                )}
+                {skill.effects.map((effect, i) => (
+                  <PanelLine
+                    key={i}
+                    label={`效果${EFFECT_NUMERALS[i]}：`}
+                    muted={zombie}
+                  >
+                    {effect}
+                  </PanelLine>
+                ))}
+                <PanelLine label="缺陷：" muted flaw>
+                  {skill.flaw}
+                </PanelLine>
+                <PanelLine label="点数：" muted={zombie}>
+                  {read.points} — {skill.points.barsMet} bars met ·{" "}
+                  {skill.points.baitHeld} bait held
+                </PanelLine>
+                <CircleLedger
+                  openItem={openItem}
+                  sealItem={sealItem}
+                  sealedAt={sealedAt}
+                  sealed={platform.circle}
+                  today={today}
+                />
+              </div>
+            )}
+          </div>
+        )}
+        <Flavor>
+          read from the journal at each seal — each realm against its own past,
+          nothing subtracted; a cut that does not return within a quarter stays
+          cut.
+        </Flavor>
+      </div>
+    </div>
+  );
+}
+
+/** 效果一…效果四 — the book splits a skill's wording as it sharpens. */
+const EFFECT_NUMERALS = ["一", "二", "三", "四"];
+
+/** One bracketed line of the panel, in the book's own furniture: the label in
+ *  中文, the reading in English, and the brackets themselves the faintest thing
+ *  on the row. `muted` is the ban's grey — and the flaw's, which is grey
+ *  always, being the line the book never prints. */
+function PanelLine({
+  label,
+  muted,
+  flaw,
+  children,
+}: {
+  label: string;
+  muted?: boolean;
+  flaw?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <p
+      className={`text-[11px] leading-[20px] tabular-nums ${
+        muted && !flaw ? "text-muted/50" : ""
+      }`}
+    >
+      <span className="text-muted/60">【</span>
+      <span lang="zh" className="font-[family-name:var(--font-zh)] text-muted">
+        {label}
+      </span>
+      <span className={flaw ? "text-muted" : "text-fg/80"}>{children}</span>
+      <span className="text-muted/60">】</span>
+    </p>
   );
 }
 

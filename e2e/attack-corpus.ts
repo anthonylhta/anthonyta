@@ -124,6 +124,12 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["POST"],
   },
   {
+    routeKey: "/api/circle",
+    probe: "/api/circle",
+    shape: "owner-api",
+    methods: ["GET", "PUT"],
+  },
+  {
     routeKey: "/api/dropbox/delete",
     probe: "/api/dropbox/delete",
     shape: "owner-api",

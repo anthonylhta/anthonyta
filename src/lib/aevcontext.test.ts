@@ -5,6 +5,7 @@ import {
   APERTURE_HIST_PREFIX,
   apertureHistDay,
   apertureHistPath,
+  CIRCLE_CONTEXT,
   FIN_CONTEXT,
   GU_MARKS_CONTEXT,
   GYM_CONTEXT,
@@ -16,6 +17,7 @@ import {
 } from "./aevcontext";
 import { AGENDA_PATH } from "./agendastore";
 import { APERTURE_PATH } from "./aperturestore";
+import { CIRCLE_PATH } from "./circlestore";
 import { generateMk, open, seal, type EnvelopeMeta } from "./crypto";
 import { FIN_PATH } from "./finstore";
 import { GU_MARKS_PATH } from "./gumarksstore";
@@ -36,6 +38,7 @@ const STORES = [
   { name: "agenda", ctx: AGENDA_CONTEXT, path: AGENDA_PATH },
   { name: "jobs", ctx: JOBS_CONTEXT, path: JOBS_PATH },
   { name: "gu-marks", ctx: GU_MARKS_CONTEXT, path: GU_MARKS_PATH },
+  { name: "circle", ctx: CIRCLE_CONTEXT, path: CIRCLE_PATH },
 ];
 
 const meta: EnvelopeMeta = { n: "x.json", t: "application/json", s: 3 };

@@ -4,6 +4,7 @@ import { type ApertureDoc, type AperturePath } from "./aperture";
 import {
   marksTrends,
   planRecordFetch,
+  platformTrends,
   RECORD_FETCH_CAP,
   recordRows,
   recordTrends,
@@ -449,6 +450,75 @@ describe("marksTrends", () => {
             { name: "Cartography", marks: { count: 19, unit: "survey days" } },
           ]),
         },
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("platformTrends", () => {
+  const seal = (barsMet: number, baitHeld: number): ApertureDoc => {
+    const base = doc({});
+    return {
+      ...base,
+      sealed: {
+        ...base.sealed,
+        platform: {
+          realms: [
+            {
+              corpse: "本我",
+              stage: "cut",
+              origin: "the night the bait came and the evening stayed his",
+            },
+          ],
+          skill: {
+            name: "the circle",
+            grade: "自我",
+            line: "the circle I drew",
+            level: 1,
+            points: { barsMet, baitHeld },
+            effects: ["a bar spoken inside binds him"],
+            flaw: "he cannot be pulled",
+          },
+        },
+      },
+    };
+  };
+
+  it("reads both point sources oldest → newest", () => {
+    const trends = platformTrends([
+      { day: "2026-09-16", doc: seal(3, 2) },
+      { day: "2026-09-02", doc: seal(1, 0) },
+      { day: "2026-09-09", doc: seal(2, 1) },
+    ]);
+    expect(trends).toEqual([
+      { name: "bait held", values: [0, 1, 2], first: 0, last: 2, target: null },
+      { name: "bars met", values: [1, 2, 3], first: 1, last: 3, target: null },
+    ]);
+  });
+
+  it("contributes nothing from a seal carrying no platform", () => {
+    // The band was born mid-history, so every seal before it must read as
+    // absent rather than as a week of zero points.
+    const trends = platformTrends([
+      { day: "2026-08-26", doc: doc({}) },
+      { day: "2026-09-02", doc: seal(1, 0) },
+      { day: "2026-09-09", doc: seal(2, 1) },
+    ]);
+    expect(trends.map((t) => t.values)).toEqual([
+      [0, 1],
+      [1, 2],
+    ]);
+  });
+
+  it("drops a single seal — the row lights at the second one carrying it", () => {
+    expect(platformTrends([{ day: "2026-09-09", doc: seal(2, 1) }])).toEqual(
+      [],
+    );
+    expect(platformTrends([])).toEqual([]);
+    expect(
+      platformTrends([
+        { day: "2026-09-02", doc: doc({}) },
+        { day: "2026-09-09", doc: doc({}) },
       ]),
     ).toEqual([]);
   });

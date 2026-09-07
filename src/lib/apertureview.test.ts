@@ -11,6 +11,8 @@ import {
   type ApertureStreak,
   type ApertureTrial,
   type ApertureGu,
+  type AperturePlatform,
+  type AperturePlatformRealm,
 } from "./aperture";
 import {
   ACTIVITY_SERIES,
@@ -62,18 +64,25 @@ import {
   imminentMajorTrial,
   isImminent,
   latestDailyDay,
+  LEVEL_GATE,
+  LEVEL_POINTS,
+  levelNext,
   membraneOf,
   mortalSegments,
   pathAnchor,
   pathEvidence,
+  platformHeader,
+  realmLayer,
   recordedDays,
   seaFill,
   sealedAgo,
   signedCount,
+  skillRead,
   splitLead,
   splitTrials,
   tierGlyph,
   trialCountdown,
+  STAGE_GLYPH,
   trialsSummary,
   type FeedingRead,
 } from "./apertureview";
@@ -2097,5 +2106,127 @@ describe("apertureview — the ledger of rulings", () => {
 
   it("reads its status line in the book's words", () => {
     expect(bookStatus(18, 0)).toBe("1-10/18 · 56%");
+  });
+});
+
+describe("the platform band", () => {
+  const realm = (
+    corpse: "本我" | "自我" | "超我",
+    stage: "mortal" | "half a foot in" | "cut" | "returned",
+  ): AperturePlatformRealm => ({
+    corpse,
+    stage,
+    origin: `${corpse} read from the journal`,
+  });
+  const skill = (level: number, barsMet: number, baitHeld: number) => ({
+    name: "画地为牢",
+    grade: "自我",
+    line: "the circle I drew",
+    level,
+    points: { barsMet, baitHeld },
+    effects: ["a bar spoken inside binds him"],
+    flaw: "he cannot be pulled",
+  });
+
+  it("names each level's next threshold, and nothing past the table", () => {
+    expect(LEVEL_POINTS).toEqual([10, 25, 50, 100, 200]);
+    expect(levelNext(1)).toBe(10);
+    expect(levelNext(5)).toBe(200);
+    // Past the ruled ladder there is no denominator to print — the check-in
+    // owns those numbers and has not written them.
+    expect(levelNext(6)).toBeNull();
+    expect(levelNext(9)).toBeNull();
+  });
+
+  it("gates each level on the realm the skill doc named", () => {
+    expect(LEVEL_GATE[2]).toEqual({ corpse: "本我", stage: "returned" });
+    expect(LEVEL_GATE[3]).toEqual({ corpse: "自我", stage: "cut" });
+    expect(LEVEL_GATE[4]).toEqual({ corpse: "自我", stage: "returned" });
+    expect(LEVEL_GATE[5]).toEqual({ corpse: "超我", stage: "cut" });
+    expect(LEVEL_GATE[6]).toEqual({ corpse: "超我", stage: "returned" });
+  });
+
+  it("reads a fraction below its threshold as simply below it", () => {
+    const p: AperturePlatform = {
+      realms: [realm("本我", "cut")],
+      skill: skill(1, 2, 1),
+    };
+    expect(skillRead(p)).toEqual({ points: 3, next: 10, held: false });
+  });
+
+  it("turns nothing when the fraction fills and the gate is met", () => {
+    // The level is the SEAL's to bump — the site only stops calling it held.
+    const p: AperturePlatform = {
+      realms: [realm("本我", "returned")],
+      skill: skill(1, 8, 6),
+    };
+    expect(skillRead(p)).toEqual({ points: 14, next: 10, held: false });
+  });
+
+  it("reads a full fraction the realms will not turn as held", () => {
+    const p: AperturePlatform = {
+      realms: [realm("本我", "cut")],
+      skill: skill(1, 8, 6),
+    };
+    expect(skillRead(p)).toEqual({ points: 14, next: 10, held: true });
+    // A layer never sealed at all is mortal, and holds the level exactly the
+    // same way an unclimbed one does.
+    expect(
+      skillRead({ realms: [realm("自我", "cut")], skill: skill(1, 14, 0) }),
+    ).toEqual({
+      points: 14,
+      next: 10,
+      held: true,
+    });
+    // A gate asking for `cut` is satisfied by `returned`: nothing is subtracted,
+    // so a stage passed stays passed.
+    expect(
+      skillRead({
+        realms: [realm("自我", "returned")],
+        skill: skill(2, 30, 0),
+      }),
+    ).toEqual({ points: 30, next: 25, held: false });
+  });
+
+  it("cannot hold a level past the ladder's table, and reads no skill as nothing", () => {
+    const p: AperturePlatform = {
+      realms: [realm("超我", "mortal")],
+      skill: skill(6, 900, 0),
+    };
+    expect(skillRead(p)).toEqual({ points: 900, next: null, held: false });
+    expect(skillRead({ realms: [realm("本我", "cut")] })).toEqual({
+      points: 0,
+      next: null,
+      held: false,
+    });
+  });
+
+  it("heads the band with the highest layer that has moved", () => {
+    expect(platformHeader([])).toBe("mortal");
+    expect(
+      platformHeader([realm("本我", "mortal"), realm("自我", "mortal")]),
+    ).toBe("mortal");
+    // Canonical order wins, whatever order the seal listed them in.
+    expect(
+      platformHeader([realm("自我", "half a foot in"), realm("本我", "cut")]),
+    ).toBe("自我 · half a foot in");
+    expect(platformHeader([realm("自我", "half a foot in")])).toBe(
+      "自我 · half a foot in",
+    );
+    expect(
+      platformHeader([realm("本我", "returned"), realm("超我", "cut")]),
+    ).toBe("超我 · cut");
+  });
+
+  it("names each layer and gives each stage its dot", () => {
+    expect(realmLayer("本我")).toBe("the reactive layer");
+    expect(realmLayer("自我")).toBe("the installed beliefs");
+    expect(realmLayer("超我")).toBe("the relational binds");
+    expect(STAGE_GLYPH).toEqual({
+      mortal: "○",
+      "half a foot in": "◔",
+      cut: "◑",
+      returned: "●",
+    });
   });
 });
