@@ -1103,6 +1103,8 @@ function EncryptedRow({
         <video
           src={item.url}
           controls
+          loop
+          playsInline
           preload="metadata"
           className="mt-2 max-h-[60vh] w-full border border-hairline"
         />
