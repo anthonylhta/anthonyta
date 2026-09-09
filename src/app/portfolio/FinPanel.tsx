@@ -13,10 +13,12 @@ import { Sparkline } from "@/components/terminal/Sparkline";
 import { scrubIndex } from "@/lib/spark";
 import {
   buildFullSeries,
+  burnWeekly,
   importPortfolioCsv,
   investedAt,
   latestEntry,
   normalizeFinConfig,
+  spentThisWeek,
   sydneyToday,
   upsertEntry,
   upsertIncome,
@@ -224,23 +226,10 @@ export function FinPanel({ offline }: { offline: boolean }) {
     return ok;
   }
 
-  // Upsert today's pay-in, and the weekly burn denominator alongside it.
-  async function saveIncome(fields: {
-    amountCents: number;
-    burnWeeklyCents: number | null;
-  }): Promise<boolean> {
-    const entry: IncomeEntry = {
-      date: sydneyToday(),
-      amountCents: fields.amountCents,
-    };
-    const ok = await saveConfig((base) => {
-      const next = upsertIncome(base, entry);
-      // An empty burn field LEAVES the denominator where it was — clearing it
-      // would silently blank the runway rather than say anything.
-      return fields.burnWeeklyCents === null
-        ? next
-        : { ...next, burnWeeklyCents: fields.burnWeeklyCents };
-    });
+  // Upsert today's pay-in.
+  async function saveIncome(amountCents: number): Promise<boolean> {
+    const entry: IncomeEntry = { date: sydneyToday(), amountCents };
+    const ok = await saveConfig((base) => upsertIncome(base, entry));
     if (ok) setEditingIncome(false);
     return ok;
   }
@@ -319,6 +308,10 @@ export function FinPanel({ offline }: { offline: boolean }) {
   const hisa = latest?.hisa ?? 0;
   const rate = latest?.rate ?? null;
   const latestIncome = cfg.income?.at(-1) ?? null;
+  // Both derived from the pay, balance and invested figures already sealed here —
+  // nothing is typed for them (ADR 0185).
+  const spent = spentThisWeek(cfg, today);
+  const burn = burnWeekly(cfg, today);
   // The WHOLE history, not a window: a 30-day slice of a savings staircase is
   // mostly flat between paydays and reads as stagnation. All-time is the story.
   const series = buildFullSeries(cfg, today);
@@ -381,9 +374,9 @@ export function FinPanel({ offline }: { offline: boolean }) {
         )}
       </div>
 
-      {/* What comes IN, and what goes out per week — the two figures the inward
-          page divides by. Both live in this envelope rather than in code: a burn
-          rate is personal data and the repo is public. */}
+      {/* What comes IN, and what went out — the figure the inward page divides
+          by. The pay is logged here; the spend and the burn fall out of it, the
+          balance and the invested total, so the runway needs no typed number. */}
       <div className="border-t border-hairline px-4 py-4">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-[11px] uppercase tracking-[0.2em] text-muted">
@@ -401,7 +394,6 @@ export function FinPanel({ offline }: { offline: boolean }) {
         </div>
         {editingIncome ? (
           <IncomeEditor
-            burnWeeklyCents={cfg.burnWeeklyCents ?? null}
             onSave={saveIncome}
             onCancel={() => setEditingIncome(false)}
           />
@@ -418,10 +410,16 @@ export function FinPanel({ offline }: { offline: boolean }) {
               </span>
             </div>
             <div className="flex items-baseline justify-between">
+              <span className="text-muted">spent this week</span>
+              <span className="tabular-nums text-fg/90">
+                {spent !== null ? aud(spent / 100) : "—"}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between">
               <span className="text-muted">burn</span>
               <span className="tabular-nums text-fg/90">
-                {cfg.burnWeeklyCents != null
-                  ? `${aud(cfg.burnWeeklyCents / 100)} /wk`
+                {burn
+                  ? `${aud(burn.cents / 100)} /wk · ${burn.weeks}-wk avg`
                   : "—"}
               </span>
             </div>
@@ -677,48 +675,30 @@ function UnlockBox({ vault }: { vault: Vault }) {
 }
 
 /**
- * This week's pay, plus the weekly burn it is read against. The pay field starts
- * EMPTY every time — a new week's figure is a new number, and prefilling the last
- * one invites saving it twice — while burn is prefilled, because it is a standing
- * denominator that changes rarely. Leaving burn blank keeps whatever is sealed.
+ * This week's pay. The field starts EMPTY every time — a new week's figure is a
+ * new number, and prefilling the last one invites saving it twice.
  */
 function IncomeEditor({
-  burnWeeklyCents,
   onSave,
   onCancel,
 }: {
-  burnWeeklyCents: number | null;
-  onSave: (f: {
-    amountCents: number;
-    burnWeeklyCents: number | null;
-  }) => Promise<boolean>;
+  onSave: (amountCents: number) => Promise<boolean>;
   onCancel: () => void;
 }) {
   const [payInput, setPayInput] = useState("");
-  const [burnInput, setBurnInput] = useState(
-    burnWeeklyCents != null ? String(burnWeeklyCents / 100) : "",
-  );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(false);
 
   const payNum = Number(payInput);
-  const burnTrim = burnInput.trim();
-  const burnNum = burnTrim === "" ? null : Number(burnTrim);
   const valid =
-    payInput.trim() !== "" &&
-    Number.isFinite(payNum) &&
-    payNum >= 0 &&
-    (burnNum === null || (Number.isFinite(burnNum) && burnNum > 0));
+    payInput.trim() !== "" && Number.isFinite(payNum) && payNum >= 0;
 
   async function submit() {
     if (!valid || saving) return;
     setSaving(true);
     setErr(false);
-    // dollars → cents, rounded, so float drift can't leak into either figure
-    const ok = await onSave({
-      amountCents: Math.round(payNum * 100),
-      burnWeeklyCents: burnNum === null ? null : Math.round(burnNum * 100),
-    });
+    // dollars → cents, rounded, so float drift can't leak into the figure
+    const ok = await onSave(Math.round(payNum * 100));
     if (ok) return;
     setErr(true);
     setSaving(false);
@@ -746,7 +726,6 @@ function IncomeEditor({
   return (
     <div className="flex flex-col gap-2">
       {field("this week's pay", payInput, setPayInput, "0")}
-      {field("burn /wk", burnInput, setBurnInput, "—")}
       <div className="flex items-center gap-2 pt-1">
         <button
           type="button"

@@ -85,6 +85,7 @@ import {
 import {
   absorbedThisWeek,
   buildFullSeries,
+  burnWeekly,
   investedAt,
   latestEntry,
   monthToDateBaseline,
@@ -720,7 +721,11 @@ export function ApertureInner({
     ? Math.round(((entry?.cash ?? 0) + (entry?.hisa ?? 0)) * 100)
     : null;
   const invested = fin ? investedAt(fin, today) : null;
-  const burn = fin?.burnWeeklyCents ?? null;
+  // Derived from the pay, balance and invested figures the envelope already
+  // holds, never typed (ADR 0185). A burn at or below zero — a refund-heavy
+  // stretch — is not a denominator, so it reads as unknown rather than infinite.
+  const burnRead = fin ? burnWeekly(fin, today) : null;
+  const burn = burnRead && burnRead.cents > 0 ? burnRead.cents : null;
 
   // The wealth path's row — the same reading the sheet used to print, off the
   // envelope already open here. Month-to-date rather than a 7-day Δ: on weekly pay

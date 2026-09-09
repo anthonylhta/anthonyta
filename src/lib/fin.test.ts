@@ -3,6 +3,7 @@ import {
   absorbedThisWeek,
   buildFullSeries,
   buildStepSeries,
+  burnWeekly,
   cashAt,
   importPortfolioCsv,
   indexBaseline,
@@ -15,6 +16,7 @@ import {
   normalizeFinConfig,
   pickBaseline,
   recoveredThisWeek,
+  spentThisWeek,
   weeklyFlow,
   SNAP_INDEX_MAX_DAYS,
   sydneyDaysAgo,
@@ -471,6 +473,88 @@ describe("weeklyFlow", () => {
   });
 });
 
+describe("spentThisWeek / burnWeekly", () => {
+  // Wednesdays back from 2026-09-09: 09-09, 09-02, 08-26, 08-19, 08-12.
+  const TODAY = "2026-09-09";
+  const entry = (date: string, cash: number, hisa: number) => ({
+    date,
+    cash,
+    hisa,
+    rate: null,
+  });
+  // Paid 1,200 a week, puts 300 away, and the balance tells the rest.
+  const cfg = cfg2({
+    income: [
+      { date: "2026-08-19", amountCents: 120000 },
+      { date: "2026-08-26", amountCents: 120000 },
+      { date: "2026-09-02", amountCents: 120000 },
+      { date: "2026-09-09", amountCents: 120000 },
+    ],
+    invested: [
+      { date: "2026-08-12", investedCents: 2970000 },
+      { date: "2026-08-19", investedCents: 3000000 },
+      { date: "2026-08-26", investedCents: 3030000 },
+      { date: "2026-09-02", investedCents: 3060000 },
+      { date: "2026-09-09", investedCents: 3090000 },
+    ],
+    entries: [
+      entry("2026-08-12", 5000, 20000),
+      entry("2026-08-19", 5100, 20000), // +100 → spent 1200 − 300 − 100 = 800
+      entry("2026-08-26", 4700, 20000), // −400 → spent 1200 − 300 + 400 = 1300
+      entry("2026-09-02", 4700, 20200), // HISA +200 → 700
+      entry("2026-09-09", 4900, 20200), // +200 → 700
+    ],
+  });
+
+  it("derives the week's spend from pay, the balance move and what was put away", () => {
+    expect(spentThisWeek(cfg, "2026-08-19")).toBe(80000);
+    expect(spentThisWeek(cfg, "2026-08-26")).toBe(130000);
+    expect(spentThisWeek(cfg, "2026-09-02")).toBe(70000);
+    expect(spentThisWeek(cfg, TODAY)).toBe(70000);
+  });
+
+  it("is null without a pay, a re-read balance, or a balance before the week", () => {
+    // 08-12 has a balance but no pay logged, and no balance before it.
+    expect(spentThisWeek(cfg, "2026-08-12")).toBeNull();
+    const noReread = cfg2({
+      ...cfg,
+      entries: cfg.entries.filter((e) => e.date !== "2026-09-09"),
+    });
+    expect(spentThisWeek(noReread, TODAY)).toBeNull();
+    const noPay = cfg2({
+      ...cfg,
+      income: cfg.income!.filter((e) => e.date !== "2026-09-09"),
+    });
+    expect(spentThisWeek(noPay, TODAY)).toBeNull();
+  });
+
+  it("counts a week with no import as nothing put away, and a refund as negative", () => {
+    const quiet = cfg2({
+      ...cfg,
+      invested: cfg.invested.filter((e) => e.date !== "2026-09-09"),
+    });
+    expect(spentThisWeek(quiet, TODAY)).toBe(100000);
+    const refund = cfg2({
+      ...cfg,
+      entries: [...cfg.entries.slice(0, -1), entry("2026-09-09", 6000, 20200)],
+    });
+    // The balance rose by 1,300 on 1,200 of pay with 300 put away.
+    expect(spentThisWeek(refund, TODAY)).toBe(-40000);
+  });
+
+  it("averages the knowable trailing weeks and says how many went in", () => {
+    // (800 + 1300 + 700 + 700) / 4
+    expect(burnWeekly(cfg, TODAY)).toEqual({ cents: 87500, weeks: 4 });
+    // Only the two newest weeks knowable → a two-week figure, labelled so.
+    const short = cfg2({
+      ...cfg,
+      entries: cfg.entries.filter((e) => e.date >= "2026-08-26"),
+    });
+    expect(burnWeekly(short, TODAY)).toEqual({ cents: 70000, weeks: 2 });
+    expect(burnWeekly(cfg2(), TODAY)).toBeNull();
+  });
+});
+
 describe("income + burn (envelope fields)", () => {
   const base = cfg2();
 
@@ -482,9 +566,10 @@ describe("income + burn (envelope fields)", () => {
         income: [{ date: "2026-08-05", amountCents: 1 }],
       }),
     ).toBe(true);
+    // The retired typed burn still validates — old envelopes carry it.
     expect(isFinConfig({ ...base, burnWeeklyCents: 90000 })).toBe(true);
     // dollars-as-string, a descending series, a non-integer and a zero burn are
-    // each a figure the page would do arithmetic on.
+    // each a figure the page would have done arithmetic on.
     expect(
       isFinConfig({
         ...base,

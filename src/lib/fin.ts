@@ -54,9 +54,8 @@ export interface FinConfig {
   /** Dated pay-ins — a third step function beside cash and invested. Optional:
    *  every envelope written before the income log existed simply has none. */
   income?: IncomeEntry[];
-  /** The weekly spending denominator, in cents. It lives IN THE ENVELOPE rather
-   *  than as a constant in this file because the repo is public and a burn rate
-   *  is personal data: the figure is the owner's, so it is sealed like the rest. */
+  /** RETIRED — the typed weekly burn. Envelopes sealed before the derived burn
+   *  (`burnWeekly`) still carry it, so it stays valid; nothing reads it now. */
   burnWeeklyCents?: number;
 }
 /** One day of the (unsealed) reading index — the week-over-week baseline source. */
@@ -330,6 +329,57 @@ export function absorbedThisWeek(
   if (at < 0) return null;
   const prev = at > 0 ? cfg.invested[at - 1].investedCents : 0;
   return cfg.invested[at].investedCents - prev;
+}
+
+/**
+ * What went OUT over the trailing week, derived from the three figures the panel
+ * already seals rather than typed: the week's pay, less what was put away, less
+ * whatever the cash + HISA balance rose by (a fall counts as spent). Every card
+ * charge, subscription and cash withdrawal lands in the balance without being
+ * itemised. Null unless the week is fully knowable — a pay logged in it, a balance
+ * re-read in it, and a balance in force before it — because a week whose balance
+ * was never re-read would read as spend exactly equal to the pay. A week with no
+ * import put nothing away, which IS zero here (the ledger's null is "no buy").
+ * Negative is possible and honest: a refund or interest landed, and it says so.
+ */
+export function spentThisWeek(cfg: FinConfig, todayISO: string): number | null {
+  const pay = recoveredThisWeek(cfg, todayISO);
+  if (pay === null) return null;
+  const start = weekStart(todayISO);
+  const reread = cfg.entries.some((e) => e.date >= start && e.date <= todayISO);
+  const before = cashAt(cfg, addDays(start, -1));
+  const now = cashAt(cfg, todayISO);
+  if (!reread || !before || !now) return null;
+  const away = absorbedThisWeek(cfg, todayISO) ?? 0;
+  const rise = Math.round(
+    (now.cash + now.hisa - before.cash - before.hisa) * 100,
+  );
+  return pay - away - rise;
+}
+
+/** How many trailing weeks the burn averages over — enough to swallow the monthly
+ *  charges that land in one week and not the next. */
+const BURN_WEEKS = 4;
+
+/**
+ * The weekly burn as the site divides by it: the mean of `spentThisWeek` over the
+ * trailing BURN_WEEKS anchors, over however many of them are knowable. `weeks`
+ * says how many went in so a reader can tell a one-week figure from a settled
+ * average. Null until a single week is knowable — never a figure the site made up.
+ */
+export function burnWeekly(
+  cfg: FinConfig,
+  todayISO: string,
+  weeks: number = BURN_WEEKS,
+): { cents: number; weeks: number } | null {
+  const spent: number[] = [];
+  for (let k = 0; k < weeks; k++) {
+    const s = spentThisWeek(cfg, addDays(todayISO, -WEEK_DAYS * k));
+    if (s !== null) spent.push(s);
+  }
+  if (spent.length === 0) return null;
+  const sum = spent.reduce((a, b) => a + b, 0);
+  return { cents: Math.round(sum / spent.length), weeks: spent.length };
 }
 
 /** How many weeks of flow the /aperture strips read back over. */
