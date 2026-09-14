@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_NOW_KEY, MAX_NOW_TEXT } from "./now";
 import { parseQuickLog, quickLogLabel, quickLogSaved } from "./quicklog";
 import { MAX_TEXT } from "./todo";
 
@@ -82,6 +83,47 @@ describe("parseQuickLog — the capture verb", () => {
   });
 });
 
+describe("parseQuickLog — the front-door verb", () => {
+  it("reads the first word as the key and the rest as the line", () => {
+    expect(parseQuickLog("now reading a new serial", TODAY)).toEqual({
+      kind: "now",
+      key: "reading",
+      text: "a new serial",
+    });
+  });
+
+  it("lowercases the key and trims both halves", () => {
+    expect(parseQuickLog("  now   Reading   a new serial  ", TODAY)).toEqual({
+      kind: "now",
+      key: "reading",
+      text: "a new serial",
+    });
+  });
+
+  it("is not an action until there is something to say", () => {
+    expect(parseQuickLog("now", TODAY)).toBeNull();
+    expect(parseQuickLog("now   ", TODAY)).toBeNull();
+    expect(parseQuickLog("now reading", TODAY)).toBeNull();
+  });
+
+  it("refuses a key or a line past the block's caps", () => {
+    const longKey = "k".repeat(MAX_NOW_KEY + 1);
+    const longText = "t".repeat(MAX_NOW_TEXT + 1);
+    expect(parseQuickLog(`now ${longKey} a line`, TODAY)).toBeNull();
+    expect(parseQuickLog(`now reading ${longText}`, TODAY)).toBeNull();
+  });
+
+  it("takes both halves at exactly the cap", () => {
+    const key = "k".repeat(MAX_NOW_KEY);
+    const text = "t".repeat(MAX_NOW_TEXT);
+    expect(parseQuickLog(`now ${key} ${text}`, TODAY)).toEqual({
+      kind: "now",
+      key,
+      text,
+    });
+  });
+});
+
 describe("parseQuickLog — everything else is navigation", () => {
   it("leaves an ordinary query alone", () => {
     expect(parseQuickLog("", TODAY)).toBeNull();
@@ -103,6 +145,15 @@ describe("quickLogLabel", () => {
       "capture · call the tailor",
     );
   });
+
+  it("spells out the now line, clipped to the palette's row", () => {
+    expect(
+      quickLogLabel({ kind: "now", key: "reading", text: "a new serial" }),
+    ).toBe("set now · reading · a new serial");
+    expect(
+      quickLogLabel({ kind: "now", key: "reading", text: "t".repeat(80) }),
+    ).toBe(`set now · reading · ${"t".repeat(59)}…`);
+  });
 });
 
 describe("quickLogSaved", () => {
@@ -116,5 +167,11 @@ describe("quickLogSaved", () => {
     expect(quickLogSaved({ kind: "todo", text: "call the tailor" })).toBe(
       "saved ✓ captured · call the tailor",
     );
+  });
+
+  it("marks the now line written", () => {
+    expect(
+      quickLogSaved({ kind: "now", key: "reading", text: "a new serial" }),
+    ).toBe("saved ✓ now · reading · a new serial");
   });
 });

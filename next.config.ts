@@ -41,6 +41,14 @@ const nextConfig: NextConfig = {
   },
   // The tone-translator → ishin rebrand renamed two public routes; 308-redirect
   // the old paths so existing links, bookmarks, and search results don't 404.
+  //
+  // `/live` is not a page but a name for the lobby's folded-open state, so it
+  // redirects onto the fragment the fold reads on mount. A CONFIG redirect
+  // rather than a page.tsx, deliberately: a route file would join the app's
+  // route tree (and so the adversarial suite's manifest) to do nothing but
+  // bounce, and it would have to be argued in and out of the sitemap. 307, not
+  // 308 — a browser-cached-forever alias would be the wrong thing to have
+  // promised if /live ever becomes a page of its own.
   async redirects() {
     return [
       { source: "/translator", destination: "/ishin", permanent: true },
@@ -49,6 +57,7 @@ const nextConfig: NextConfig = {
         destination: "/projects/ishin",
         permanent: true,
       },
+      { source: "/live", destination: "/#live", permanent: false },
     ];
   },
 };

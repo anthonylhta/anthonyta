@@ -38,6 +38,7 @@ test.describe("guest gating", () => {
     "/api/transit/stops?q=central", // TfNSW place-search proxy
     "/api/transit/trip?from=stop%3A1&to=stop%3A2", // TfNSW journey proxy
     "/api/layout", // owner layout config write/read (ADR: layout visibility)
+    "/api/now", // owner front-door "now" block write/read (the lobby's words)
     "/api/todo", // E2EE quick-capture envelope (ADR: quick capture)
     "/api/push", // web push subscriptions — plaintext, so the wall is the whole guard
     "/reader", // the owner-only morning feeds page (ADR: rss reader)
@@ -406,6 +407,7 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(200);
     const html = await res.text();
     expect(html).toContain("reading is live"); // lobby footer
+    expect(html).toContain("the live slice"); // the dashboard's fold row
     expect(html).not.toContain("command center");
     expect(html).not.toContain("private command center");
     expect(html).not.toContain("net worth"); // command-center-only
@@ -414,6 +416,20 @@ test.describe("guest gating", () => {
     // its essence colour and every band of the sheet stay off the guest page.
     for (const s of SHEET_STRINGS)
       expect(html, `the lobby leaks "${s}"`).not.toContain(s);
+  });
+
+  test("/live is a name for the folded-open lobby, not a page", async ({
+    request,
+  }) => {
+    const res = await request.get("/live", { maxRedirects: 0 });
+    expect([307, 308]).toContain(res.status());
+    // Robust to relative vs absolute Location, as the sign-in redirect is.
+    const loc = new URL(
+      res.headers()["location"] ?? "",
+      "http://localhost:3210",
+    );
+    expect(loc.pathname).toBe("/");
+    expect(loc.hash).toBe("#live");
   });
 
   test("/briefing hides the owner-only portfolio note", async ({ request }) => {

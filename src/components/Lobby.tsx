@@ -11,14 +11,18 @@ import {
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { Tape } from "@/components/terminal/Tape";
 import { GithubModule } from "@/components/GithubModule";
+import { LobbyFrame } from "@/components/LobbyFrame";
+import { NowCard } from "@/components/NowCard";
 import { TftModule } from "@/components/TftModule";
 import { getBriefing } from "@/lib/connectors/briefing";
 import { getGithub } from "@/lib/connectors/github";
 import { getLayout } from "@/lib/connectors/layout";
+import { getNow } from "@/lib/connectors/now";
 import { getHandOfTheDay } from "@/lib/connectors/riichi";
 import { getTft, getTftHistory } from "@/lib/connectors/tft";
 import { getLanguageStats } from "@/lib/connectors/translator";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
+import { relativeTime } from "@/lib/github";
 import { hiddenSet, orderedUnits } from "@/lib/layout";
 import { sampleBriefing } from "@/lib/sampleBriefing";
 import { me, nav, reading as mockReading, riichi } from "@/lib/mock";
@@ -56,7 +60,7 @@ function NavItem({
 
 /** The public face of the hub — what visitors / recruiters see (ADR 0004). */
 export async function Lobby() {
-  const [reads, hand, briefingData, lang, gh, tft, tftHistory, layout] =
+  const [reads, hand, briefingData, lang, gh, tft, tftHistory, layout, now] =
     await Promise.all([
       getCurrentlyReading(),
       getHandOfTheDay(),
@@ -66,6 +70,7 @@ export async function Lobby() {
       getTft(),
       getTftHistory(),
       getLayout(),
+      getNow(),
     ]);
   const briefing = briefingData ?? sampleBriefing;
   // Owner-curated visibility (roadmap 59): a hidden module simply doesn't
@@ -231,21 +236,71 @@ export async function Lobby() {
     ) : null,
   };
 
+  const units = orderedUnits(layout, "lobby");
+
+  // The fold's label names what is actually behind it — each visible module by
+  // its own name, which is its registry label before the parenthetical. Derived
+  // rather than written out, so hiding a module in /system takes it off the row
+  // too instead of promising something the slice no longer holds.
+  const sliceNames = units.flatMap((u) =>
+    u.modules
+      .filter((m) => !hidden.has(m.key))
+      .map((m) => m.label.replace(/\s*\(.*$/, "")),
+  );
+  const sliceLabel = sliceNames.length
+    ? `the live slice — ${sliceNames.join(" · ")}`
+    : null;
+
+  // The pulse — three live facts under the card. Each is DROPPED when its
+  // connector fell back to sample data: a front door that states a figure has to
+  // mean it, and a placeholder streak beside "open to work" is a lie told to the
+  // one audience that matters.
+  const pushed = gh.isLive && gh.recent ? relativeTime(gh.recent.at) : null;
+  const facts: ReactNode[] = [];
+  if (pushed)
+    facts.push(
+      <span key="pushed">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-up align-middle" />{" "}
+        pushed {pushed}
+      </span>,
+    );
+  if (gh.isLive && gh.currentStreak > 0)
+    facts.push(<span key="streak">{gh.currentStreak}d streak</span>);
+  if (top) facts.push(<span key="reading">reading ch. {top.chapter}</span>);
+  const pulse = facts.flatMap((fact, i) =>
+    i === 0
+      ? [fact]
+      : [
+          <span key={`sep-${i}`} aria-hidden className="text-muted/40">
+            ·
+          </span>,
+          fact,
+        ],
+  );
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
-      <div className="border border-hairline bg-surface/20">
-        <StatusBar user="guest" />
+    <LobbyFrame
+      card={
+        <>
+          <StatusBar user="guest" />
 
-        {/* prompt / hero */}
-        <Prompt tagline={me.tagline} subtitle={me.intro} />
+          {/* prompt / hero — the name is the cursor line now, the trades and the
+              availability signal the quiet one under it. */}
+          <Prompt tagline={me.name} subtitle={`${me.tagline} — ${me.intro}`} />
 
-        {/* modules render in the owner's layout order (roadmap 59); the default
-            order reproduces the hand-tuned lobby exactly. */}
-        {orderedUnits(layout, "lobby").map((u) => (
+          <NowCard now={now} />
+        </>
+      }
+      pulse={pulse}
+      sliceLabel={sliceLabel}
+      slice={
+        // modules render in the owner's layout order (roadmap 59); the default
+        // order reproduces the hand-tuned lobby exactly.
+        units.map((u) => (
           <Fragment key={u.key}>{lobbyNodes[u.key]}</Fragment>
-        ))}
-
-        {/* nav */}
+        ))
+      }
+      nav={
         <div className="flex items-center justify-between border-t border-hairline px-4 py-3">
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             {leadNav.map((item) => (
@@ -262,11 +317,7 @@ export async function Lobby() {
           </nav>
           <CommandK />
         </div>
-      </div>
-
-      <p className="mt-4 text-center text-xs text-muted/50">
-        warm terminal · reading is live
-      </p>
-    </main>
+      }
+    />
   );
 }

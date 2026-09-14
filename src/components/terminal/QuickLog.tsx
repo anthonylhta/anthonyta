@@ -6,6 +6,7 @@ import { useMeals } from "@/components/useMeals";
 import { useTodo } from "@/components/useTodo";
 import { sydneyToday } from "@/lib/fin";
 import { setWeight } from "@/lib/meals";
+import { DEFAULT_NOW, normalizeNow, setLine, type NowConfig } from "@/lib/now";
 import {
   parseQuickLog,
   quickLogLabel,
@@ -60,11 +61,11 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
   useEffect(() => () => onStage(false, null), [onStage]);
 
   if (action) {
-    return action.kind === "weigh" ? (
-      <WeighRow action={action} onDone={onDone} onStage={onStage} />
-    ) : (
-      <CaptureRow action={action} onDone={onDone} onStage={onStage} />
-    );
+    if (action.kind === "weigh")
+      return <WeighRow action={action} onDone={onDone} onStage={onStage} />;
+    if (action.kind === "todo")
+      return <CaptureRow action={action} onDone={onDone} onStage={onStage} />;
+    return <NowRow action={action} onDone={onDone} onStage={onStage} />;
   }
 
   // Mid-word, or plainly a jump: a section that can't read the query says
@@ -78,7 +79,7 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       </li>
       {/* The section's one advertisement — the verbs, not a row to select. */}
       <li className="flex items-center justify-between px-3 py-2 text-sm text-muted">
-        <span className="truncate">w 67.4 · todo …</span>
+        <span className="truncate">w 67.4 · todo … · now …</span>
         <span className="text-xs text-muted">type to log</span>
       </li>
     </>
@@ -127,6 +128,74 @@ function CaptureRow({
     ready: todo.cfg !== null,
     storeErr: todo.dataErr !== null,
     write: () => todo.capture(action.text),
+    onDone,
+    onStage,
+  });
+  return <ActionRow {...row} />;
+}
+
+/**
+ * The front-door verb — one line of the lobby's "now" block, rewritten from
+ * wherever I happen to be. The only one of the three that writes something a
+ * STRANGER reads, and the only one over a plaintext store rather than an
+ * envelope: the block is public words by design (lib/now), so there is nothing
+ * here to unseal, and the route's owner gate is the whole guard.
+ */
+function NowRow({
+  action,
+  onDone,
+  onStage,
+}: {
+  action: Extract<QuickLogAction, { kind: "now" }>;
+  onDone: () => void;
+  onStage: StageLog;
+}) {
+  const [cfg, setCfg] = useState<NowConfig | null>(null);
+  const [dataErr, setDataErr] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/now");
+        // The store is empty until the first save, and the route answers the
+        // defaults — which are what the lobby is currently printing anyway.
+        if (res.status === 404) {
+          if (!cancelled) setCfg(DEFAULT_NOW);
+          return;
+        }
+        if (!res.ok) throw new Error(`now: ${res.status}`);
+        const parsed = normalizeNow(await res.json());
+        if (!parsed) throw new Error("now: unreadable");
+        if (!cancelled) setCfg(parsed);
+      } catch {
+        if (!cancelled) setDataErr(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const row = useStaged({
+    action,
+    ready: cfg !== null,
+    storeErr: dataErr,
+    write: async () => {
+      if (!cfg) return false;
+      const next = setLine(cfg, action.key, action.text);
+      // Unchanged means the block is already full and this is a ninth key —
+      // reported as a refused write rather than a ✓ over nothing.
+      if (next === cfg) return false;
+      const res = await fetch("/api/now", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) return false;
+      setCfg(next);
+      return true;
+    },
     onDone,
     onStage,
   });
