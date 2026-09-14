@@ -10,6 +10,7 @@ import {
   investedAt,
   isFinConfig,
   isPortfolioSnapshot,
+  lastInvestedDay,
   isSnapIndex,
   latestEntry,
   monthToDateBaseline,
@@ -867,6 +868,22 @@ describe("pickBaseline", () => {
   it("is null when nothing is old enough or the series is empty", () => {
     expect(pickBaseline(series, 30, "2026-06-26")).toBeNull();
     expect(pickBaseline([], 7, "2026-06-26")).toBeNull();
+  });
+});
+
+describe("lastInvestedDay", () => {
+  it("is the tail of the ascending invested series, or null when empty", () => {
+    const base = { v: 2 as const, entries: [], portfolio: null };
+    expect(lastInvestedDay({ ...base, invested: [] })).toBeNull();
+    expect(
+      lastInvestedDay({
+        ...base,
+        invested: [
+          { date: "2026-08-26", investedCents: 1 },
+          { date: "2026-09-02", investedCents: 2 },
+        ],
+      }),
+    ).toBe("2026-09-02");
   });
 });
 
