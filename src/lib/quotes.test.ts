@@ -5,6 +5,26 @@ import { QUOTES, quoteForDay } from "./quotes";
 const tier = (rank: number) =>
   QUOTES.filter((q) => q.rank === rank || q.rank === null);
 
+/** Fang Yuan's rank by chapter in the second life, off the wiki's Cultivation
+ *  table — the same windows the bank's header documents. A chapter outside every
+ *  window belongs to no rank. */
+const RANK_WINDOWS: readonly [rank: number, from: number, to: number][] = [
+  [1, 1, 91], // the rebirth and the awakening (ch. 5) are the same mortal era
+  [2, 92, 151],
+  [3, 152, 197],
+  [1, 198, 232], // the Blood Skull reset
+  [2, 233, 272],
+  [3, 273, 330],
+  [4, 331, 474],
+  [5, 475, 632],
+  [6, 633, 1205],
+  [7, 1206, 1766],
+  [8, 1767, 2205],
+  [9, 2206, Infinity],
+];
+const rankAtChapter = (ch: number) =>
+  RANK_WINDOWS.find(([, from, to]) => ch >= from && ch <= to)?.[0] ?? null;
+
 describe("quotes — the bank", () => {
   it("carries a non-empty line, correctly ranked, in every entry", () => {
     for (const q of QUOTES) {
@@ -26,6 +46,51 @@ describe("quotes — the bank", () => {
 
   it("holds scripture that belongs to no rank", () => {
     expect(QUOTES.some((q) => q.rank === null)).toBe(true);
+  });
+
+  it("tiers every Fang Yuan line by the chapter his own rank stood at", () => {
+    // The doctrine's promise: the page never quotes a road that hasn't been
+    // walked. The chapter is in every `arc`, the rank-by-chapter table is above,
+    // so a mis-tiered line is a red test, not a reader's suspicion. The ch. 1285
+    // first-life flashbacks are the one ruled exception (tier 1 — the mortal
+    // era remembered).
+    const ranked = QUOTES.filter((q) => q.rank !== null);
+    expect(ranked.length).toBeGreaterThan(0);
+    for (const q of ranked) {
+      const arc = q.arc ?? "";
+      if (arc.includes("first life")) {
+        expect(q.rank, arc).toBe(1);
+        continue;
+      }
+      const m = /^ch\. (\d+)/.exec(arc);
+      expect(m, `no chapter in arc: ${arc}`).not.toBeNull();
+      expect(rankAtChapter(Number(m![1])), `${arc} → rank ${q.rank}`).toBe(
+        q.rank,
+      );
+    }
+  });
+
+  it("carries the original sentence on every translated (十八层) line", () => {
+    // The mind novel's lines are translated here, not excerpted from a fan
+    // translation — so the provenance a reader can check is the original itself.
+    const translated = QUOTES.filter((q) => q.arc?.startsWith("十八层"));
+    expect(translated.length).toBeGreaterThan(0);
+    for (const q of translated) {
+      expect(q.rank, q.arc).toBeNull();
+      expect(q.zh?.trim().length, q.arc).toBeGreaterThan(0);
+    }
+    // and the excerpted lines never pretend to be translations
+    for (const q of QUOTES.filter((q) => !q.arc?.startsWith("十八层")))
+      expect(q.zh, q.arc).toBeUndefined();
+  });
+
+  it("keeps the mind novel's third realm out until a seal opens it", () => {
+    // 超我 reads mortal on the sheet: nothing from the superego's road — 失我劫,
+    // 鬼仙, the third realm's booklet — is stocked yet. The curation rule, pinned.
+    for (const q of QUOTES.filter((q) => q.arc?.startsWith("十八层"))) {
+      expect(q.zh, q.arc).not.toMatch(/超我失我|失我劫|鬼仙|三境/);
+      expect(q.arc, q.arc).not.toMatch(/superego booklet|third realm/);
+    }
   });
 });
 
@@ -77,12 +142,17 @@ describe("quotes — quoteForDay", () => {
     expect(quoteForDay(1, "2026-8-6")).toBe(tier(1)[0]);
   });
 
-  it("answers null only when a tier is empty", () => {
-    // No rank-9 lines are stocked (the ten-in-three-million-years tier), and
-    // scripture is stocked for every rank — so an empty tier can only happen if
-    // the scripture itself were emptied. The wiki-excerpt curation pass stocked
-    // every mortal tier and 6–8, so rank 9 is the one honest probe left.
-    expect(QUOTES.some((q) => q.rank === 9)).toBe(false);
-    expect(quoteForDay(9, "2026-08-06")).not.toBeNull();
+  it("answers at every rank, one through nine", () => {
+    // Every mortal and immortal tier is stocked (rank 9 since the venerable
+    // poem was re-tiered to the chapter it was recited at), and scripture rides
+    // with all of them — so null, the empty-tier answer, is unreachable while
+    // the scripture stands. Pinned across the whole ladder.
+    for (let rank = 1; rank <= 9; rank++) {
+      expect(
+        QUOTES.some((q) => q.rank === rank),
+        `rank ${rank}`,
+      ).toBe(true);
+      expect(quoteForDay(rank, "2026-08-06")).not.toBeNull();
+    }
   });
 });
