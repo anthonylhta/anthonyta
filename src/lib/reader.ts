@@ -10,37 +10,155 @@
  * the URLs to fetch them (so the list can't be E2EE), and editing it is a
  * one-line PR.
  *
- * Curated to the owner's interests — tech, Japan, gaming, genre fiction — and
- * to what a server can actually fetch. The obvious hobby-specific sources are
- * RSS-hostile from a datacenter IP: Reddit (r/CompetitiveTFT, r/rational) 403s
- * then 429s any non-browser / cloud request, and Dot Esports / ScribbleHub sit
- * behind a Cloudflare bot challenge. So the two "closest reachable" stand-ins:
- * Dexerto for Riot/esports, Reactor (Tor) for serialized/genre fiction.
+ * LANES, NOT A PILE (the 2026-09-15 relay): the page reads as four lanes the
+ * owner named — craft, japan, sydney, the world — each a handful of sources
+ * chosen for him rather than front pages, interleaved one row per source so a
+ * firehose (Anime News Network posts a hundred a day) can never take a lane.
+ * Everything here was probed through this parser before it entered the list
+ * (the 2026-07-20 lesson: a datacenter IP is a different fetcher than a
+ * laptop). What a server cannot fetch stays out: Reddit, the TFT sites, the
+ * web-serial sites, and since September NHK Easy, whose list now sits behind a
+ * token. Tofugu left because its newest post was three years old.
+ *
+ * What learns from the owner lives on the device, not the server: boost and
+ * mute WORDS in localStorage beside the visit memory. A title carrying a boost
+ * word floats to its lane's top; a muted one leaves the page with a count. No
+ * model reads anything — the hub never calls one.
  */
 
 import { MAX_TEXT } from "./todo";
+
+export type LaneKey = "craft" | "japan" | "sydney" | "world";
+
+export interface Lane {
+  key: LaneKey;
+  label: string;
+}
+
+/** The page's order. */
+export const LANES: Lane[] = [
+  { key: "craft", label: "craft" },
+  { key: "japan", label: "japan" },
+  { key: "sydney", label: "sydney" },
+  { key: "world", label: "the world" },
+];
 
 export interface Feed {
   key: string;
   label: string;
   url: string;
+  lane: LaneKey;
+  /** Japanese-language source — its rows wear the JP font stack. */
+  lang?: "ja";
+  /** Titles to leave out at the source (a release feed's canaries). */
+  drop?: RegExp;
 }
 
 export const FEEDS: Feed[] = [
-  // tech / programming
-  { key: "hn", label: "hn", url: "https://news.ycombinator.com/rss" },
-  { key: "lobsters", label: "lobsters", url: "https://lobste.rs/rss" },
-  // japan — anime + language
+  // craft — the best of HN rather than its front page; lobsters by tag
+  { key: "hn", label: "hn", url: "https://hnrss.org/best", lane: "craft" },
+  {
+    key: "lobsters",
+    label: "lobsters",
+    url: "https://lobste.rs/t/ai,web,javascript.rss",
+    lane: "craft",
+  },
+  {
+    key: "simonw",
+    label: "simon willison",
+    url: "https://simonwillison.net/atom/everything/",
+    lane: "craft",
+  },
+  {
+    key: "nextjs",
+    label: "next.js",
+    url: "https://github.com/vercel/next.js/releases.atom",
+    lane: "craft",
+    drop: /canary|-rc\./i,
+  },
+  {
+    key: "vercel",
+    label: "vercel",
+    url: "https://vercel.com/atom",
+    lane: "craft",
+  },
+  // japan — easiest to hardest for the eye; the last two are the reading rungs
   {
     key: "ann",
     label: "anime news",
     url: "https://www.animenewsnetwork.com/all/rss.xml",
+    lane: "japan",
   },
-  { key: "tofugu", label: "tofugu", url: "https://www.tofugu.com/feed.xml" },
-  // gaming — riot / esports (TFT-specific feeds are all bot-blocked)
-  { key: "dexerto", label: "dexerto", url: "https://www.dexerto.com/feed/" },
-  // fiction — serialized / genre (web-serial sites have no server-fetchable feed)
-  { key: "reactor", label: "reactor", url: "https://reactormag.com/feed/" },
+  {
+    key: "soranews",
+    label: "soranews",
+    url: "https://soranews24.com/feed/",
+    lane: "japan",
+  },
+  {
+    key: "japantimes",
+    label: "japan times",
+    url: "https://www.japantimes.co.jp/feed/",
+    lane: "japan",
+  },
+  {
+    key: "joc",
+    label: "just one cookbook",
+    url: "https://www.justonecookbook.com/feed/",
+    lane: "japan",
+  },
+  {
+    key: "nhk",
+    label: "nhk 日本語",
+    url: "https://www.nhk.or.jp/rss/news/cat0.xml",
+    lane: "japan",
+    lang: "ja",
+  },
+  {
+    key: "toyokeizai",
+    label: "東洋経済",
+    url: "https://toyokeizai.net/list/feed/rss",
+    lane: "japan",
+    lang: "ja",
+  },
+  // sydney — what the city is doing, and what happened in it
+  {
+    key: "concrete",
+    label: "concrete playground",
+    url: "https://concreteplayground.com/sydney/feed",
+    lane: "sydney",
+  },
+  {
+    key: "smh",
+    label: "smh nsw",
+    url: "https://www.smh.com.au/rss/national/nsw.xml",
+    lane: "sydney",
+  },
+  {
+    key: "abcsyd",
+    label: "abc sydney",
+    url: "https://www.abc.net.au/news/feed/2942460/rss.xml",
+    lane: "sydney",
+  },
+  // the world
+  {
+    key: "abc",
+    label: "abc",
+    url: "https://www.abc.net.au/news/feed/45910/rss.xml",
+    lane: "world",
+  },
+  {
+    key: "guardian",
+    label: "guardian au",
+    url: "https://www.theguardian.com/au/rss",
+    lane: "world",
+  },
+  {
+    key: "bbc",
+    label: "bbc world",
+    url: "https://feeds.bbci.co.uk/news/world/rss.xml",
+    lane: "world",
+  },
 ];
 
 export interface FeedItem {
@@ -49,6 +167,8 @@ export interface FeedItem {
   link: string;
   /** Epoch ms of the item's published/updated time; null when unparseable. */
   ts: number | null;
+  /** Carried from the feed: a Japanese-language row wears the JP font stack. */
+  lang?: "ja";
 }
 
 /** Numeric + the five named entities feeds actually use. Applied AFTER tag
@@ -131,12 +251,38 @@ export function parseFeed(xml: string, source: string, limit = 20): FeedItem[] {
   return out;
 }
 
-/** Flatten + newest-first (undated items sink) + cap. */
-export function mergeItems(lists: FeedItem[][], cap = 40): FeedItem[] {
-  return lists
-    .flat()
-    .sort((a, b) => (b.ts ?? -Infinity) - (a.ts ?? -Infinity))
-    .slice(0, cap);
+/**
+ * One lane out of its sources' lists: round-robin, one row from each source
+ * before a second from any, newest-first inside each source (undated sink).
+ * The order is the promise — a source that posts a hundred a day gets exactly
+ * the turns a source that posts one does — and the cap is the lane's depth.
+ */
+export function interleave(lists: FeedItem[][], cap = 15): FeedItem[] {
+  const queues = lists.map((l) =>
+    [...l].sort((a, b) => (b.ts ?? -Infinity) - (a.ts ?? -Infinity)),
+  );
+  const out: FeedItem[] = [];
+  for (let round = 0; out.length < cap; round++) {
+    let any = false;
+    for (const q of queues) {
+      if (out.length >= cap) break;
+      const item = q[round];
+      if (item) {
+        out.push(item);
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  return out;
+}
+
+/** One lane as the page reads it — its sources, and its rows in reading order. */
+export interface LaneRead {
+  key: LaneKey;
+  label: string;
+  sources: string[];
+  items: FeedItem[];
 }
 
 /** "now" / "5m" / "3h" / "2d" — the reader row's age column. */
@@ -158,6 +304,93 @@ export const SAMPLE_ITEMS: FeedItem[] = [
     ts: null,
   },
 ];
+
+/** The sample as lanes — one row in the first lane, the rest empty. */
+export function sampleLanes(): LaneRead[] {
+  return LANES.map((l, i) => ({
+    key: l.key,
+    label: l.label,
+    sources: ["sample"],
+    items: i === 0 ? SAMPLE_ITEMS : [],
+  }));
+}
+
+/* --- boost + mute words (the device's taste, never the server's) ----------- */
+
+/** Where a device keeps its words. localStorage like the visit memory: a
+ *  display preference for this browser, nothing worth sealing. */
+export const READER_PREFS_KEY = "reader-prefs-v1";
+
+export interface ReaderPrefs {
+  boost: string[];
+  mute: string[];
+}
+
+export const EMPTY_PREFS: ReaderPrefs = { boost: [], mute: [] };
+
+/** Words per list and letters per word — a taste, not a filter language. */
+export const MAX_WORDS = 20;
+const MAX_WORD = 32;
+
+/** "japanese, TypeScript  claude" → ["japanese", "typescript", "claude"]:
+ *  split on commas and whitespace, lowercased, deduped, capped. */
+export function parseWords(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/[,\s]+/)) {
+    const w = raw.trim().toLowerCase().slice(0, MAX_WORD);
+    if (w && !out.includes(w)) out.push(w);
+    if (out.length >= MAX_WORDS) break;
+  }
+  return out;
+}
+
+/** The stored JSON → prefs, or the empty pair. Junk never throws — it is
+ *  whatever a previous build left behind, untrusted like the visit record. */
+export function parsePrefs(json: string | null): ReaderPrefs {
+  if (json === null) return EMPTY_PREFS;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return EMPTY_PREFS;
+  }
+  if (typeof raw !== "object" || raw === null) return EMPTY_PREFS;
+  const { boost, mute } = raw as { boost?: unknown; mute?: unknown };
+  const words = (x: unknown) =>
+    Array.isArray(x)
+      ? parseWords(x.filter((w) => typeof w === "string").join(" "))
+      : [];
+  return { boost: words(boost), mute: words(mute) };
+}
+
+function hasWord(item: FeedItem, words: string[]): boolean {
+  if (words.length === 0) return false;
+  const t = item.title.toLowerCase();
+  return words.some((w) => t.includes(w));
+}
+
+export function isBoosted(item: FeedItem, prefs: ReaderPrefs): boolean {
+  return hasWord(item, prefs.boost);
+}
+
+export function isMuted(item: FeedItem, prefs: ReaderPrefs): boolean {
+  return hasWord(item, prefs.mute);
+}
+
+/** A lane's rows under the device's words: muted rows leave (counted), boosted
+ *  rows rise to the top in their existing order, the rest keep theirs. A mute
+ *  wins over a boost — hiding is the stronger wish. */
+export function rankLane(
+  items: FeedItem[],
+  prefs: ReaderPrefs,
+): { shown: FeedItem[]; muted: number } {
+  const kept = items.filter((i) => !isMuted(i, prefs));
+  const shown = [
+    ...kept.filter((i) => isBoosted(i, prefs)),
+    ...kept.filter((i) => !isBoosted(i, prefs)),
+  ];
+  return { shown, muted: items.length - kept.length };
+}
 
 /* --- "new since your last visit" (roadmap 54's per-device read-state) -------
  *

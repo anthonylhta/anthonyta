@@ -5,7 +5,6 @@ import { ReaderList } from "@/components/ReaderList";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { getReaderItems } from "@/lib/connectors/reader";
 import { r2Enabled } from "@/lib/r2";
-import { FEEDS } from "@/lib/reader";
 
 export const metadata = { title: "reader" };
 
@@ -25,7 +24,7 @@ export default async function ReaderPage() {
   if (!session?.user) notFound();
 
   const who = session.user.name ?? "anthony";
-  const { sample, items } = await getReaderItems();
+  const { sample, lanes } = await getReaderItems();
   const now = renderNow();
 
   return (
@@ -43,17 +42,12 @@ export default async function ReaderPage() {
           </span>
         </div>
 
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline px-4 py-2 text-xs text-muted">
-          <span>{FEEDS.map((f) => f.label).join(" · ")}</span>
-          {sample && (
-            <span className="border border-hairline px-1.5 py-0.5 text-[10px]">
-              sample — feeds unreachable
-            </span>
-          )}
-          <span className="ml-auto">refreshes every 30 min</span>
-        </div>
-
-        <ReaderList items={items} now={now} offline={!r2Enabled()} />
+        <ReaderList
+          lanes={lanes}
+          now={now}
+          offline={!r2Enabled()}
+          sample={sample}
+        />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
