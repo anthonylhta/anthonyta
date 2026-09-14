@@ -624,6 +624,18 @@ export function foldedDay(
 /** Whether anything was written against a day — entries, or a folded total. What
  *  separates a day that went unlogged from one whose list has aged out: the
  *  windows here average the days that were written, and a folded day was. */
+/** The newest day anything was eaten on — the head of the newest-first entries
+ *  or the last folded row, whichever is later — or null for a log with no days.
+ *  String compare, because `YYYY-MM-DD` sorts as a date already. What the meal
+ *  log gu is fed by. */
+export function lastLoggedDay(cfg: MealsConfig): string | null {
+  const entry = cfg.entries[0]?.date ?? null;
+  const folded = cfg.dayTotals[cfg.dayTotals.length - 1]?.date ?? null;
+  if (entry === null) return folded;
+  if (folded === null) return entry;
+  return entry > folded ? entry : folded;
+}
+
 export function dayIsLogged(cfg: MealsConfig, date: string): boolean {
   return entriesFor(cfg, date).length > 0 || foldedDay(cfg, date) !== null;
 }

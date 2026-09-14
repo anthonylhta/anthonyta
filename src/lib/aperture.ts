@@ -231,6 +231,12 @@ export interface ApertureGu {
    *  page can see that push it OVERRIDES `fed`: the repo's own history is better
    *  evidence than a day typed at the check-in a week ago. */
   repo?: string;
+  /** A hub log whose newest day feeds it — `steps`, `gym`, `meals` — named as the
+   *  page names its logs. Where the page can see that log it OVERRIDES `fed` the
+   *  way a push does: a log written daily is better evidence than the day typed
+   *  at the last check-in, which otherwise drifts hungry within the week. A name
+   *  the page can't see falls back to `fed`, never voids the clock. */
+  log?: string;
 }
 
 /** One path. Sub-paths reuse the same shape — `role` only appears on top-level
@@ -889,7 +895,7 @@ function normCondition(x: unknown): ApertureCondition | null {
 function normGu(x: unknown): ApertureGu | null {
   if (!isObj(x)) return null;
   if (!isStr(x.name)) return null;
-  const { type, bears, fed, interval, repo } = x;
+  const { type, bears, fed, interval, repo, log } = x;
   if (type !== undefined && !isStr(type)) return null;
   if (bears !== undefined && typeof bears !== "boolean") return null;
   if (fed !== undefined && !isDay(fed)) return null;
@@ -899,6 +905,8 @@ function normGu(x: unknown): ApertureGu | null {
   // An empty repo name is absent-in-disguise (it can match no push), so it
   // rejects the way an empty `peak` line does.
   if (repo !== undefined && !isNonEmptyStr(repo)) return null;
+  // …and so does an empty log name, for the same reason.
+  if (log !== undefined && !isNonEmptyStr(log)) return null;
   // The pairing rule (see the interface): a clock needs both hands, and a lone
   // hand is dropped rather than allowed to reject the document.
   const clock =
@@ -909,6 +917,7 @@ function normGu(x: unknown): ApertureGu | null {
     ...(bears !== undefined ? { bears } : {}),
     ...clock,
     ...(repo !== undefined ? { repo } : {}),
+    ...(log !== undefined ? { log } : {}),
   };
 }
 

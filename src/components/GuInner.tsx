@@ -13,6 +13,7 @@ import {
   rememberSavedSeq,
   SeqAlarm,
 } from "@/components/SeqAlarm";
+import { gymConfig, mealsConfig } from "@/components/logRiders";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
 import {
@@ -40,6 +41,7 @@ import {
   ledgerPage,
 } from "@/lib/apertureview";
 import { recoveredThisWeek } from "@/lib/fin";
+import { lastSessionDate, type GymConfig } from "@/lib/gym";
 import {
   EMPTY_GU_MARKS,
   normalizeGuMarks,
@@ -50,6 +52,7 @@ import {
   type GuCastMark,
   type GuMarksConfig,
 } from "@/lib/gumarks";
+import { lastLoggedDay, type MealsConfig } from "@/lib/meals";
 import { aud } from "@/lib/money";
 import { nextSeq } from "@/lib/seqrule";
 import { useApertureDoc } from "./useApertureDoc";
@@ -86,6 +89,7 @@ import { useApertureDoc } from "./useApertureDoc";
 export function GuInner({
   offline,
   repoPushes,
+  logDays,
   today,
 }: {
   offline: boolean;
@@ -93,6 +97,10 @@ export function GuInner({
    *  that names a repo is fed by its pushes; an unlisted repo falls back to the
    *  day the check-in sealed. */
   repoPushes: Record<string, string>;
+  /** The newest day of every log the SERVER can see (the plaintext steps store),
+   *  keyed by the name a gu uses. The sealed logs — gym, meals — join this map
+   *  in the browser, off the same key as the document. */
+  logDays: Record<string, string>;
   /** The Sydney calendar day, anchored once on the server so every clock on this
    *  page counts from the same midnight. */
   today: string;
@@ -109,6 +117,11 @@ export function GuInner({
   const [marksAlarm, setMarksAlarm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // The two sealed logs, for the clocks of the gu that name them (ADR 0172's
+  // named second pass): riders on the document's key, best-effort, leaving with
+  // the document.
+  const [gymCfg, setGymCfg] = useState<GymConfig | null>(null);
+  const [mealsCfg, setMealsCfg] = useState<MealsConfig | null>(null);
   const hasDoc = doc !== null;
   const [hadDoc, setHadDoc] = useState(hasDoc);
   if (hadDoc !== hasDoc) {
@@ -117,8 +130,37 @@ export function GuInner({
       setMarks(null);
       setMarksExisted(false);
       setNotice(null);
+      setGymCfg(null);
+      setMealsCfg(null);
     }
   }
+
+  useEffect(() => {
+    if (!doc) return;
+    let cancelled = false;
+    (async () => {
+      const meals = await mealsConfig(openItem);
+      if (meals && !cancelled) setMealsCfg(meals);
+      const gymLog = await gymConfig(openItem);
+      if (gymLog && !cancelled) setGymCfg(gymLog);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, openItem]);
+
+  // Every log the page can see, by the name a gu uses: the server's map plus
+  // the two opened here. A log with no days yet is simply not in the map, so
+  // its gu falls back to the sealed day rather than reading never-fed.
+  const logs = useMemo(() => {
+    const gym = gymCfg ? lastSessionDate(gymCfg) : null;
+    const meals = mealsCfg ? lastLoggedDay(mealsCfg) : null;
+    return {
+      ...logDays,
+      ...(gym !== null ? { gym } : {}),
+      ...(meals !== null ? { meals } : {}),
+    };
+  }, [logDays, gymCfg, mealsCfg]);
 
   const putMarks = useCallback(
     async (
@@ -232,12 +274,12 @@ export function GuInner({
   }
 
   const blocks = useMemo(
-    () => (doc ? guBlocks(doc.sealed.paths, today, repoPushes) : []),
-    [doc, today, repoPushes],
+    () => (doc ? guBlocks(doc.sealed.paths, today, repoPushes, logs) : []),
+    [doc, today, repoPushes, logs],
   );
   const held = useMemo(
-    () => (doc ? guReads(doc.sealed.held, today, repoPushes) : []),
-    [doc, today, repoPushes],
+    () => (doc ? guReads(doc.sealed.held, today, repoPushes, logs) : []),
+    [doc, today, repoPushes, logs],
   );
   const census = useMemo(() => guCensus(blocks, held), [blocks, held]);
   // The casts: the seal's, plus the site's own unsealed ones — a cast marked

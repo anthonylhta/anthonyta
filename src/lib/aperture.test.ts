@@ -1033,6 +1033,11 @@ describe("aperture — the feeding clock", () => {
     expect(normalizeAperture(repo)).toEqual(repo);
   });
 
+  it("carries a log name beside the clock, exactly like a repo", () => {
+    const logged = held({ fed: "2026-03-01", interval: 2, log: "steps" });
+    expect(normalizeAperture(logged)).toEqual(logged);
+  });
+
   it("drops a lone hand rather than rejecting the whole document", () => {
     expect(firstGu(held({ fed: "2026-03-01" }))).toEqual({ name: "Kiln gu" });
     expect(firstGu(held({ interval: 7 }))).toEqual({ name: "Kiln gu" });
@@ -1055,6 +1060,8 @@ describe("aperture — the feeding clock", () => {
     bad({ fed: "2026-03-01", interval: 0 }); // hungry the instant it was fed
     bad({ fed: "2026-03-01", interval: 1.5 }); // half a day is not a period
     bad({ fed: "2026-03-01", interval: 7, repo: "" }); // matches no push
+    bad({ fed: "2026-03-01", interval: 7, log: "" }); // names no log
+    bad({ fed: "2026-03-01", interval: 7, log: 3 }); // not a name
   });
 });
 

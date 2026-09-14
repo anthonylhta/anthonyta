@@ -13,6 +13,7 @@ import {
   clearWeight,
   dayHeading,
   dayIsLogged,
+  lastLoggedDay,
   dayTotals,
   daysSinceYmd,
   driftLabel,
@@ -864,6 +865,25 @@ describe("the ≥4/7 gate counts a folded day as a written one", () => {
     const thin = foldOldDays(removeEntry(weighed, "d0"), NOW);
     expect(thin.dayTotals).toHaveLength(3);
     expect(energyBalance(thin, DAY)).toBeNull();
+  });
+});
+
+describe("lastLoggedDay", () => {
+  it("is the newest day eaten on, itemized or folded, or null for no days", () => {
+    expect(lastLoggedDay(EMPTY_MEALS_CONFIG)).toBeNull();
+    const itemized = base({
+      entries: [entry({ id: "b", date: NOW }), entry({ id: "a", date: EDGE })],
+    });
+    expect(lastLoggedDay(itemized)).toBe(NOW);
+    // Everything folded: the last folded row is the day.
+    const folded = foldOldDays(
+      base({ entries: [entry({ id: "old", date: OLD })] }),
+      NOW,
+    );
+    expect(folded.entries).toEqual([]);
+    expect(lastLoggedDay(folded)).toBe(OLD);
+    // Both: whichever is later, which is always the itemized side in practice.
+    expect(lastLoggedDay({ ...folded, entries: itemized.entries })).toBe(NOW);
   });
 });
 

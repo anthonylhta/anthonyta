@@ -6,13 +6,9 @@ import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { ExceptionLine } from "@/components/terminal/ExceptionLine";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
+import { gymConfig, mealsConfig } from "@/components/logRiders";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
-import {
-  apertureHistPath,
-  GYM_CONTEXT,
-  JOBS_CONTEXT,
-  MEALS_CONTEXT,
-} from "@/lib/aevcontext";
+import { apertureHistPath, JOBS_CONTEXT } from "@/lib/aevcontext";
 import {
   isAdjudicationPending,
   isAttainment,
@@ -96,7 +92,6 @@ import {
   e1rmSeries,
   GYM_WEEKLY_TARGET,
   liftChips,
-  normalizeGymConfig,
   plateauWeeks,
   sessionCounts,
   sessionsThisWeek,
@@ -106,7 +101,6 @@ import {
   dayTotals,
   driftLabel,
   energyBalance,
-  normalizeMealsConfig,
   trailingAverage,
   trailingProtein,
   weeklyWeightAverages,
@@ -293,35 +287,6 @@ async function recordSeries(
 }
 
 /**
- * The gym log, opened ONCE for the two readings it feeds: the gym path's evidence
- * strip (when a path declares it) and the vessel's training figures — the week's
- * sessions and the best estimate per lift, which no declaration gates, because
- * the body is read whether or not a path has been declared over it. Every other
- * strip on the paths band is server-rendered; this one can't be, since the log
- * lives in the E2EE `meta/gym` envelope and the server cannot see a session.
- *
- * Best-effort by construction, on the meal log's exact terms: ANY miss (no
- * envelope yet, a store flake, a shape this build doesn't trust) returns null and
- * the page carries on without either reading. It never delays or fails the page.
- */
-async function gymConfig(
-  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
-): Promise<GymConfig | null> {
-  try {
-    const res = await fetch("/api/gym");
-    if (res.status !== 200) return null;
-    const { bytes } = await openItem(
-      new Uint8Array(await res.arrayBuffer()),
-      GYM_CONTEXT,
-    );
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    return normalizeGymConfig(parsed);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * The application ledger, for the sect-search line under the trials band —
  * derived client-side off the sealed `meta/jobs` envelope (the dot-rider
  * pattern; never check-in-emitted). Best-effort like every rider: any miss
@@ -339,31 +304,6 @@ async function jobsApps(
     );
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     return normalizeJobsConfig(parsed)?.apps ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The meal log itself, opened ONCE for the two readings it feeds: the meals
- * path's evidence strip (protein, when a path asks for it) and the vessel's
- * weight trend (which no declaration gates — the body is read whether or not a
- * path has been declared over it). One fetch and one decrypt for both, on gym's
- * exact terms: best-effort by construction, so ANY miss returns null and the
- * page carries on without either reading.
- */
-async function mealsConfig(
-  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
-): Promise<MealsConfig | null> {
-  try {
-    const res = await fetch("/api/meals");
-    if (res.status !== 200) return null;
-    const { bytes } = await openItem(
-      new Uint8Array(await res.arrayBuffer()),
-      MEALS_CONTEXT,
-    );
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    return normalizeMealsConfig(parsed);
   } catch {
     return null;
   }
