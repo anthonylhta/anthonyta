@@ -8,7 +8,11 @@ import { Sparkline } from "@/components/terminal/Sparkline";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { gymConfig, mealsConfig, vaultIndex } from "@/components/logRiders";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
-import { apertureHistPath, JOBS_CONTEXT } from "@/lib/aevcontext";
+import {
+  apertureHistPath,
+  GU_MARKS_CONTEXT,
+  JOBS_CONTEXT,
+} from "@/lib/aevcontext";
 import {
   isAdjudicationPending,
   isAttainment,
@@ -79,15 +83,33 @@ import {
   type SeaFill,
 } from "@/lib/apertureview";
 import {
+  checkinBlock,
+  checkinWindow,
+  commitDaysIn,
+  countersBlock,
+  datesIn,
+  eventLines,
+  isDailyTitle,
+  journalDaysIn,
+  unsealedSince,
+} from "@/lib/checkin";
+import {
   absorbedThisWeek,
   buildFullSeries,
   burnWeekly,
   investedAt,
+  lastInvestedDay,
   latestEntry,
   monthToDateBaseline,
   recoveredThisWeek,
   weeklyFlow,
 } from "@/lib/fin";
+import {
+  EMPTY_GU_MARKS,
+  normalizeGuMarks,
+  unsealedCasts,
+  type GuMarksConfig,
+} from "@/lib/gumarks";
 import {
   e1rmSeries,
   GYM_WEEKLY_TARGET,
@@ -98,6 +120,7 @@ import {
   type GymConfig,
 } from "@/lib/gym";
 import {
+  dayIsLogged,
   dayTotals,
   driftLabel,
   energyBalance,
@@ -111,6 +134,7 @@ import type { FormationRow, FormationStatus } from "@/lib/formations";
 import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
+import { noteBlob, type VaultIndexNote } from "@/lib/vaultblob";
 import type { EnvelopeMeta } from "@/lib/crypto";
 import { CircleLedger } from "./CircleLedger";
 import { useApertureDoc } from "./useApertureDoc";
@@ -196,28 +220,94 @@ interface RecordState {
 }
 
 /**
- * The two facts the sealed vault index holds for this page — whether the reading
- * is behind the raw journal (the adjudication line) and how many distinct days
- * the journal records (the soul band's count: one recorded day is one man soul).
- * One SECOND fetch and decrypt serves both. Best-effort by construction: any miss
- * returns the say-nothing pair, because a line that can't be computed is a line
- * that shouldn't be shown.
+ * What the sealed vault index holds for this page — whether the reading is behind
+ * the raw journal (the adjudication line), how many distinct days the journal
+ * records (the soul band's count: one recorded day is one man soul), and the
+ * index itself, which the check-in band reads the week's notes out of. One SECOND
+ * fetch and decrypt serves all three. Best-effort by construction: any miss
+ * returns the say-nothing reading, because a line that can't be computed is a
+ * line that shouldn't be shown.
  */
 async function indexReading(
   sealedAt: string,
   today: string,
   openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
-): Promise<{ pending: boolean; soulDays: number | null }> {
+): Promise<{
+  pending: boolean;
+  soulDays: number | null;
+  notes: VaultIndexNote[] | null;
+}> {
   try {
     const parsed = await vaultIndex(openItem);
-    if (!parsed) return { pending: false, soulDays: null };
+    if (!parsed) return { pending: false, soulDays: null, notes: null };
     const titles = parsed.notes.map((n) => n.title);
     return {
       pending: isAdjudicationPending(sealedAt, latestDailyDay(titles, today)),
       soulDays: recordedDays(titles, today),
+      notes: parsed.notes,
     };
   } catch {
-    return { pending: false, soulDays: null };
+    return { pending: false, soulDays: null, notes: null };
+  }
+}
+
+/** What the check-in band reads only once it is opened: the week's tagged journal
+ *  lines and the gu marks the seal has yet to take. */
+interface CheckinRead {
+  events: string[];
+  /** Null when the marks store won't answer — the line then reads `?`. */
+  marks: { since: string[]; casts: { name: string; date: string }[] } | null;
+}
+
+/**
+ * The week's journal, read the expensive way: one fetch and one decrypt per daily
+ * note in the window, so it happens on the tap that opens the band and never on
+ * the page load. A note that won't serve or won't open is skipped — an event line
+ * missing from a pre-filled draft is a line the owner types, while a failed read
+ * that took the band down would cost him the other five.
+ */
+async function checkinEvents(
+  notes: VaultIndexNote[],
+  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
+): Promise<string[]> {
+  const read = await Promise.all(
+    notes.map(async (n) => {
+      try {
+        const res = await fetch(
+          `/api/vault/raw?p=${encodeURIComponent(noteBlob(n.id))}`,
+        );
+        if (!res.ok) return null;
+        // The vault's own default context, like every other `vault/*` blob.
+        const { bytes } = await openItem(
+          new Uint8Array(await res.arrayBuffer()),
+        );
+        return { day: n.title, text: new TextDecoder().decode(bytes) };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return eventLines(
+    read.filter((n): n is { day: string; text: string } => n !== null),
+  );
+}
+
+/** The gu book's marks, for the counters block — the same fetch /gu makes, on the
+ *  rider's terms: an empty store is a first run, and any other miss is a `?`. */
+async function checkinMarks(
+  openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
+): Promise<GuMarksConfig | null> {
+  try {
+    const res = await fetch("/api/gu-marks");
+    if (res.status === 404) return EMPTY_GU_MARKS;
+    if (res.status !== 200) return null;
+    const { bytes } = await openItem(
+      new Uint8Array(await res.arrayBuffer()),
+      GU_MARKS_CONTEXT,
+    );
+    return normalizeGuMarks(JSON.parse(new TextDecoder().decode(bytes)));
+  } catch {
+    return null;
   }
 }
 
@@ -373,6 +463,16 @@ export function ApertureInner({
   /** Whether the record's strips are open. Folded at rest: the seal-by-seal
    *  reading is history, and history is looked up rather than read daily. */
   const [recordOpen, setRecordOpen] = useState(false);
+  /** The sealed vault index's notes, off the same read the two lines above come
+   *  from — the check-in band reads the week's journal out of it. */
+  const [journalNotes, setJournalNotes] = useState<VaultIndexNote[] | null>(
+    null,
+  );
+  /** Whether the check-in's draft is open. Folded at rest like the record: it is
+   *  read once a week, on the night of the seal. */
+  const [checkinOpen, setCheckinOpen] = useState(false);
+  /** The two readings the draft pays for only when it is opened. */
+  const [checkin, setCheckin] = useState<CheckinRead | null>(null);
 
   // Render-phase adjustment (not an effect): dropping everything decrypted the
   // moment the vault stops being unlocked, per the lint-blessed reset pattern.
@@ -392,6 +492,9 @@ export function ApertureInner({
       setOpenRulings(new Set());
       setRulingPage(0);
       setRecordOpen(false);
+      setJournalNotes(null);
+      setCheckinOpen(false);
+      setCheckin(null);
     }
   }
 
@@ -411,6 +514,7 @@ export function ApertureInner({
       if (!cancelled) {
         if (idx.pending) setPending(true);
         setSoulDays(idx.soulDays);
+        setJournalNotes(idx.notes);
       }
 
       // Both sealed logs — one request and one decrypt each, unconditionally:
@@ -435,6 +539,41 @@ export function ApertureInner({
       cancelled = true;
     };
   }, [doc, openItem, today]);
+
+  // The check-in's two expensive reads, on the tap that opens the draft and once
+  // per unlock: a decrypt per journal day in the week plus the gu marks. Every
+  // other line of the draft comes off riders the page has already paid for, so
+  // nothing here delays the reading — and a `checkin` already in hand ends the
+  // effect at its first line, which is what makes folding and unfolding free.
+  useEffect(() => {
+    if (!checkinOpen || !doc || !journalNotes || checkin) return;
+    let cancelled = false;
+    (async () => {
+      const w = checkinWindow(today);
+      const week = journalNotes.filter(
+        (n) => isDailyTitle(n.title) && n.title >= w.from && n.title <= w.to,
+      );
+      const events = await checkinEvents(week, openItem);
+      const cfg = await checkinMarks(openItem);
+      if (cancelled) return;
+      const refining = doc.sealed.refining ?? [];
+      setCheckin({
+        events,
+        marks: cfg
+          ? {
+              since: unsealedSince(cfg, refining),
+              casts: unsealedCasts(cfg, refining).map((c) => ({
+                name: c.name,
+                date: c.date,
+              })),
+            }
+          : null,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkinOpen, checkin, doc, journalNotes, openItem, today]);
 
   // The meals path's evidence, off the log already open here — protein per day
   // (the macro the meal log accents) with today's count beside it, rounded since
@@ -699,6 +838,64 @@ export function ApertureInner({
     null;
   // Where the gu are, path by path — the line that stands in for the cards.
   const guCounts = guHeldCounts(paths);
+
+  // The check-in's draft: the week's six lines and the counters beside them,
+  // filled from the riders this page has already opened. The window is the seven
+  // days ending YESTERDAY — the seal day is lived, not counted (lib/checkin).
+  // Every figure is a count of days or rows; every judgement is still the
+  // owner's, which is what the `?`s are for.
+  const checkinWin = checkinWindow(today);
+  const journalRead = journalNotes
+    ? journalDaysIn(
+        journalNotes.map((n) => n.title),
+        checkinWin,
+      )
+    : null;
+  const checkinGym = gymCfg
+    ? datesIn(
+        gymCfg.sessions.map((s) => s.date),
+        checkinWin,
+      )
+    : null;
+  const checkinMeals = mealsCfg
+    ? checkinWin.days.filter((d) => dayIsLogged(mealsCfg, d)).length
+    : null;
+  // The week's applications — one strike each, counted off the event that says
+  // it was sent rather than off the row's own age.
+  const checkinStrikes = jobs
+    ? jobs.filter((a) =>
+        a.events.some(
+          (e) =>
+            e.kind === "applied" &&
+            e.date >= checkinWin.from &&
+            e.date <= checkinWin.to,
+        ),
+      ).length
+    : null;
+  const checkinBuy = fin
+    ? (datesIn(
+        fin.invested.map((i) => i.date),
+        checkinWin,
+      ).at(-1) ?? null)
+    : null;
+  const checkinDraft = checkinBlock({
+    today,
+    window: checkinWin,
+    journal: journalRead,
+    finance: fin ? { buyDay: checkinBuy, lastDay: lastInvestedDay(fin) } : null,
+    gymDays: checkinGym,
+    events: checkin?.events ?? null,
+    strikes: checkinStrikes,
+  });
+  const checkinCounters = countersBlock({
+    window: checkinWin,
+    commitDays: series.commits
+      ? commitDaysIn(series.commits.levels, checkinWin)
+      : null,
+    gymSessions: checkinGym?.length ?? null,
+    mealDays: checkinMeals,
+    marks: checkin?.marks ?? null,
+  });
 
   // The one trial grave enough to be read at the TOP of the page rather than in
   // the trials band below it — see `imminentMajorTrial`.
@@ -1566,6 +1763,82 @@ export function ApertureInner({
             </p>
           )
         ))}
+
+      {/* 表 — the check-in's own draft, last on the page: everything above it is
+          the week as it stands, and this is the week as it will be written down.
+          The six lines of `aperture/weekly-checkin.md` come out pre-filled from
+          what the page can count, so the ritual is reading and correcting rather
+          than typing. It ADJUDICATES NOTHING — a `?` is where the owner's word
+          goes, and no figure here is a judgement about any of them. */}
+      {!hidden.has("checkin") && (
+        <>
+          <ZoneHeader label="the check-in" seal="表" right="if sealed today" />
+          <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+            <button
+              type="button"
+              onClick={() => setCheckinOpen(!checkinOpen)}
+              aria-expanded={checkinOpen}
+              className="flex w-full items-baseline gap-2 text-left text-xs leading-[22px]"
+            >
+              <span className="w-2.5 shrink-0 text-muted/40">
+                {checkinOpen ? "▾" : "▸"}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted">
+                journal{" "}
+                <span className="tabular-nums text-fg/80">
+                  {journalRead
+                    ? `${journalRead.count}/${checkinWin.days.length}`
+                    : "?"}
+                </span>{" "}
+                · buy{" "}
+                <span className="text-fg/80">
+                  {checkinBuy ? checkinBuy.slice(5) : "?"}
+                </span>{" "}
+                · gym{" "}
+                <span className="tabular-nums text-fg/80">
+                  {checkinGym?.length ?? "?"}
+                </span>{" "}
+                · meals{" "}
+                <span className="tabular-nums text-fg/80">
+                  {checkinMeals ?? "?"}
+                </span>{" "}
+                · strikes{" "}
+                <span className="tabular-nums text-fg/80">
+                  {checkinStrikes ?? "?"}
+                </span>
+              </span>
+              {/* The window's edge hides on the phone so the five numbers keep
+                  their room — the header already says "if sealed today". */}
+              <span className="hidden shrink-0 text-[11px] tabular-nums text-muted/60 sm:inline">
+                {checkinWin.days.length} days to {checkinWin.to.slice(5)}
+              </span>
+            </button>
+            {checkinOpen && (
+              <>
+                <p className="mt-2 mb-1 text-[10px] tracking-[0.12em] text-muted/60 uppercase">
+                  the six lines · read, correct, paste
+                </p>
+                <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-fg/85">
+                  {checkinDraft}
+                </pre>
+                <p className="mt-2 mb-1 text-[10px] tracking-[0.12em] text-muted/60 uppercase">
+                  the counters the seal also takes
+                </p>
+                <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-fg/85">
+                  {checkinCounters}
+                </pre>
+                <div className="mt-2 flex items-center gap-3">
+                  <CopyBlock text={`${checkinDraft}\n\n${checkinCounters}`} />
+                  <span className="text-[10px] text-muted/60">
+                    ? = your word · the seal day is excluded, today counts next
+                    week
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -1896,6 +2169,34 @@ function CmdChip({ command }: { command: string }) {
       className="rounded-[2px] border border-hairline bg-surface px-[5px] text-[10px] text-fg/85 transition-colors hover:border-(--essence-soft)"
     >
       {copied ? <span className="text-up">copied ✓</span> : command}
+    </button>
+  );
+}
+
+/**
+ * The check-in's draft as one clipboard write — the same chip idiom as the
+ * commands above, over a block rather than a line, since the whole point of a
+ * pre-filled template is that it moves in one piece.
+ */
+function CopyBlock({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        navigator.clipboard?.writeText(text).then(
+          () => setCopied(true),
+          () => {},
+        )
+      }
+      className="rounded-[2px] border border-hairline bg-surface px-[5px] text-[10px] text-fg/85 transition-colors hover:border-(--essence-soft)"
+    >
+      {copied ? <span className="text-up">copied ✓</span> : "copy the block"}
     </button>
   );
 }
