@@ -6,7 +6,7 @@ import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { ExceptionLine } from "@/components/terminal/ExceptionLine";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
-import { gymConfig, mealsConfig } from "@/components/logRiders";
+import { gymConfig, mealsConfig, vaultIndex } from "@/components/logRiders";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import { apertureHistPath, JOBS_CONTEXT } from "@/lib/aevcontext";
 import {
@@ -112,7 +112,6 @@ import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
 import { commas } from "@/lib/steps";
 import type { EnvelopeMeta } from "@/lib/crypto";
-import { isVaultIndex, VAULT_INDEX_PATH } from "@/lib/vaultblob";
 import { CircleLedger } from "./CircleLedger";
 import { useApertureDoc } from "./useApertureDoc";
 
@@ -196,13 +195,6 @@ interface RecordState {
   unreadable: number;
 }
 
-/** Fetch one sealed vault blob's ciphertext through the same-origin owner-gated proxy. */
-async function fetchRaw(p: string): Promise<Uint8Array> {
-  const res = await fetch(`/api/vault/raw?p=${encodeURIComponent(p)}`);
-  if (!res.ok) throw new Error(`vault raw ${p}: ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
-}
-
 /**
  * The two facts the sealed vault index holds for this page — whether the reading
  * is behind the raw journal (the adjudication line) and how many distinct days
@@ -217,9 +209,8 @@ async function indexReading(
   openItem: (e: Uint8Array, ctx?: string) => Promise<{ bytes: Uint8Array }>,
 ): Promise<{ pending: boolean; soulDays: number | null }> {
   try {
-    const { bytes } = await openItem(await fetchRaw(VAULT_INDEX_PATH));
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    if (!isVaultIndex(parsed)) return { pending: false, soulDays: null };
+    const parsed = await vaultIndex(openItem);
+    if (!parsed) return { pending: false, soulDays: null };
     const titles = parsed.notes.map((n) => n.title);
     return {
       pending: isAdjudicationPending(sealedAt, latestDailyDay(titles, today)),

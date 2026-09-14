@@ -42,6 +42,13 @@ export interface IncomeEntry {
   date: string;
   amountCents: number;
 }
+/** The day of the newest invested total — the last weekly buy, since a total is
+ *  appended at each CSV import — or null for a ledger with none. The series is
+ *  ascending by date, so it is the tail. What the portfolio gu is fed by. */
+export function lastInvestedDay(cfg: FinConfig): string | null {
+  return cfg.invested[cfg.invested.length - 1]?.date ?? null;
+}
+
 /** The fin config — both series ascending by date, one row per day. */
 export interface FinConfig {
   v: 2;

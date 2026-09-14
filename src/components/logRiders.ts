@@ -3,10 +3,16 @@
 import { GYM_CONTEXT, MEALS_CONTEXT } from "@/lib/aevcontext";
 import { normalizeGymConfig, type GymConfig } from "@/lib/gym";
 import { normalizeMealsConfig, type MealsConfig } from "@/lib/meals";
+import {
+  isVaultIndex,
+  VAULT_INDEX_PATH,
+  type VaultIndex,
+} from "@/lib/vaultblob";
 
 /**
- * logRiders — the two sealed logs an inward surface opens beside the document:
- * the gym log (`meta/gym`) and the meal log (`meta/meals`). Lifted out of the
+ * logRiders — the sealed logs an inward surface opens beside the document: the
+ * gym log (`meta/gym`), the meal log (`meta/meals`) and the vault's note index
+ * (`vault/index`, the journal's edge). Lifted out of the
  * inward page when the gu compendium wanted the same fetch → decrypt → normalize
  * walk for its feeding clocks, on the `useApertureDoc` precedent — one copy of
  * the rider doctrine, not two.
@@ -31,6 +37,24 @@ export async function gymConfig(openItem: Opener): Promise<GymConfig | null> {
     );
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     return normalizeGymConfig(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/** The sealed vault index, opened once — every note's title and path, which is
+ *  where the journal's newest day is read from. Fetched through the owner-gated
+ *  raw proxy like any `vault/*` blob; opened under the vault's own default
+ *  context, not a rider context, because it IS the vault's. */
+export async function vaultIndex(openItem: Opener): Promise<VaultIndex | null> {
+  try {
+    const res = await fetch(
+      `/api/vault/raw?p=${encodeURIComponent(VAULT_INDEX_PATH)}`,
+    );
+    if (!res.ok) return null;
+    const { bytes } = await openItem(new Uint8Array(await res.arrayBuffer()));
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return isVaultIndex(parsed) ? parsed : null;
   } catch {
     return null;
   }

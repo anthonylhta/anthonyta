@@ -13,7 +13,7 @@ import {
   rememberSavedSeq,
   SeqAlarm,
 } from "@/components/SeqAlarm";
-import { gymConfig, mealsConfig } from "@/components/logRiders";
+import { gymConfig, mealsConfig, vaultIndex } from "@/components/logRiders";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
 import {
@@ -36,11 +36,12 @@ import {
   guCensus,
   type GuRead,
   guReads,
+  latestDailyDay,
   type LedgerEntry,
   ledgerEntries,
   ledgerPage,
 } from "@/lib/apertureview";
-import { recoveredThisWeek } from "@/lib/fin";
+import { lastInvestedDay, recoveredThisWeek } from "@/lib/fin";
 import { lastSessionDate, type GymConfig } from "@/lib/gym";
 import {
   EMPTY_GU_MARKS,
@@ -117,11 +118,13 @@ export function GuInner({
   const [marksAlarm, setMarksAlarm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  // The two sealed logs, for the clocks of the gu that name them (ADR 0172's
-  // named second pass): riders on the document's key, best-effort, leaving with
-  // the document.
+  // The sealed logs, for the clocks of the gu that name them (ADR 0172's named
+  // second pass, ADR 0186): riders on the document's key, best-effort, leaving
+  // with the document. The vault's day is the journal's newest dated note — the
+  // same edge the inward page measures the seal against.
   const [gymCfg, setGymCfg] = useState<GymConfig | null>(null);
   const [mealsCfg, setMealsCfg] = useState<MealsConfig | null>(null);
+  const [vaultDay, setVaultDay] = useState<string | null>(null);
   const hasDoc = doc !== null;
   const [hadDoc, setHadDoc] = useState(hasDoc);
   if (hadDoc !== hasDoc) {
@@ -132,6 +135,7 @@ export function GuInner({
       setNotice(null);
       setGymCfg(null);
       setMealsCfg(null);
+      setVaultDay(null);
     }
   }
 
@@ -143,24 +147,37 @@ export function GuInner({
       if (meals && !cancelled) setMealsCfg(meals);
       const gymLog = await gymConfig(openItem);
       if (gymLog && !cancelled) setGymCfg(gymLog);
+      const idx = await vaultIndex(openItem);
+      if (idx && !cancelled)
+        setVaultDay(
+          latestDailyDay(
+            idx.notes.map((n) => n.title),
+            today,
+          ),
+        );
     })();
     return () => {
       cancelled = true;
     };
-  }, [doc, openItem]);
+  }, [doc, openItem, today]);
 
   // Every log the page can see, by the name a gu uses: the server's map plus
-  // the two opened here. A log with no days yet is simply not in the map, so
-  // its gu falls back to the sealed day rather than reading never-fed.
+  // the ones opened here — the two logs, the vault's journal edge, and the fin
+  // ledger's last weekly buy (the hook already carries the money rider). A log
+  // with no days yet is simply not in the map, so its gu falls back to the
+  // sealed day rather than reading never-fed.
   const logs = useMemo(() => {
     const gym = gymCfg ? lastSessionDate(gymCfg) : null;
     const meals = mealsCfg ? lastLoggedDay(mealsCfg) : null;
+    const buy = fin ? lastInvestedDay(fin) : null;
     return {
       ...logDays,
       ...(gym !== null ? { gym } : {}),
       ...(meals !== null ? { meals } : {}),
+      ...(vaultDay !== null ? { vault: vaultDay } : {}),
+      ...(buy !== null ? { fin: buy } : {}),
     };
-  }, [logDays, gymCfg, mealsCfg]);
+  }, [logDays, gymCfg, mealsCfg, vaultDay, fin]);
 
   const putMarks = useCallback(
     async (
