@@ -1807,7 +1807,9 @@ export function ApertureInner({
                   {checkinStrikes ?? "?"}
                 </span>
               </span>
-              <span className="shrink-0 text-[11px] tabular-nums text-muted/60">
+              {/* The window's edge hides on the phone so the five numbers keep
+                  their room — the header already says "if sealed today". */}
+              <span className="hidden shrink-0 text-[11px] tabular-nums text-muted/60 sm:inline">
                 {checkinWin.days.length} days to {checkinWin.to.slice(5)}
               </span>
             </button>
