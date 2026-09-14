@@ -103,6 +103,16 @@ export function upsertDay(
   return { days };
 }
 
+/** The newest day the phone has posted, or null for an empty history — the
+ *  feeding day of the gu that IS the push (ISO days sort as dates, so the
+ *  newest is the greatest key). A zero-step day still counts: the push landed. */
+export function lastStepsDay(data: StepsData): string | null {
+  let last: string | null = null;
+  for (const d of Object.keys(data.days))
+    if (last === null || d > last) last = d;
+  return last;
+}
+
 /** Today's count, or null when nothing has been recorded for `day`. */
 export function stepsForDay(data: StepsData, day: string): number | null {
   return Object.prototype.hasOwnProperty.call(data.days, day)

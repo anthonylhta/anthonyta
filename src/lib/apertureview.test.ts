@@ -1128,6 +1128,25 @@ describe("apertureview — the feeding clock", () => {
     });
   });
 
+  it("lets a log's newest day override the sealed day", () => {
+    const logged = { ...gu("2026-02-19", 7), log: "steps" };
+    // Sealed a fortnight ago, the phone posted yesterday — the log wins, and
+    // its day lands on the clock as it is (a log keys by the Sydney day).
+    expect(feedingState(logged, TODAY, undefined, "2026-03-04")).toEqual({
+      state: "fed",
+      days: 1,
+    });
+    // Unknown or junk falls back to the sealed day, never voids the clock.
+    expect(feedingState(logged, TODAY, undefined, null)?.state).toBe("hungry");
+    expect(feedingState(logged, TODAY, undefined, "lately")?.state).toBe(
+      "hungry",
+    );
+    // A day handed in for a gu that names no log is ignored, not applied.
+    expect(
+      feedingState(gu("2026-02-19", 7), TODAY, undefined, "2026-03-04")?.days,
+    ).toBe(14);
+  });
+
   it("prints the state as the page reads it", () => {
     expect(feedingLabel({ state: "fed", days: 2 })).toBe("fed 2d");
     expect(feedingLabel({ state: "hungry", days: 33 })).toBe("hungry 33d");
@@ -1153,6 +1172,32 @@ describe("apertureview — guReads + guBlocks + guCensus", () => {
     expect(reads[0].feeding).toBeNull();
     expect(reads[1].feeding).toEqual({ state: "fed", days: 1 });
     expect(guReads(undefined, TODAY, PUSHES)).toEqual([]);
+  });
+
+  it("reads a log's day for the gu that names it", () => {
+    const reads = guReads(
+      [
+        { name: "Steps gu", fed: "2026-01-01", interval: 2, log: "steps" },
+        { name: "Gym gu", fed: "2026-03-01", interval: 7, log: "gym" },
+        { name: "x", fed: "2026-01-01", interval: 7, log: "constructor" },
+      ],
+      TODAY,
+      PUSHES,
+      { steps: "2026-03-05" },
+    );
+    expect(reads[0].feeding).toEqual({ state: "fed", days: 0 });
+    // A log the page can't see (no gym day yet) leaves the sealed day standing.
+    expect(reads[1].feeding).toEqual({ state: "fed", days: 4 });
+    // …and a name off the prototype is a rock by the seal, not a function.
+    expect(reads[2].feeding?.state).toBe("hibernating");
+    // The map is optional: a caller with no logs reads exactly as before.
+    expect(
+      guReads(
+        [{ name: "Steps gu", fed: "2026-03-04", interval: 2, log: "steps" }],
+        TODAY,
+        PUSHES,
+      )[0].feeding,
+    ).toEqual({ state: "fed", days: 1 });
   });
 
   it("reads a missing pushes map as no push known, never a throw", () => {

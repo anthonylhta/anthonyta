@@ -7,8 +7,10 @@ import { essenceOf } from "@/lib/aperture";
 import { essenceVarClass } from "@/lib/apertureview";
 import { getApertureGlance } from "@/lib/connectors/aperture";
 import { getGithub } from "@/lib/connectors/github";
+import { getSteps } from "@/lib/connectors/steps";
 import { sydneyToday } from "@/lib/fin";
 import { r2Enabled } from "@/lib/r2";
+import { lastStepsDay } from "@/lib/steps";
 
 export const metadata = { title: "gu" };
 
@@ -26,10 +28,17 @@ export default async function GuPage() {
   const who = session.user.name ?? "anthony";
   const today = sydneyToday();
   // The glance carries the skin's essence (plaintext at rest, rendered past the
-  // gate); the github read carries the feeding evidence — a gu that names a repo
-  // is fed by that repo's pushes rather than by a day typed at the check-in.
-  const [glance, gh] = await Promise.all([getApertureGlance(), getGithub()]);
+  // gate); the github and steps reads carry the feeding evidence — a gu that
+  // names a repo is fed by that repo's pushes, one that names the steps log by
+  // the phone's newest push, rather than by a day typed at the check-in. The
+  // sealed logs (gym, meals) are read in the browser, where the key is.
+  const [glance, gh, steps] = await Promise.all([
+    getApertureGlance(),
+    getGithub(),
+    getSteps(today),
+  ]);
   const essence = glance ? essenceOf(glance.rank, glance.stage) : null;
+  const stepsDay = lastStepsDay(steps);
 
   return (
     <main
@@ -52,7 +61,12 @@ export default async function GuPage() {
           </span>
         </div>
 
-        <GuInner offline={!r2Enabled()} repoPushes={gh.pushes} today={today} />
+        <GuInner
+          offline={!r2Enabled()}
+          repoPushes={gh.pushes}
+          logDays={stepsDay !== null ? { steps: stepsDay } : {}}
+          today={today}
+        />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>

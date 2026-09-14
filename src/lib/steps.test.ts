@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   commas,
   isStepsIngest,
+  lastStepsDay,
   MAX_STEPS_BYTES,
   parseStepsStore,
   sampleSteps,
@@ -118,6 +119,17 @@ describe("stepsForDay", () => {
   it("distinguishes a recorded zero from a missing day", () => {
     expect(stepsForDay(data, "2026-07-18")).toBe(0);
     expect(stepsForDay(data, "2026-07-19")).toBeNull();
+  });
+});
+
+describe("lastStepsDay", () => {
+  it("is the newest posted day, zero steps included, or null when empty", () => {
+    expect(lastStepsDay({ days: {} })).toBeNull();
+    expect(
+      lastStepsDay({
+        days: { "2026-09-08": 8000, "2026-09-14": 0, "2026-09-13": 6500 },
+      }),
+    ).toBe("2026-09-14");
   });
 });
 

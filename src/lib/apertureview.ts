@@ -454,6 +454,8 @@ const SYDNEY_DAY = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Australia/Sydney",
 });
 
+const LOG_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * What a gu's clock says, or null when it has none — a foundation gu (fed once,
  * holds) is silence on the page, never "never fed".
@@ -462,11 +464,18 @@ const SYDNEY_DAY = new Intl.DateTimeFormat("en-CA", {
  * that repo's last push, the push is the feeding, because a repo's own history is
  * better evidence than a day typed at a check-in. An unparseable or unknown push
  * falls back to the sealed day rather than voiding the clock.
+ *
+ * `logFedDay` is the same override for a gu that names a hub LOG — the steps
+ * store, the gym log, the meal log — whose newest day is the feeding. A log keys
+ * by the Sydney calendar day already, so it lands on the clock as it is; junk
+ * falls back like a junk push. A gu names a repo or a log, not both, so the two
+ * never compete on a real document.
  */
 export function feedingState(
   gu: ApertureGu,
   todayISO: string,
   repoPushedAt?: string | null,
+  logFedDay?: string | null,
 ): FeedingRead | null {
   const { fed, interval } = gu;
   if (fed === undefined || interval === undefined) return null;
@@ -475,6 +484,8 @@ export function feedingState(
     const t = Date.parse(repoPushedAt);
     if (Number.isFinite(t)) anchor = SYDNEY_DAY.format(t);
   }
+  if (gu.log !== undefined && logFedDay && LOG_DAY.test(logFedDay))
+    anchor = logFedDay;
   const gap = dayGap(anchor, todayISO);
   if (gap === null) return null;
   const days = Math.max(0, -gap);
@@ -646,15 +657,32 @@ function pushAt(
   return pushes[repo];
 }
 
-/** A sealed gu list with each entry's clock read against today. */
+/** The newest day of one log out of the page's map — `pushAt`'s twin, with the
+ *  same prototype guard, since the keys are names off the seal. */
+function logAt(
+  logs: Record<string, string>,
+  log: string | undefined,
+): string | undefined {
+  if (!logs || log === undefined || !Object.hasOwn(logs, log)) return undefined;
+  return logs[log];
+}
+
+/** A sealed gu list with each entry's clock read against today. `logs` is the
+ *  newest day of every log the page can see, keyed by the name a gu uses. */
 export function guReads(
   gu: ApertureGu[] | undefined,
   todayISO: string,
   pushes: Record<string, string>,
+  logs: Record<string, string> = {},
 ): GuRead[] {
   return (gu ?? []).map((g) => ({
     gu: g,
-    feeding: feedingState(g, todayISO, pushAt(pushes, g.repo)),
+    feeding: feedingState(
+      g,
+      todayISO,
+      pushAt(pushes, g.repo),
+      logAt(logs, g.log),
+    ),
   }));
 }
 
@@ -669,6 +697,7 @@ export function guBlocks(
   paths: AperturePath[],
   todayISO: string,
   pushes: Record<string, string>,
+  logs: Record<string, string> = {},
 ): GuBlock[] {
   const out: GuBlock[] = [];
   const walk = (list: AperturePath[], parent: string | null) => {
@@ -678,7 +707,7 @@ export function guBlocks(
         out.push({
           name,
           ...(p.attainment !== undefined ? { attainment: p.attainment } : {}),
-          gu: guReads(p.gu, todayISO, pushes),
+          gu: guReads(p.gu, todayISO, pushes, logs),
         });
       if (p.sub) walk(p.sub, name);
     }
