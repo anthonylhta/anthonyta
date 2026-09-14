@@ -9,10 +9,12 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type ReactNode,
 } from "react";
 
 import type { NoteHit, NoteSearch } from "@/lib/vaultquery";
+import type { QuickLogProps } from "./QuickLog";
 
 type Item = { label: string; href: string; hint?: string };
 
@@ -42,6 +44,26 @@ async function loadVaultSearch(): Promise<NoteSearch | null> {
     if (!mk) return null;
     const { loadNoteSearch } = await import("@/lib/vaultquery");
     return await loadNoteSearch(mk);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load the log section, or nothing at all — `loadVaultSearch`'s ordering, for
+ * exactly its reason (ADR 0022). The device key cache answers first, and a
+ * guest — or a locked owner — ends there, having loaded no module and changed
+ * nothing on screen. Only a browser already holding the master key pulls the
+ * section in, so its verbs, its labels and the store machinery behind them live
+ * in a chunk the public face never asks for. Every failure is silence: the
+ * palette then behaves exactly as it did before this feature existed.
+ */
+async function loadQuickLog(): Promise<ComponentType<QuickLogProps> | null> {
+  try {
+    const { getCachedKey } = await import("@/lib/keycache");
+    if (!(await getCachedKey())) return null;
+    const { QuickLog } = await import("./QuickLog");
+    return QuickLog;
   } catch {
     return null;
   }
@@ -132,10 +154,28 @@ export function CommandPaletteProvider({
     [filtered, vaultHits],
   );
 
+  // The owner's log section — null for everyone else, for the life of the page.
+  const [QuickLog, setQuickLog] = useState<ComponentType<QuickLogProps> | null>(
+    null,
+  );
+  const logAttemptRef = useRef<Promise<void> | null>(null);
+  // True while the section has a verb staged: the list is its row alone, and ↵
+  // writes instead of navigating. Only the boolean lives in state — the handle
+  // itself is a ref, so re-publishing it costs no render.
+  const [logOwns, setLogOwns] = useState(false);
+  const logFireRef = useRef<(() => void) | null>(null);
+
   const close = useCallback(() => {
     setOpen(false);
     setQuery("");
     setActive(0);
+    setLogOwns(false);
+    logFireRef.current = null;
+  }, []);
+
+  const stageLog = useCallback((owns: boolean, fire: (() => void) | null) => {
+    logFireRef.current = fire;
+    setLogOwns(owns);
   }, []);
 
   const go = useCallback(
@@ -159,6 +199,16 @@ export function CommandPaletteProvider({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [close]);
+
+  useEffect(() => {
+    if (!open) {
+      logAttemptRef.current = null; // the next opening probes afresh
+      return;
+    }
+    logAttemptRef.current ??= loadQuickLog().then((c) => {
+      if (c) setQuickLog(() => c);
+    });
+  }, [open]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
@@ -195,41 +245,54 @@ export function CommandPaletteProvider({
                   setActive((a) => Math.max(a - 1, 0));
                 } else if (e.key === "Enter") {
                   e.preventDefault();
-                  go(rows[active]);
+                  // A staged log verb owns the key — its row is the only one on
+                  // screen, and there is nothing to navigate to.
+                  if (logOwns) logFireRef.current?.();
+                  else go(rows[active]);
                 }
               }}
               placeholder="jump to…"
               className="w-full border-b border-hairline bg-transparent px-3 py-2.5 text-sm text-fg placeholder:text-muted focus:outline-none"
             />
             <ul className="max-h-72 overflow-y-auto py-1">
-              {rows.length === 0 && (
-                <li className="px-3 py-2 text-sm text-muted">no matches</li>
+              {/* A staged log verb takes the whole list — what ↵ is about to
+                  write is the only thing worth reading. */}
+              {!logOwns && (
+                <>
+                  {rows.length === 0 && (
+                    <li className="px-3 py-2 text-sm text-muted">no matches</li>
+                  )}
+                  {filtered.map((item, i) => (
+                    <Row
+                      key={item.href}
+                      item={item}
+                      active={i === active}
+                      onHover={() => setActive(i)}
+                      onSelect={() => go(item)}
+                    />
+                  ))}
+                  {/* Only ever drawn when the query found notes — no label, no
+                      divider, nothing at all for a guest. */}
+                  {vaultHits.length > 0 && (
+                    <li className="mt-1 border-t border-hairline px-3 pb-1 pt-2 text-[10px] uppercase tracking-[0.2em] text-muted">
+                      vault
+                    </li>
+                  )}
+                  {vaultHits.map((item, i) => (
+                    <Row
+                      key={item.href}
+                      item={item}
+                      active={filtered.length + i === active}
+                      onHover={() => setActive(filtered.length + i)}
+                      onSelect={() => go(item)}
+                    />
+                  ))}
+                </>
               )}
-              {filtered.map((item, i) => (
-                <Row
-                  key={item.href}
-                  item={item}
-                  active={i === active}
-                  onHover={() => setActive(i)}
-                  onSelect={() => go(item)}
-                />
-              ))}
-              {/* Only ever drawn when the query found notes — no label, no divider,
-                  nothing at all for a guest. */}
-              {vaultHits.length > 0 && (
-                <li className="mt-1 border-t border-hairline px-3 pb-1 pt-2 text-[10px] uppercase tracking-[0.2em] text-muted">
-                  vault
-                </li>
+              {/* Null for a guest for the life of the page — see loadQuickLog. */}
+              {QuickLog && (
+                <QuickLog query={query} onDone={close} onStage={stageLog} />
               )}
-              {vaultHits.map((item, i) => (
-                <Row
-                  key={item.href}
-                  item={item}
-                  active={filtered.length + i === active}
-                  onHover={() => setActive(filtered.length + i)}
-                  onSelect={() => go(item)}
-                />
-              ))}
             </ul>
           </div>
         </div>
