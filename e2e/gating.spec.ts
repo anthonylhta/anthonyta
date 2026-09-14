@@ -38,6 +38,7 @@ test.describe("guest gating", () => {
     "/api/transit/stops?q=central", // TfNSW place-search proxy
     "/api/transit/trip?from=stop%3A1&to=stop%3A2", // TfNSW journey proxy
     "/api/layout", // owner layout config write/read (ADR: layout visibility)
+    "/api/now", // owner front-door "now" block write/read (the lobby's words)
     "/api/todo", // E2EE quick-capture envelope (ADR: quick capture)
     "/api/push", // web push subscriptions — plaintext, so the wall is the whole guard
     "/reader", // the owner-only morning feeds page (ADR: rss reader)
