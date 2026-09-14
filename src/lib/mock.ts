@@ -7,9 +7,10 @@
 export const me = {
   name: "anthony ta",
   tagline: "builder · languages · markets",
-  // one quiet line under the prompt — who I am + a soft availability signal for
-  // the lobby's recruiter audience (ADR 0004).
-  intro: "sydney · building things in typescript · open to work",
+  // one quiet line under the prompt — where I am + a soft availability signal
+  // for the lobby's recruiter audience (ADR 0004). What I build moved down into
+  // the now block, which can say it in sentences and change without a deploy.
+  intro: "sydney · open to work",
 } as const;
 
 /** Sample reading — the lobby's fallback when the webnovel connector is off. */

@@ -407,6 +407,7 @@ test.describe("guest gating", () => {
     expect(res.status()).toBe(200);
     const html = await res.text();
     expect(html).toContain("reading is live"); // lobby footer
+    expect(html).toContain("the live slice"); // the dashboard's fold row
     expect(html).not.toContain("command center");
     expect(html).not.toContain("private command center");
     expect(html).not.toContain("net worth"); // command-center-only
@@ -415,6 +416,20 @@ test.describe("guest gating", () => {
     // its essence colour and every band of the sheet stay off the guest page.
     for (const s of SHEET_STRINGS)
       expect(html, `the lobby leaks "${s}"`).not.toContain(s);
+  });
+
+  test("/live is a name for the folded-open lobby, not a page", async ({
+    request,
+  }) => {
+    const res = await request.get("/live", { maxRedirects: 0 });
+    expect([307, 308]).toContain(res.status());
+    // Robust to relative vs absolute Location, as the sign-in redirect is.
+    const loc = new URL(
+      res.headers()["location"] ?? "",
+      "http://localhost:3210",
+    );
+    expect(loc.pathname).toBe("/");
+    expect(loc.hash).toBe("#live");
   });
 
   test("/briefing hides the owner-only portfolio note", async ({ request }) => {
