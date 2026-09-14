@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { getNow } from "@/lib/connectors/now";
 import { SITE_TAGLINE } from "@/lib/site";
 
 /**
@@ -23,10 +24,31 @@ const AMBER = "#f5a524";
 const GREEN = "#7fd17f";
 const HAIR = "#2a2519";
 
+/** How much of the first now line fits on one card line beside the tagline. */
+const NOW_CHARS = 70;
+
+/**
+ * The front door's first now line, as the card's third line — whatever I am
+ * currently open to travels with every link anyone shares. Any failure at all
+ * returns null and the card draws exactly what it drew before the block existed:
+ * a share image is not worth a broken build.
+ */
+async function firstNowLine(): Promise<string | null> {
+  try {
+    const [first] = (await getNow()).lines;
+    if (!first) return null;
+    const line = `${first.key} · ${first.text}`;
+    return line.length > NOW_CHARS ? `${line.slice(0, NOW_CHARS - 1)}…` : line;
+  } catch {
+    return null;
+  }
+}
+
 export default async function Image() {
   const geistMono = await readFile(
     join(process.cwd(), "assets/GeistMono-Regular.ttf"),
   );
+  const nowLine = await firstNowLine();
 
   return new ImageResponse(
     <div
@@ -97,6 +119,18 @@ export default async function Image() {
             }}
           />
         </div>
+        {nowLine ? (
+          <div
+            style={{
+              display: "flex",
+              fontSize: 26,
+              color: MUTED,
+              marginTop: 22,
+            }}
+          >
+            {nowLine}
+          </div>
+        ) : null}
       </div>
 
       {/* surface tags + domain */}
