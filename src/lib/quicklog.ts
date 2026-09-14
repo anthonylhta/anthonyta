@@ -14,12 +14,14 @@
  */
 
 import { dayHeading } from "./meals";
+import { MAX_NOW_KEY, MAX_NOW_TEXT } from "./now";
 import { MAX_TEXT } from "./todo";
 
 /** One parsed log line — the write the section will make on ↵. */
 export type QuickLogAction =
   | { kind: "weigh"; kg: number; day: string }
-  | { kind: "todo"; text: string };
+  | { kind: "todo"; text: string }
+  | { kind: "now"; key: string; text: string };
 
 /**
  * Sane bodyweight, in kilos. Tighter than the meal log's own storage bounds
@@ -35,6 +37,9 @@ const WEIGH = /^(?:w|weigh)\s+(\d+(?:\.\d)?)$/i;
 
 /** `todo <anything>` — the rest of the line, whatever it is. */
 const TODO = /^todo\s+(\S.*)$/i;
+
+/** `now <key> <the sentence>` — the front door's block, one line at a time. */
+const NOW = /^now\s+(\S+)\s+(\S.*)$/i;
 
 /** Read a palette query as a log line, or `null` for "this is not one". */
 export function parseQuickLog(
@@ -58,20 +63,47 @@ export function parseQuickLog(
     if (clean) return { kind: "todo", text: clean };
   }
 
+  const now = NOW.exec(text);
+  if (now) {
+    // Both halves are REFUSED rather than clipped when they're too long: unlike
+    // a capture, this line is published on the public front door, and a row that
+    // silently lost its last clause — or landed under a key the owner didn't
+    // quite type — is worse than a palette that says nothing yet.
+    const key = now[1].trim().toLowerCase();
+    const line = now[2].trim();
+    if (key.length > MAX_NOW_KEY || line.length > MAX_NOW_TEXT) return null;
+    if (key && line) return { kind: "now", key, text: line };
+  }
+
   return null;
+}
+
+/** A long line, cut to fit the palette's one row. */
+function clip(text: string, max = 60): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
 /** The action row's text — what ↵ is about to do, spelled out. */
 export function quickLogLabel(action: QuickLogAction): string {
-  return action.kind === "weigh"
-    ? `log weigh-in · ${action.kg} kg · ${dayHeading(action.day)}`
-    : `capture · ${action.text}`;
+  switch (action.kind) {
+    case "weigh":
+      return `log weigh-in · ${action.kg} kg · ${dayHeading(action.day)}`;
+    case "todo":
+      return `capture · ${action.text}`;
+    case "now":
+      return `set now · ${action.key} · ${clip(action.text)}`;
+  }
 }
 
 /** The same row once it is written — held for a beat before the palette closes,
  *  so the ✓ is seen rather than merely assumed. */
 export function quickLogSaved(action: QuickLogAction): string {
-  return action.kind === "weigh"
-    ? `saved ✓ weigh-in ${action.kg} kg · ${dayHeading(action.day)}`
-    : `saved ✓ captured · ${action.text}`;
+  switch (action.kind) {
+    case "weigh":
+      return `saved ✓ weigh-in ${action.kg} kg · ${dayHeading(action.day)}`;
+    case "todo":
+      return `saved ✓ captured · ${action.text}`;
+    case "now":
+      return `saved ✓ now · ${action.key} · ${clip(action.text)}`;
+  }
 }

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { AuthJournalPanel } from "@/components/AuthJournal";
 import { LayoutPanel } from "@/components/LayoutPanel";
+import { NowPanel } from "@/components/NowPanel";
 import { PasskeyManager } from "@/components/PasskeyManager";
 import { PushPanel } from "@/components/PushPanel";
 import { RecoveryShares } from "@/components/RecoveryShares";
@@ -80,6 +81,12 @@ export default async function SystemPage() {
         <Section label="layout" right="visibility" />
         <div className="px-4 py-3">
           <LayoutPanel offline={!r2Enabled()} />
+        </div>
+
+        {/* ───────────── NOW ───────────── */}
+        <Section label="now" right="the lobby's words" />
+        <div className="px-4 py-3">
+          <NowPanel offline={!r2Enabled()} />
         </div>
 
         {/* ───────────── JOURNAL ───────────── */}
