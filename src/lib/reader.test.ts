@@ -3,11 +3,21 @@ import { MAX_TEXT } from "./todo";
 import {
   captureText,
   decodeEntities,
+  EMPTY_PREFS,
+  FEEDS,
+  interleave,
+  isBoosted,
+  isMuted,
   isNew,
-  mergeItems,
+  LANES,
+  MAX_WORDS,
   parseFeed,
+  parsePrefs,
   parseVisit,
+  parseWords,
+  rankLane,
   rollVisit,
+  sampleLanes,
   timeAgo,
   VISIT_SESSION_MS,
   type FeedItem,
@@ -96,27 +106,123 @@ describe("decodeEntities", () => {
   });
 });
 
-describe("mergeItems", () => {
+describe("interleave", () => {
   const item = (source: string, ts: number | null): FeedItem => ({
     source,
     title: "t",
-    link: "https://x.com",
+    link: `https://x.com/${source}/${ts}`,
     ts,
   });
 
-  it("interleaves newest-first, sinks undated, caps", () => {
-    const merged = mergeItems(
-      [
-        [item("a", 100), item("a", 50)],
-        [item("b", 75), item("b", null)],
-      ],
-      3,
-    );
-    expect(merged.map((i) => [i.source, i.ts])).toEqual([
+  it("takes one row per source per round, newest-first inside each", () => {
+    const lane = interleave([
+      [item("a", 50), item("a", 100), item("a", 10)],
+      [item("b", 75)],
+      [item("c", null), item("c", 200)],
+    ]);
+    expect(lane.map((i) => [i.source, i.ts])).toEqual([
       ["a", 100],
       ["b", 75],
+      ["c", 200],
       ["a", 50],
+      ["c", null],
+      ["a", 10],
     ]);
+  });
+
+  it("caps at the lane's depth and stops when every source is spent", () => {
+    expect(
+      interleave([[item("a", 1), item("a", 2)], [item("b", 3)]], 2),
+    ).toHaveLength(2);
+    expect(interleave([[], []])).toEqual([]);
+  });
+});
+
+describe("the feed list", () => {
+  it("names a lane the page has, once per key, with http(s) urls", () => {
+    const keys = new Set(LANES.map((l) => l.key));
+    const seen = new Set<string>();
+    for (const f of FEEDS) {
+      expect(keys.has(f.lane)).toBe(true);
+      expect(seen.has(f.key)).toBe(false);
+      seen.add(f.key);
+      expect(f.url).toMatch(/^https:\/\//);
+    }
+    // Every lane has something to read.
+    for (const l of LANES)
+      expect(FEEDS.some((f) => f.lane === l.key)).toBe(true);
+  });
+
+  it("samples as lanes with the placeholder in the first", () => {
+    const lanes = sampleLanes();
+    expect(lanes.map((l) => l.key)).toEqual(LANES.map((l) => l.key));
+    expect(lanes[0].items[0].source).toBe("sample");
+    expect(lanes[1].items).toEqual([]);
+  });
+});
+
+describe("boost + mute words", () => {
+  const item = (title: string): FeedItem => ({
+    source: "s",
+    title,
+    link: `https://x.com/${title}`,
+    ts: 1,
+  });
+
+  it("parses words: split, lowercase, dedupe, cap", () => {
+    expect(parseWords("Japanese, TypeScript  claude,claude")).toEqual([
+      "japanese",
+      "typescript",
+      "claude",
+    ]);
+    expect(parseWords("")).toEqual([]);
+    expect(
+      parseWords(Array.from({ length: 30 }, (_, i) => `w${i}`).join(" ")),
+    ).toHaveLength(MAX_WORDS);
+  });
+
+  it("reads stored prefs and shrugs at junk", () => {
+    expect(parsePrefs(null)).toEqual(EMPTY_PREFS);
+    expect(parsePrefs("{nope")).toEqual(EMPTY_PREFS);
+    expect(
+      parsePrefs(JSON.stringify({ boost: ["Rust", 3], mute: "x" })),
+    ).toEqual({ boost: ["rust"], mute: [] });
+  });
+
+  it("matches inside the title, case-insensitively", () => {
+    const prefs = { boost: ["japanese"], mute: ["crypto"] };
+    expect(isBoosted(item("A Japanese novelist"), prefs)).toBe(true);
+    expect(isMuted(item("Crypto exchange collapses"), prefs)).toBe(true);
+    expect(isBoosted(item("Nothing here"), prefs)).toBe(false);
+    expect(isMuted(item("Nothing here"), EMPTY_PREFS)).toBe(false);
+  });
+
+  it("ranks a lane: muted leave with a count, boosted rise, order kept", () => {
+    const lane = [
+      item("one"),
+      item("crypto two"),
+      item("three japanese"),
+      item("four"),
+      item("five japanese"),
+    ];
+    const { shown, muted } = rankLane(lane, {
+      boost: ["japanese"],
+      mute: ["crypto"],
+    });
+    expect(muted).toBe(1);
+    expect(shown.map((i) => i.title)).toEqual([
+      "three japanese",
+      "five japanese",
+      "one",
+      "four",
+    ]);
+    // A word in both lists: the mute wins.
+    expect(
+      rankLane([item("crypto japanese")], {
+        boost: ["japanese"],
+        mute: ["crypto"],
+      }),
+    ).toEqual({ shown: [], muted: 1 });
   });
 });
 
