@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 /** The fragment that names the folded-open lobby — what `/live` redirects onto. */
 const LIVE = "#live";
@@ -55,10 +55,14 @@ function setFoldOpen(open: boolean) {
  * question a stranger arrived with, and the slice is for the one who wants
  * proof.
  *
- * Client, and holding the `<main>` itself, for one reason: opening the fold has
- * to drop `justify-center` (a centred column with a dashboard under it is a
- * column that jumps), and that class sits on the frame rather than on anything
- * the server could hand down.
+ * Client, and holding the `<main>` itself, for one reason: the card is centred
+ * by `justify-center` on the frame, and opening the fold must NOT let it
+ * re-centre (a centred column with a dashboard under it is a column that
+ * jumps). So the toggle measures where the card sits, freezes that as the
+ * frame's top padding, and drops the centring — the card stays put, the slice
+ * opens under it, and the reader scrolls. Folding lifts the freeze; the centred
+ * position is the frozen one, so the card stays put again. Nothing scrolls the
+ * page on either press.
  */
 export function LobbyFrame({
   card,
@@ -78,52 +82,57 @@ export function LobbyFrame({
   nav: ReactNode;
 }) {
   const open = useFoldOpen();
-  const foldRef = useRef<HTMLDivElement>(null);
-  // The first pass neither scrolls nor jumps: it is the page as loaded, not
-  // something the reader just did.
-  const settled = useRef(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  // The card's document-space top at the moment the fold was opened, held as
+  // the frame's padding while it is open. Null when closed, and on a `/#live`
+  // arrival — nothing was centred to preserve, so the page loads with the card
+  // at the top.
+  const [frozenTop, setFrozenTop] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (!settled.current) {
-      settled.current = true;
-      return;
-    }
-    if (open) foldRef.current?.scrollIntoView({ block: "start" });
-    else window.scrollTo({ top: 0 });
-  }, [open]);
+  function toggle() {
+    const next = !open;
+    setFrozenTop(
+      next && boxRef.current
+        ? boxRef.current.getBoundingClientRect().top + window.scrollY
+        : null,
+    );
+    setFoldOpen(next);
+  }
 
   return (
     <main
       className={`mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6${
         open ? "" : " justify-center"
       }`}
+      style={open && frozenTop !== null ? { paddingTop: frozenTop } : undefined}
     >
-      <div className="border border-hairline bg-surface/20">
+      <div ref={boxRef} className="border border-hairline bg-surface/20">
         {card}
 
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline px-5 py-3 text-[11px] text-muted">
           {pulse}
           {sliceLabel && (
             <a
-              href={LIVE}
+              href={open ? "/" : LIVE}
+              aria-expanded={open}
               onClick={(e) => {
                 e.preventDefault();
-                setFoldOpen(true);
+                toggle();
               }}
               className="ml-auto text-amber hover:underline"
             >
-              live →
+              {open ? "fold ↑" : "live →"}
             </a>
           )}
         </div>
 
         {sliceLabel && (
           <>
-            <div ref={foldRef} className="border-b border-hairline px-5 py-2.5">
+            <div className="border-b border-hairline px-5 py-2.5">
               <button
                 type="button"
                 aria-expanded={open}
-                onClick={() => setFoldOpen(!open)}
+                onClick={toggle}
                 className="flex w-full items-baseline gap-2 text-left text-xs leading-[22px]"
               >
                 <span className="w-2.5 shrink-0 text-muted/40">
