@@ -116,18 +116,23 @@ export function isEncrypted(pathname: string): boolean {
   return leaf.startsWith("e-") && leaf.endsWith(".bin");
 }
 
-export type ViewKind = "image" | "pdf" | "video" | "audio";
+export type ViewKind = "text" | "image" | "pdf" | "video" | "audio";
+
+/** Decoded text at or below this opens in the in-page reader; bigger stays a save link. */
+export const TEXT_VIEW_MAX = 1 << 20;
 
 /**
  * What the in-browser viewer can render for a decrypted envelope's MIME type —
  * `null` means save-to-view stays the only door (office docs would need a
  * third-party viewer, which hands plaintext off; HEIC/HEIF browsers can't
- * decode). PDF rides the browser's own viewer in a blob: iframe — desktop
- * engines only; Android Chrome has no inline PDF viewer, so the component
- * shows a save hint there instead.
+ * decode). Text (any `text/*`, plus JSON) is decoded and read in place. PDF
+ * rides the browser's own viewer in a blob: iframe — desktop engines only;
+ * Android Chrome has no inline PDF viewer, so the component draws the pages
+ * itself instead.
  */
 export function viewKind(mime: string): ViewKind | null {
   const t = mime.toLowerCase();
+  if (t.startsWith("text/") || t === "application/json") return "text";
   if (t === "image/heic" || t === "image/heif") return null;
   if (t.startsWith("image/")) return "image";
   if (t === "application/pdf") return "pdf";

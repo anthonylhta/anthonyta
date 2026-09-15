@@ -211,6 +211,10 @@ describe("fileKind", () => {
 
 describe("viewKind", () => {
   it("routes the renderable families", () => {
+    expect(viewKind("text/plain")).toBe("text");
+    expect(viewKind("text/markdown")).toBe("text");
+    expect(viewKind("text/csv; charset=utf-8")).toBe("text");
+    expect(viewKind("application/json")).toBe("text");
     expect(viewKind("image/jpeg")).toBe("image");
     expect(viewKind("image/svg+xml")).toBe("image");
     expect(viewKind("application/pdf")).toBe("pdf");
