@@ -18,6 +18,7 @@ import {
   noteName,
   SHARE_PREFIX,
   shareSegment,
+  TEXT_VIEW_MAX,
   UPLOAD_MAX_CONTENT,
   viewKind,
   type FileKind,
@@ -42,6 +43,17 @@ const KIND_TAG: Record<FileKind, string> = {
 
 /** Ciphertext at or below this auto-decrypts once unlocked — notes, essentially. */
 const AUTO_DECRYPT_MAX = 8192;
+
+/** The row's one-line preview of a decrypted text. */
+function firstLine(text: string): string {
+  return text.trimStart().split("\n", 1)[0] ?? "";
+}
+
+/** A short one-liner IS its preview; anything more opens the reader under the row. */
+function needsReader(text: string): boolean {
+  const t = text.trim();
+  return t.includes("\n") || t.length > 60;
+}
 
 /** Where sw.js stashes share-target files for the window to encrypt + upload. */
 const SHARED_CACHE = "anthonyta-shared-v1";
@@ -823,8 +835,9 @@ function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
 /**
  * An E2EE envelope row. Sealed, it shows only what the server knows: ciphertext
  * size and age. Small ciphertext (notes) auto-decrypts once unlocked; anything
- * bigger decrypts on tap, revealing its real name and a save link backed by an
- * object URL that dies on lock or unmount.
+ * bigger decrypts on tap. Decrypted, the item is VIEWED by default — text in a
+ * reader under the row, images/PDF/media off an object URL — and the save link
+ * is the secondary door. The object URL dies on lock or unmount.
  */
 function EncryptedRow({
   f,
@@ -875,18 +888,17 @@ function EncryptedRow({
       if (!res.ok) throw new Error("fetch failed");
       const envelope = new Uint8Array(await res.arrayBuffer());
       const { meta, bytes } = await vault.openItem(envelope);
-      if (meta.t === "text/plain") {
-        setItem({ meta, text: new TextDecoder().decode(bytes) });
+      const url = URL.createObjectURL(
+        new Blob([bytes as BlobPart], {
+          type: meta.t || "application/octet-stream",
+        }),
+      );
+      urlRef.current = url;
+      const kind = viewKind(meta.t);
+      if (kind === "text" && bytes.length <= TEXT_VIEW_MAX) {
+        setItem({ meta, url, text: new TextDecoder().decode(bytes) });
       } else {
-        const url = URL.createObjectURL(
-          new Blob([bytes as BlobPart], {
-            type: meta.t || "application/octet-stream",
-          }),
-        );
-        urlRef.current = url;
-        setItem(
-          viewKind(meta.t) === "pdf" ? { meta, url, bytes } : { meta, url },
-        );
+        setItem(kind === "pdf" ? { meta, url, bytes } : { meta, url });
       }
     } catch {
       setDecErr(true);
@@ -1013,8 +1025,8 @@ function EncryptedRow({
 
         <div className="min-w-0 flex-1">
           {item?.text !== undefined ? (
-            <p className="line-clamp-3 font-mono text-[13px] break-words whitespace-pre-wrap text-fg">
-              {item.text}
+            <p className="truncate font-mono text-[13px] text-fg">
+              {firstLine(item.text)}
             </p>
           ) : item ? (
             <p className="truncate text-[13px] text-fg">{item.meta.n}</p>
@@ -1035,7 +1047,7 @@ function EncryptedRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-3 text-xs">
-          {item?.text !== undefined ? (
+          {item?.text !== undefined && (
             <button
               type="button"
               onClick={() => copyText(item.text!)}
@@ -1043,7 +1055,8 @@ function EncryptedRow({
             >
               {copyLabel}
             </button>
-          ) : item?.url ? (
+          )}
+          {item?.url ? (
             <a
               href={item.url}
               download={item.meta.n}
@@ -1078,6 +1091,11 @@ function EncryptedRow({
           URL — nothing lands in the device's Downloads folder, and the URL (with
           the bytes behind it) still dies on lock and unmount above. Tap-to-decrypt
           is the intent gate: only rows the owner opened grow a preview. */}
+      {item?.text !== undefined && needsReader(item.text) && (
+        <pre className="mt-2 max-h-[60vh] overflow-y-auto border border-hairline p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap text-fg">
+          {item.text}
+        </pre>
+      )}
       {item?.url && viewKind(item.meta.t) === "image" && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
