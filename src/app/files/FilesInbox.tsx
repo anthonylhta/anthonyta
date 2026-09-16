@@ -861,6 +861,9 @@ function EncryptedRow({
   const [copyLabel, setCopyLabel] = useState("copy");
   const [shareLabel, setShareLabel] = useState("share");
   const [sharing, setSharing] = useState(false);
+  // The viewer under the row folds away per row (long notes stack up once
+  // everything auto-decrypts); it reopens with the next decrypt.
+  const [folded, setFolded] = useState(false);
   // A pre-strip image about to be shared: the decrypted bytes + what they carry,
   // held only until the owner picks strip-or-keep, then dropped.
   const [shareChoice, setShareChoice] = useState<{
@@ -923,6 +926,7 @@ function EncryptedRow({
     if (!unlocked) {
       setItem(null);
       setDecErr(false);
+      setFolded(false);
     }
   }
 
@@ -1012,6 +1016,11 @@ function EncryptedRow({
     void doShare({ ...shareChoice.meta, s: cleaned.length }, cleaned);
   }
 
+  const hasViewer =
+    item?.text !== undefined
+      ? needsReader(item.text)
+      : item?.url !== undefined && viewKind(item.meta.t) !== null;
+
   return (
     <li className="py-2">
       <div className="flex items-center gap-3">
@@ -1047,6 +1056,15 @@ function EncryptedRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-3 text-xs">
+          {hasViewer && (
+            <button
+              type="button"
+              onClick={() => setFolded((v) => !v)}
+              className="text-muted transition-colors hover:text-amber"
+            >
+              {folded ? "open" : "fold"}
+            </button>
+          )}
           {item?.text !== undefined && (
             <button
               type="button"
@@ -1091,12 +1109,12 @@ function EncryptedRow({
           URL — nothing lands in the device's Downloads folder, and the URL (with
           the bytes behind it) still dies on lock and unmount above. Tap-to-decrypt
           is the intent gate: only rows the owner opened grow a preview. */}
-      {item?.text !== undefined && needsReader(item.text) && (
+      {!folded && item?.text !== undefined && needsReader(item.text) && (
         <pre className="mt-2 max-h-[60vh] overflow-y-auto border border-hairline p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap text-fg">
           {item.text}
         </pre>
       )}
-      {item?.url && viewKind(item.meta.t) === "image" && (
+      {!folded && item?.url && viewKind(item.meta.t) === "image" && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={item.url}
@@ -1104,7 +1122,8 @@ function EncryptedRow({
           className="mt-2 max-h-[60vh] max-w-full border border-hairline object-contain"
         />
       )}
-      {item?.url &&
+      {!folded &&
+        item?.url &&
         viewKind(item.meta.t) === "pdf" &&
         (/Android/i.test(navigator.userAgent) ? (
           // Android Chrome has no inline PDF viewer — a blob: iframe would render
@@ -1117,7 +1136,7 @@ function EncryptedRow({
             className="mt-2 h-[70vh] w-full border border-hairline"
           />
         ))}
-      {item?.url && viewKind(item.meta.t) === "video" && (
+      {!folded && item?.url && viewKind(item.meta.t) === "video" && (
         <video
           src={item.url}
           controls
@@ -1127,7 +1146,7 @@ function EncryptedRow({
           className="mt-2 max-h-[60vh] w-full border border-hairline"
         />
       )}
-      {item?.url && viewKind(item.meta.t) === "audio" && (
+      {!folded && item?.url && viewKind(item.meta.t) === "audio" && (
         <audio src={item.url} controls className="mt-2 w-full" />
       )}
 
