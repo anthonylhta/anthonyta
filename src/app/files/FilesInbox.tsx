@@ -1,7 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   exportKeyRaw,
   generateShareKey,
@@ -58,6 +64,34 @@ function needsReader(text: string): boolean {
 
 /** Where sw.js stashes share-target files for the window to encrypt + upload. */
 const SHARED_CACHE = "anthonyta-shared-v1";
+
+/** This device's answer to "strip photo metadata before upload". */
+const STRIP_META_KEY = "files.stripMeta";
+
+/**
+ * The strip toggle as this device last left it, read once on mount (the
+ * ReaderList pattern; `true` on the server so hydration matches). Stripping is
+ * the safe default, but it takes the capture date with it — and the journal
+ * import sorts a batch by that date — so the phone that feeds the journal turns
+ * it off once and it stays off. A share link still offers its own strip.
+ */
+function useStoredStripMeta(): boolean {
+  const read = useRef<boolean | null>(null);
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    try {
+      read.current = window.localStorage.getItem(STRIP_META_KEY) !== "off";
+    } catch {
+      read.current = true;
+    }
+    onStoreChange();
+    return () => {};
+  }, []);
+  return useSyncExternalStore(
+    subscribe,
+    () => read.current ?? true,
+    () => true,
+  );
+}
 
 /** Everything a share-sheet or picker hands us, normalized for sealing. */
 async function toEnvelopeInput(
@@ -235,7 +269,9 @@ export function FilesInbox({
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState("");
-  const [stripMeta, setStripMeta] = useState(true);
+  const storedStrip = useStoredStripMeta();
+  const [editedStrip, setEditedStrip] = useState<boolean | null>(null);
+  const stripMeta = editedStrip ?? storedStrip;
   const [progress, setProgress] = useState<{
     name: string;
     pct: number;
@@ -470,7 +506,18 @@ export function FilesInbox({
 
           <button
             type="button"
-            onClick={() => setStripMeta((v) => !v)}
+            onClick={() => {
+              const next = !stripMeta;
+              setEditedStrip(next);
+              try {
+                window.localStorage.setItem(
+                  STRIP_META_KEY,
+                  next ? "on" : "off",
+                );
+              } catch {
+                // A blocked store just means the choice lasts as long as the page.
+              }
+            }}
             disabled={busy}
             className="mt-2 font-mono text-xs text-muted transition-colors hover:text-amber disabled:opacity-50"
           >
