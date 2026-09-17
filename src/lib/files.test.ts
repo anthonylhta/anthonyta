@@ -11,6 +11,7 @@ import {
   noteName,
   parseShareSegment,
   sanitizePathname,
+  saveName,
   shareSegment,
   sortInbox,
   TEXT_NOTE_MAX,
@@ -248,6 +249,34 @@ describe("displayName", () => {
     expect(displayName("inbox/report-aBcDeFgHiJkLmNoPqRsT.pdf")).toBe(
       "report.pdf",
     );
+  });
+});
+
+describe("saveName", () => {
+  it("keeps an ordinary camera name as it is", () => {
+    expect(saveName("IMG_20260917_081502.jpg", new Set())).toBe(
+      "IMG_20260917_081502.jpg",
+    );
+  });
+
+  it("reduces a path to its basename and swaps what a folder refuses", () => {
+    expect(saveName("../../etc/passwd", new Set())).toBe("passwd");
+    expect(saveName("C:\\Users\\a\\shot.png", new Set())).toBe("shot.png");
+    expect(saveName('what: "this"?.jpg', new Set())).toBe("what_ _this__.jpg");
+  });
+
+  it("falls back to a name when nothing usable is left", () => {
+    expect(saveName("", new Set())).toBe("file");
+    expect(saveName("...", new Set())).toBe("file");
+  });
+
+  it("numbers a repeat before the extension, case-insensitively", () => {
+    const taken = new Set<string>();
+    expect(saveName("a.jpg", taken)).toBe("a.jpg");
+    expect(saveName("A.JPG", taken)).toBe("A (1).JPG");
+    expect(saveName("a.jpg", taken)).toBe("a (2).jpg");
+    expect(saveName("noext", taken)).toBe("noext");
+    expect(saveName("noext", taken)).toBe("noext (1)");
   });
 });
 

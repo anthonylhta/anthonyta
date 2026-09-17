@@ -30,6 +30,7 @@ import { RecoverWithShares } from "@/components/RecoveryShares";
 import { usePrfCeremonySupported } from "./prfCeremony";
 import { useVault, type Vault } from "./useVault";
 import { PdfPages } from "./PdfPages";
+import { saveAllImages, type SaveAllResult } from "./saveAll";
 
 // Short type tags for the non-image thumbnail slot.
 const KIND_TAG: Record<FileKind, string> = {
@@ -242,6 +243,12 @@ export function FilesInbox({
   const [failed, setFailed] = useState<string[]>([]);
   const [notices, setNotices] = useState<string[]>([]);
   const consumedShare = useRef(false);
+  // "save all images": the running count while it decrypts, then what went out.
+  const [saving, setSaving] = useState<{ done: number; total: number } | null>(
+    null,
+  );
+  const [savedAll, setSavedAll] = useState<SaveAllResult | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   const unlocked = vault.status === "unlocked";
 
@@ -348,6 +355,34 @@ export function FilesInbox({
     } else {
       setFailed([`note — ${failure}`]);
     }
+  }
+
+  async function saveAll() {
+    if (saving || !unlocked) return;
+    setSavedAll(null);
+    setSaving({ done: 0, total: 0 });
+    try {
+      setSavedAll(
+        await saveAllImages(files, vault.openItem, isImageMeta, (done, total) =>
+          setSaving({ done, total }),
+        ),
+      );
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  // Offered only after a folder write, where every saved row is known to be on
+  // disk — a plain download can be refused by the browser without a word.
+  async function clearSaved() {
+    if (!savedAll || clearing) return;
+    setClearing(true);
+    const left: string[] = [];
+    for (const pathname of savedAll.saved)
+      if (!(await removeFile(pathname))) left.push(pathname);
+    setSavedAll(left.length > 0 ? { ...savedAll, saved: left } : null);
+    setClearing(false);
+    router.refresh();
   }
 
   // A share-sheet landing (?shared=1): pick up what the SW stashed once the
@@ -470,6 +505,51 @@ export function FilesInbox({
         </p>
       ) : (
         <ul className="divide-y divide-hairline/40">
+          {unlocked && files.some((f) => f.encrypted) && (
+            <li className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 font-mono text-xs text-muted">
+              <button
+                type="button"
+                onClick={saveAll}
+                disabled={saving !== null || clearing}
+                className="transition-colors hover:text-amber disabled:opacity-30"
+              >
+                save all images
+              </button>
+              {saving && saving.total > 0 && (
+                <span>
+                  decrypting{" "}
+                  <span className="tabular-nums text-amber">
+                    {saving.done + 1}/{saving.total}
+                  </span>
+                </span>
+              )}
+              {savedAll && (
+                <span>
+                  {savedAll.saved.length === 0
+                    ? "no images here"
+                    : savedAll.folder
+                      ? `${savedAll.saved.length} saved → ${savedAll.folder}`
+                      : `${savedAll.saved.length} sent to downloads`}
+                  {savedAll.failed > 0 && (
+                    <span className="text-down">
+                      {" "}
+                      · {savedAll.failed} failed
+                    </span>
+                  )}
+                </span>
+              )}
+              {savedAll?.folder && savedAll.saved.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearSaved}
+                  disabled={clearing}
+                  className="transition-colors hover:text-down disabled:opacity-30"
+                >
+                  del those {savedAll.saved.length} from the inbox
+                </button>
+              )}
+            </li>
+          )}
           {files.map((f) =>
             f.encrypted ? (
               <EncryptedRow

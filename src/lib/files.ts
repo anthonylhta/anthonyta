@@ -206,6 +206,30 @@ export function displayName(pathname: string): string {
   return (stripped || stem) + ext;
 }
 
+/**
+ * The name a decrypted file is written under by the inbox's "save all". The sealed
+ * name is whatever the sending device called it, so it is reduced to a bare basename
+ * with the characters a Windows folder refuses swapped out, then de-duplicated
+ * against `taken` (compared case-insensitively, as that folder would) with a
+ * ` (n)` before the extension. Records the result in `taken`.
+ */
+export function saveName(name: string, taken: Set<string>): string {
+  const base = name
+    .slice(Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\")) + 1)
+    .replace(/[ -<>:"|?*]/g, "_")
+    .replace(/^\.+/, "")
+    .trim();
+  const clean = base || "file";
+  const dot = clean.lastIndexOf(".");
+  const stem = dot > 0 ? clean.slice(0, dot) : clean;
+  const ext = dot > 0 ? clean.slice(dot) : "";
+  let out = clean;
+  for (let n = 1; taken.has(out.toLowerCase()); n++)
+    out = `${stem} (${n})${ext}`;
+  taken.add(out.toLowerCase());
+  return out;
+}
+
 /** Base-1024 size: whole bytes, one decimal above. Negative/NaN → "0 B". */
 export function formatSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
