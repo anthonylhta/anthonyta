@@ -285,6 +285,16 @@ export function FilesInbox({
   );
   const [savedAll, setSavedAll] = useState<SaveAllResult | null>(null);
   const [clearing, setClearing] = useState(false);
+  // Select mode: tick rows, then delete them together. `armed` is the second
+  // tap a bulk delete asks for — R2 keeps no versions, so there is no undo.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [armed, setArmed] = useState(false);
+  const [deleting, setDeleting] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const [delFailed, setDelFailed] = useState(0);
 
   const unlocked = vault.status === "unlocked";
 
@@ -421,6 +431,47 @@ export function FilesInbox({
     router.refresh();
   }
 
+  // Ticks only count while their row is still in the list.
+  const pickedNow = files.filter((f) => picked.has(f.pathname));
+
+  function togglePick(pathname: string) {
+    setArmed(false);
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(pathname)) next.add(pathname);
+      return next;
+    });
+  }
+
+  function stopPicking() {
+    setPicking(false);
+    setPicked(new Set());
+    setArmed(false);
+    setDelFailed(0);
+  }
+
+  async function deletePicked() {
+    if (deleting || pickedNow.length === 0) return;
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
+    setDelFailed(0);
+    const left = new Set<string>();
+    let done = 0;
+    for (const f of pickedNow) {
+      setDeleting({ done: done++, total: pickedNow.length });
+      if (!(await removeFile(f.pathname))) left.add(f.pathname);
+    }
+    setDeleting(null);
+    // A row that wouldn't go stays ticked, so the next tap retries just those.
+    setPicked(left);
+    setDelFailed(left.size);
+    if (left.size === 0) setPicking(false);
+    router.refresh();
+  }
+
   // A share-sheet landing (?shared=1): pick up what the SW stashed once the
   // vault is open, then run it through the same encrypt-and-upload path. The
   // busy guard matters: draining removes the stash, and handleFiles no-ops
@@ -552,49 +603,120 @@ export function FilesInbox({
         </p>
       ) : (
         <ul className="divide-y divide-hairline/40">
-          {unlocked && files.some((f) => f.encrypted) && (
+          {picking ? (
             <li className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 font-mono text-xs text-muted">
+              <span>
+                <span className="tabular-nums text-amber">
+                  {pickedNow.length}
+                </span>{" "}
+                selected
+              </span>
               <button
                 type="button"
-                onClick={saveAll}
+                onClick={() => {
+                  setArmed(false);
+                  setPicked(
+                    pickedNow.length === files.length
+                      ? new Set()
+                      : new Set(files.map((f) => f.pathname)),
+                  );
+                }}
+                disabled={deleting !== null}
+                className="transition-colors hover:text-amber disabled:opacity-30"
+              >
+                {pickedNow.length === files.length ? "none" : "all"}
+              </button>
+              {deleting ? (
+                <span>
+                  deleting{" "}
+                  <span className="tabular-nums text-amber">
+                    {deleting.done + 1}/{deleting.total}
+                  </span>
+                </span>
+              ) : (
+                pickedNow.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={deletePicked}
+                    className={
+                      armed ? "text-down" : "transition-colors hover:text-down"
+                    }
+                  >
+                    {armed
+                      ? `sure? del ${pickedNow.length} for good`
+                      : `del ${pickedNow.length}`}
+                  </button>
+                )
+              )}
+              {delFailed > 0 && !deleting && (
+                <span className="text-down">
+                  {delFailed} failed — try again
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={stopPicking}
+                disabled={deleting !== null}
+                className="transition-colors hover:text-amber disabled:opacity-30"
+              >
+                done
+              </button>
+            </li>
+          ) : (
+            <li className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 font-mono text-xs text-muted">
+              {unlocked && files.some((f) => f.encrypted) && (
+                <>
+                  <button
+                    type="button"
+                    onClick={saveAll}
+                    disabled={saving !== null || clearing}
+                    className="transition-colors hover:text-amber disabled:opacity-30"
+                  >
+                    save all images
+                  </button>
+                  {saving && saving.total > 0 && (
+                    <span>
+                      decrypting{" "}
+                      <span className="tabular-nums text-amber">
+                        {saving.done + 1}/{saving.total}
+                      </span>
+                    </span>
+                  )}
+                  {savedAll && (
+                    <span>
+                      {savedAll.saved.length === 0
+                        ? "no images here"
+                        : savedAll.folder
+                          ? `${savedAll.saved.length} saved → ${savedAll.folder}`
+                          : `${savedAll.saved.length} sent to downloads`}
+                      {savedAll.failed > 0 && (
+                        <span className="text-down">
+                          {" "}
+                          · {savedAll.failed} failed
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {savedAll?.folder && savedAll.saved.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearSaved}
+                      disabled={clearing}
+                      className="transition-colors hover:text-down disabled:opacity-30"
+                    >
+                      del those {savedAll.saved.length} from the inbox
+                    </button>
+                  )}
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setPicking(true)}
                 disabled={saving !== null || clearing}
                 className="transition-colors hover:text-amber disabled:opacity-30"
               >
-                save all images
+                select
               </button>
-              {saving && saving.total > 0 && (
-                <span>
-                  decrypting{" "}
-                  <span className="tabular-nums text-amber">
-                    {saving.done + 1}/{saving.total}
-                  </span>
-                </span>
-              )}
-              {savedAll && (
-                <span>
-                  {savedAll.saved.length === 0
-                    ? "no images here"
-                    : savedAll.folder
-                      ? `${savedAll.saved.length} saved → ${savedAll.folder}`
-                      : `${savedAll.saved.length} sent to downloads`}
-                  {savedAll.failed > 0 && (
-                    <span className="text-down">
-                      {" "}
-                      · {savedAll.failed} failed
-                    </span>
-                  )}
-                </span>
-              )}
-              {savedAll?.folder && savedAll.saved.length > 0 && (
-                <button
-                  type="button"
-                  onClick={clearSaved}
-                  disabled={clearing}
-                  className="transition-colors hover:text-down disabled:opacity-30"
-                >
-                  del those {savedAll.saved.length} from the inbox
-                </button>
-              )}
             </li>
           )}
           {files.map((f) =>
@@ -604,12 +726,28 @@ export function FilesInbox({
                 f={f}
                 vault={vault}
                 onChanged={() => router.refresh()}
+                pick={
+                  picking
+                    ? {
+                        on: picked.has(f.pathname),
+                        toggle: () => togglePick(f.pathname),
+                      }
+                    : undefined
+                }
               />
             ) : (
               <FileRow
                 key={f.pathname}
                 f={f}
                 onChanged={() => router.refresh()}
+                pick={
+                  picking
+                    ? {
+                        on: picked.has(f.pathname),
+                        toggle: () => togglePick(f.pathname),
+                      }
+                    : undefined
+                }
               />
             ),
           )}
@@ -848,6 +986,28 @@ function LockedPanel({ vault }: { vault: Vault }) {
 // rows
 // ---------------------------------------------------------------------------
 
+/** A row's part in the list's select mode: whether it's ticked, and the tick. */
+interface RowPick {
+  on: boolean;
+  toggle: () => void;
+}
+
+/** The tick box a row wears while the list is in select mode — the strip
+ *  toggle's `[x]`, sized for a thumb. */
+function PickBox({ pick }: { pick: RowPick }) {
+  return (
+    <button
+      type="button"
+      onClick={pick.toggle}
+      aria-pressed={pick.on}
+      aria-label={pick.on ? "deselect" : "select"}
+      className="flex h-10 w-8 shrink-0 items-center font-mono text-xs text-amber"
+    >
+      {pick.on ? "[x]" : "[ ]"}
+    </button>
+  );
+}
+
 function DelButton({
   pathname,
   onChanged,
@@ -883,7 +1043,15 @@ function DelButton({
 }
 
 /** A legacy plaintext row — a file (thumbnail, dl · del) or an inlined text note (copy · del). */
-function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
+function FileRow({
+  f,
+  onChanged,
+  pick,
+}: {
+  f: InboxFile;
+  onChanged: () => void;
+  pick?: RowPick;
+}) {
   const [copyLabel, setCopyLabel] = useState("copy");
 
   const dl = `/api/files/dl?p=${encodeURIComponent(f.pathname)}`;
@@ -903,6 +1071,7 @@ function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
   return (
     <li className="py-2">
       <div className="flex items-center gap-3">
+        {pick && <PickBox pick={pick} />}
         {noteText !== undefined ? (
           <span className="flex h-10 w-10 shrink-0 items-center justify-center border border-hairline font-mono text-[10px] text-muted">
             [txt]
@@ -934,7 +1103,9 @@ function FileRow({ f, onChanged }: { f: InboxFile; onChanged: () => void }) {
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-3 text-xs">
+        <div
+          className={`shrink-0 items-center gap-3 text-xs ${pick ? "hidden" : "flex"}`}
+        >
           {noteText !== undefined ? (
             <button
               type="button"
@@ -970,10 +1141,12 @@ function EncryptedRow({
   f,
   vault,
   onChanged,
+  pick,
 }: {
   f: InboxFile;
   vault: Vault;
   onChanged: () => void;
+  pick?: RowPick;
 }) {
   const [busy, setBusy] = useState(false);
   const [decErr, setDecErr] = useState(false);
@@ -1151,6 +1324,7 @@ function EncryptedRow({
   return (
     <li className="py-2">
       <div className="flex items-center gap-3">
+        {pick && <PickBox pick={pick} />}
         <span
           className={`flex h-10 w-10 shrink-0 items-center justify-center border border-hairline font-mono text-[10px] ${
             item ? "text-muted" : "text-amber"
@@ -1182,7 +1356,9 @@ function EncryptedRow({
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-3 text-xs">
+        <div
+          className={`shrink-0 items-center gap-3 text-xs ${pick ? "hidden" : "flex"}`}
+        >
           {hasViewer && (
             <button
               type="button"
