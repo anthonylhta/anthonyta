@@ -107,6 +107,7 @@ import {
 import {
   EMPTY_GU_MARKS,
   normalizeGuMarks,
+  reconcileMarks,
   unsealedCasts,
   type GuMarksConfig,
 } from "@/lib/gumarks";
@@ -562,7 +563,16 @@ export function ApertureInner({
         marks: cfg
           ? {
               since: unsealedSince(cfg, refining),
-              casts: unsealedCasts(cfg, refining).map((c) => ({
+              // A free cast the seal already folded is not unsealed, even
+              // before /gu has opened and retired it from the store.
+              casts: unsealedCasts(
+                reconcileMarks(
+                  cfg,
+                  refining,
+                  doc.sealed.consumables?.casts ?? [],
+                ),
+                refining,
+              ).map((c) => ({
                 name: c.name,
                 date: c.date,
               })),
