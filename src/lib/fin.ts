@@ -61,6 +61,9 @@ export interface FinConfig {
   /** Dated pay-ins — a third step function beside cash and invested. Optional:
    *  every envelope written before the income log existed simply has none. */
   income?: IncomeEntry[];
+  /** Expected recurring debits (the premium, the subscriptions) — sorted by name,
+   *  unique case-insensitively. Optional for the same reason `income` is. */
+  debits?: DebitEntry[];
   /** RETIRED — the typed weekly burn. Envelopes sealed before the derived burn
    *  (`burnWeekly`) still carry it, so it stays valid; nothing reads it now. */
   burnWeeklyCents?: number;
@@ -216,6 +219,7 @@ export function isFinConfig(x: unknown): x is FinConfig {
     // Absent is fine — both fields postdate the envelope; present-but-malformed
     // rejects, exactly as `seq` does.
     (x.income === undefined || isIncome(x.income)) &&
+    (x.debits === undefined || isDebits(x.debits)) &&
     (x.burnWeeklyCents === undefined || isPosInt(x.burnWeeklyCents)) &&
     (x.portfolio === null || isPortfolioSnapshot(x.portfolio))
   );
@@ -597,4 +601,118 @@ export function monthToDateBaseline(
     if (p.date < monthStart && (!found || p.date > found.date)) found = p;
   }
   return found;
+}
+
+/** One expected recurring debit — a charge that lands every `everyDays` days,
+ *  anchored on the last one seen (`last`, a Sydney calendar day). */
+export interface DebitEntry {
+  name: string;
+  amountCents: number;
+  everyDays: number;
+  last: string;
+}
+
+/** How many debit rows an envelope may carry. */
+const DEBITS_MAX = 50;
+/** Longest debit name, after trimming. */
+const DEBIT_NAME_MAX = 60;
+/** Longest cadence — a yearly charge, leap year included. */
+const DEBIT_EVERY_MAX = 366;
+
+/** A real calendar day, not just the `YYYY-MM-DD` shape (no 02-30). */
+function isCalendarDay(x: unknown): x is string {
+  return isYmd(x) && addDays(x, 0) === x;
+}
+
+/** A debits list: trimmed 1–60 char names, whole cents, a 1–366 day cadence, a
+ *  real `last` day — strictly ascending by lower-cased name, which is both the
+ *  sort and the case-insensitive uniqueness rule in one pass. */
+function isDebits(x: unknown): x is DebitEntry[] {
+  if (!Array.isArray(x) || x.length > DEBITS_MAX) return false;
+  let prev = "";
+  for (const e of x) {
+    if (!isObj(e) || typeof e.name !== "string") return false;
+    const key = e.name.toLowerCase();
+    if (e.name.trim() !== e.name || e.name.length === 0) return false;
+    if (e.name.length > DEBIT_NAME_MAX) return false;
+    if (!isNonNegInt(e.amountCents) || !isCalendarDay(e.last)) return false;
+    if (!isPosInt(e.everyDays) || e.everyDays > DEBIT_EVERY_MAX) return false;
+    if (!(key > prev)) return false;
+    prev = key;
+  }
+  return true;
+}
+
+/**
+ * A new config with `entry` in the debits list — its name trimmed, replacing a
+ * row of the same name (case-insensitively), else inserted in name order. Never
+ * mutates the input; the caller validates the fields.
+ */
+export function upsertDebit(cfg: FinConfig, entry: DebitEntry): FinConfig {
+  const row = { ...entry, name: entry.name.trim() };
+  const key = row.name.toLowerCase();
+  const kept = (cfg.debits ?? []).filter((d) => d.name.toLowerCase() !== key);
+  const at = kept.findIndex((d) => d.name.toLowerCase() > key);
+  const i = at < 0 ? kept.length : at;
+  return { ...cfg, debits: [...kept.slice(0, i), row, ...kept.slice(i)] };
+}
+
+/** A new config without the debit named `name` (case-insensitively). */
+export function removeDebit(cfg: FinConfig, name: string): FinConfig {
+  const key = name.trim().toLowerCase();
+  return {
+    ...cfg,
+    debits: (cfg.debits ?? []).filter((d) => d.name.toLowerCase() !== key),
+  };
+}
+
+/** Whole calendar days from `a` to `b` (negative when `b` is earlier). */
+function daysBetween(a: string, b: string): number {
+  return Math.round(
+    (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000,
+  );
+}
+
+/**
+ * The day the debit last fell due on or before `todayISO`: the latest day on the
+ * `last + k·everyDays` grid (k ≥ 0) not after today — `last` itself when today
+ * is still before it. The ledger dates the charge from its cadence; a debit that
+ * moved (a public holiday, a changed plan) is corrected by re-typing `last`.
+ */
+export function debitDueDay(entry: DebitEntry, todayISO: string): string {
+  const gap = daysBetween(entry.last, todayISO);
+  if (gap <= 0) return entry.last;
+  const k = Math.floor(gap / entry.everyDays);
+  return addDays(entry.last, k * entry.everyDays);
+}
+
+/** The first day on the same grid strictly after `todayISO`. */
+export function debitNextDay(entry: DebitEntry, todayISO: string): string {
+  if (todayISO < entry.last) return entry.last;
+  return addDays(debitDueDay(entry, todayISO), entry.everyDays);
+}
+
+/** The name a gu's `log` uses for a debit: `debit:` + the lower-cased name. */
+export function debitLogKey(name: string): string {
+  return `debit:${name.trim().toLowerCase()}`;
+}
+
+/** Every debit's due day, keyed by its log name — the map a gu's clock reads. */
+export function debitDays(
+  cfg: FinConfig,
+  todayISO: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const d of cfg.debits ?? [])
+    out[debitLogKey(d.name)] = debitDueDay(d, todayISO);
+  return out;
+}
+
+/** What the debits commit per week, in cents: each amount spread over its
+ *  cadence (× 7 / everyDays, rounded per row) and summed. */
+export function committedWeeklyCents(cfg: FinConfig): number {
+  let sum = 0;
+  for (const d of cfg.debits ?? [])
+    sum += Math.round((d.amountCents * 7) / d.everyDays);
+  return sum;
 }
