@@ -14,6 +14,7 @@ import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { TftModule } from "@/components/TftModule";
 import { TransitGlance } from "@/components/TransitGlance";
 import { VaultTodayGlance } from "@/components/VaultTodayGlance";
+import { WaitingOnRow } from "@/components/WaitingOnRow";
 import { CHORE_CADENCE_DAYS, choreState } from "@/lib/chores";
 import { getApertureGlance } from "@/lib/connectors/aperture";
 import { getBriefing } from "@/lib/connectors/briefing";
@@ -410,6 +411,14 @@ export async function CommandCenter({ userName }: { userName: string }) {
           </span>
         </div>
       ) : null,
+
+    /* jobs — open applications gone quiet (past QUIET_DAYS since their last
+       event), longest wait first. Exception-only, and the ledger is sealed, so
+       the whole row is a client island that decides its own absence: locked,
+       empty or all-fresh says nothing. */
+    jobs: !hidden.has("jobs") ? (
+      <WaitingOnRow offline={!r2Enabled()} today={today} />
+    ) : null,
   };
 
   // The rank, as the one word the me-block prints of it: the canon essence name,
