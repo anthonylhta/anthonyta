@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_NOW_KEY, MAX_NOW_TEXT } from "./now";
 import { parseQuickLog, quickLogLabel, quickLogSaved } from "./quicklog";
+import { MAX_STUDY_SOURCE } from "./study";
 import { MAX_TEXT } from "./todo";
 
 const TODAY = "2026-09-15";
@@ -226,6 +227,71 @@ describe("quickLogLabel — the cast", () => {
   });
 });
 
+describe("parseQuickLog — the study verb", () => {
+  it("reads `ja <source> 20m` as today's sitting with its minutes", () => {
+    expect(parseQuickLog("ja 東洋経済 article 20m", TODAY)).toEqual({
+      kind: "study",
+      source: "東洋経済 article",
+      minutes: 20,
+      day: TODAY,
+    });
+    expect(parseQuickLog("JA graded reader 45 min", TODAY)).toEqual({
+      kind: "study",
+      source: "graded reader",
+      minutes: 45,
+      day: TODAY,
+    });
+  });
+
+  it("takes a source alone, numbers inside it included", () => {
+    expect(parseQuickLog("ja anki", TODAY)).toEqual({
+      kind: "study",
+      source: "anki",
+      day: TODAY,
+    });
+    expect(parseQuickLog("ja genki chapter 12", TODAY)).toEqual({
+      kind: "study",
+      source: "genki chapter 12",
+      day: TODAY,
+    });
+  });
+
+  it("is not an action until something studied is named", () => {
+    expect(parseQuickLog("ja", TODAY)).toBeNull();
+    expect(parseQuickLog("ja   ", TODAY)).toBeNull();
+    expect(parseQuickLog("ja 20m", TODAY)).toBeNull();
+    expect(parseQuickLog("japan", TODAY)).toBeNull();
+  });
+
+  it("refuses a sitting of no minutes or past ten hours", () => {
+    expect(parseQuickLog("ja anki 0m", TODAY)).toBeNull();
+    expect(parseQuickLog("ja anki 601 min", TODAY)).toBeNull();
+  });
+
+  it("clips a long source to the log's cap", () => {
+    const action = parseQuickLog(`ja ${"x".repeat(250)}`, TODAY);
+    expect(action).toEqual({
+      kind: "study",
+      source: "x".repeat(MAX_STUDY_SOURCE),
+      day: TODAY,
+    });
+  });
+
+  it("labels the row with the minutes only when they were said", () => {
+    expect(
+      quickLogLabel({
+        kind: "study",
+        source: "東洋経済 article",
+        minutes: 20,
+        day: "2026-09-25",
+      }),
+    ).toBe("study · 東洋経済 article · 20 min · fri 25 sep");
+    expect(quickLogLabel({ kind: "study", source: "anki", day: TODAY })).toBe(
+      "study · anki · tue 15 sep",
+    );
+  });
+});
+
 describe("quickLogSaved", () => {
   it("marks the weigh-in written", () => {
     expect(quickLogSaved({ kind: "weigh", kg: 67, day: TODAY })).toBe(
@@ -254,5 +320,11 @@ describe("quickLogSaved", () => {
         day: TODAY,
       }),
     ).toBe("saved ✓ cast · karaoke · $25.50 · tue 15 sep");
+  });
+
+  it("marks the sitting written", () => {
+    expect(
+      quickLogSaved({ kind: "study", source: "anki", minutes: 15, day: TODAY }),
+    ).toBe("saved ✓ study · anki · 15 min · tue 15 sep");
   });
 });

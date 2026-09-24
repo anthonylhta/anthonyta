@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVault } from "@/app/files/useVault";
 import { rememberSavedSeq } from "@/components/SeqAlarm";
 import { useMeals } from "@/components/useMeals";
+import { useStudy } from "@/components/useStudy";
 import { useTodo } from "@/components/useTodo";
 import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
 import { sydneyToday } from "@/lib/fin";
@@ -17,6 +18,7 @@ import {
 import { setWeight } from "@/lib/meals";
 import { DEFAULT_NOW, normalizeNow, setLine, type NowConfig } from "@/lib/now";
 import { nextSeq } from "@/lib/seqrule";
+import { addStudy } from "@/lib/study";
 import {
   parseQuickLog,
   quickLogLabel,
@@ -77,6 +79,8 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       return <CaptureRow action={action} onDone={onDone} onStage={onStage} />;
     if (action.kind === "cast")
       return <CastRow action={action} onDone={onDone} onStage={onStage} />;
+    if (action.kind === "study")
+      return <StudyRow action={action} onDone={onDone} onStage={onStage} />;
     return <NowRow action={action} onDone={onDone} onStage={onStage} />;
   }
 
@@ -91,7 +95,9 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       </li>
       {/* The section's one advertisement — the verbs, not a row to select. */}
       <li className="flex items-center justify-between px-3 py-2 text-sm text-muted">
-        <span className="truncate">w 67.4 · todo … · now … · cast …</span>
+        <span className="truncate">
+          w 67.4 · todo … · ja … · now … · cast …
+        </span>
         <span className="text-xs text-muted">type to log</span>
       </li>
     </>
@@ -140,6 +146,37 @@ function CaptureRow({
     ready: todo.cfg !== null,
     storeErr: todo.dataErr !== null,
     write: () => todo.capture(action.text),
+    onDone,
+    onStage,
+  });
+  return <ActionRow {...row} />;
+}
+
+/** The study verb, over the Japanese study log — the same store and save the
+ *  reader's japan lane writes through, dated to the day the row names (the
+ *  weigh-in's rule), so a palette left open past midnight logs what it said. */
+function StudyRow({
+  action,
+  onDone,
+  onStage,
+}: {
+  action: Extract<QuickLogAction, { kind: "study" }>;
+  onDone: () => void;
+  onStage: StageLog;
+}) {
+  const study = useStudy(false);
+  const row = useStaged({
+    action,
+    ready: study.cfg !== null,
+    storeErr: study.dataErr !== null,
+    write: () =>
+      study.save((base) =>
+        addStudy(base, {
+          date: action.day,
+          source: action.source,
+          ...(action.minutes !== undefined ? { minutes: action.minutes } : {}),
+        }),
+      ),
     onDone,
     onStage,
   });
