@@ -132,6 +132,10 @@ const META_SKIPS: ReadonlyMap<string, string> = new Map([
     "meta/aperture-glance.json",
     "plaintext rank/stage glance — deliberately unsealed (ADR 0112)",
   ],
+  [
+    "meta/almanac-windows.json",
+    "plaintext almanac window names + dates — the world's calendar, for the nightly push",
+  ],
 ]);
 
 /** `meta/*` prefixes that are plaintext hub state by design. */

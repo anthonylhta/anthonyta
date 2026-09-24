@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAperture, normalizeApertureGlance } from "./aperture";
 import {
+  normalizeAlmanacWindows,
+  normalizeAperture,
+  normalizeApertureGlance,
+} from "./aperture";
+import {
+  almanacWindows,
   apertureGlance,
   diffSummary,
   explainApertureRejection,
@@ -114,6 +119,87 @@ describe("aperturesync — glance projection", () => {
   it("copies the document's seal instant rather than stamping a clock", () => {
     const shifted = doc({ sealedAt: "2026-02-01T07:30:00+10:00" });
     expect(apertureGlance(shifted).sealedAt).toBe("2026-02-01T07:30:00+10:00");
+  });
+});
+
+describe("aperturesync — almanac windows", () => {
+  const almanac = [
+    {
+      name: "Lantern fair",
+      source: "the harbour",
+      from: "10-15",
+      to: "11-02",
+      free: true,
+      tier: "1",
+      feeds: ["the compass"],
+      note: "bring the good ink",
+      pair: "a chart sale",
+    },
+    { name: "Map guild exam", from: "2027-03-01", to: "2027-03-20" },
+    { name: "a new quill" },
+    { name: "a lone end", from: "05-01" },
+  ];
+
+  it("carries only windowed lines, and only name + both ends", () => {
+    expect(almanacWindows(withSealed({ almanac }))).toEqual({
+      v: 1,
+      sealedAt: "2026-03-05T09:00:00+10:00",
+      windows: [
+        { name: "Lantern fair", from: "10-15", to: "11-02" },
+        { name: "Map guild exam", from: "2027-03-01", to: "2027-03-20" },
+      ],
+    });
+  });
+
+  it("leaks nothing else — the row keys are exactly the three", () => {
+    for (const w of almanacWindows(withSealed({ almanac })).windows)
+      expect(Object.keys(w).sort()).toEqual(["from", "name", "to"]);
+  });
+
+  it("writes an empty list, never nothing, when no line is windowed", () => {
+    expect(almanacWindows(doc()).windows).toEqual([]);
+    expect(
+      almanacWindows(withSealed({ almanac: [{ name: "a new quill" }] }))
+        .windows,
+    ).toEqual([]);
+  });
+
+  it("survives the reader's normalize round trip", () => {
+    const file = almanacWindows(withSealed({ almanac }));
+    const roundTripped: unknown = JSON.parse(JSON.stringify(file));
+    expect(normalizeAlmanacWindows(roundTripped)).toEqual(file);
+  });
+
+  it("the reader rejects the whole file over one bad row", () => {
+    const good = { v: 1, sealedAt: "2026-03-05T09:00:00+10:00" };
+    const bad = (w: unknown) =>
+      normalizeAlmanacWindows({ ...good, windows: [w] });
+    expect(bad({ name: "x", from: "05-01" })).toBeNull();
+    expect(bad({ name: "x", from: "05-01", to: "2027-03-20" })).toBeNull();
+    expect(bad({ name: "x", from: "13-01", to: "13-02" })).toBeNull();
+    expect(bad({ name: "", from: "05-01", to: "05-02" })).toBeNull();
+    expect(normalizeAlmanacWindows({ ...good, windows: "no" })).toBeNull();
+    expect(normalizeAlmanacWindows({ ...good, v: 2, windows: [] })).toBeNull();
+    expect(
+      normalizeAlmanacWindows({
+        ...good,
+        windows: Array.from({ length: 41 }, (_, i) => ({
+          name: `w${i}`,
+          from: "05-01",
+          to: "05-02",
+        })),
+      }),
+    ).toBeNull();
+  });
+
+  it("the reader drops unknown row keys", () => {
+    expect(
+      normalizeAlmanacWindows({
+        v: 1,
+        sealedAt: "2026-03-05T09:00:00+10:00",
+        windows: [{ name: "x", from: "05-01", to: "05-02", note: "private" }],
+      })?.windows,
+    ).toEqual([{ name: "x", from: "05-01", to: "05-02" }]);
   });
 });
 

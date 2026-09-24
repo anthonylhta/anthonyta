@@ -85,6 +85,7 @@ import {
   trialCountdown,
   STAGE_GLYPH,
   trialsSummary,
+  windowOpensOn,
   type FeedingRead,
 } from "./apertureview";
 
@@ -1321,6 +1322,30 @@ describe("apertureview — almanacGroups", () => {
       "free first",
       "jacarandas",
     ]);
+  });
+});
+
+describe("apertureview — windowOpensOn", () => {
+  it("reads a recurring window's next opening on or after today", () => {
+    const jlpt = { from: "03-01", to: "03-20" };
+    expect(windowOpensOn(jlpt, "2026-09-25")).toBe("2027-03-01");
+    expect(windowOpensOn(jlpt, "2027-03-01")).toBe("2027-03-01");
+    expect(windowOpensOn(jlpt, "2027-02-22")).toBe("2027-03-01");
+    // Inside the window its opening is behind it — the next is a year on.
+    expect(windowOpensOn(jlpt, "2027-03-05")).toBe("2028-03-01");
+  });
+
+  it("reads a window that wraps the new year from its opening year", () => {
+    const summer = { from: "12-01", to: "02-28" };
+    expect(windowOpensOn(summer, "2026-11-24")).toBe("2026-12-01");
+    expect(windowOpensOn(summer, "2027-01-15")).toBe("2027-12-01");
+  });
+
+  it("reads a one-off as itself, and null once it has opened", () => {
+    const fringe = { from: "2026-09-01", to: "2026-09-30" };
+    expect(windowOpensOn(fringe, "2026-08-25")).toBe("2026-09-01");
+    expect(windowOpensOn(fringe, "2026-09-01")).toBe("2026-09-01");
+    expect(windowOpensOn(fringe, "2026-09-02")).toBeNull();
   });
 });
 
