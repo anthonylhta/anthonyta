@@ -1,3 +1,6 @@
+import { checkAlmanacWindows } from "@/lib/almanacpush";
+import { normalizeAlmanacWindows } from "@/lib/aperture";
+import { getAlmanacWindowsRaw } from "@/lib/aperturestore";
 import { getStoredBriefing } from "@/lib/briefingstore";
 import { overdueChores } from "@/lib/chores";
 import { getChoreReads } from "@/lib/connectors/chores";
@@ -45,7 +48,7 @@ import { getTftHistoryRaw, putTftHistory } from "@/lib/tftstore";
 export const dynamic = "force-dynamic";
 
 /**
- * Nightly cron. Six jobs (the sealed-box net-worth snapshot retired with ADR 0061
+ * Nightly cron. Seven jobs (the sealed-box net-worth snapshot retired with ADR 0061
  * — history now reconstructs client-side from the fin envelope's step functions, so
  * the server no longer touches an invested figure, even transiently):
  *
@@ -79,6 +82,11 @@ export const dynamic = "force-dynamic";
  *             uncached, and two CONSECUTIVE failed nights buzz once per
  *             down-episode. A single failed probe is noise, which is why the
  *             debounce is the whole feature (`checkHealthDown` owns the rules).
+ * - `almanac` — the almanac windows push: one line when a dated almanac window
+ *             opens today or in a week, read off the plaintext windows file the
+ *             sync writes beside the glance (the seal stays shut). At most once
+ *             a day, and never off a file it couldn't read
+ *             (`checkAlmanacWindows` owns the rules).
  *
  * Runs late each Sydney evening via Vercel Cron (vercel.json). Vercel sends
  * `Authorization: Bearer <CRON_SECRET>`; required, fail-closed in production
@@ -330,6 +338,45 @@ async function alarmProjectsDown(date: string): Promise<Outcome> {
   return verdict.alarm ? "written" : "skipped";
 }
 
+/** Tell the owner an almanac window opens today, or a week out. Same refusals
+ *  as the jobs above, plus one of its own: a windows file that is absent,
+ *  unreadable or malformed is silence — never a guess at the calendar. */
+async function alarmAlmanacWindows(date: string): Promise<Outcome> {
+  if (!pushConfigured()) return "skipped";
+
+  const read = await getPushRaw();
+  // Same read-modify-write discipline as above: an error must not read as
+  // absent, or the write would drop every enrolled device.
+  if (read.state === "error") return "failed";
+  if (read.state === "absent") return "skipped";
+  const cfg = parsePushConfig(read.value);
+  if (!categoryOn(cfg, "almanac")) return "skipped";
+
+  const raw = await getAlmanacWindowsRaw();
+  if (raw.state !== "ok") return "skipped";
+  let file: ReturnType<typeof normalizeAlmanacWindows> = null;
+  try {
+    file = normalizeAlmanacWindows(JSON.parse(raw.value));
+  } catch {
+    // Unparseable JSON folds to the malformed case below.
+  }
+  if (file === null) return "skipped";
+
+  const verdict = checkAlmanacWindows(file.windows, date, cfg.episodes.almanac);
+
+  let next = setEpisode(cfg, "almanac", verdict.episode);
+  if (verdict.send) {
+    const { sent, gone } = await deliver(next, "almanac", verdict.body, "/gu");
+    next = pruneSubs(next, gone);
+    if (sent > 0) next = setFired(next, "almanac", date);
+  }
+
+  const serialized = serializePushConfig(next);
+  if (serialized !== serializePushConfig(cfg) && !(await putPush(serialized)))
+    return "failed";
+  return verdict.send ? "written" : "skipped";
+}
+
 export async function GET(req: Request) {
   const denied = authorizeCron(req);
   if (denied) return denied;
@@ -366,6 +413,10 @@ export async function GET(req: Request) {
     console.error("[cron:snapshot] health tripwire failed:", err);
     return "failed" as Outcome;
   });
+  const almanac = await alarmAlmanacWindows(date).catch((err) => {
+    console.error("[cron:snapshot] almanac push failed:", err);
+    return "failed" as Outcome;
+  });
 
   return Response.json({
     date,
@@ -375,6 +426,7 @@ export async function GET(req: Request) {
     alarm,
     upkeep,
     health,
+    almanac,
     at: new Date().toISOString(),
   });
 }

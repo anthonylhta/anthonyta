@@ -40,6 +40,7 @@ const CATEGORY_COPY: Record<PushCategory, string> = {
   share: "someone collects a share link",
   chores: "the hub's own upkeep goes overdue",
   health: "one of the projects goes down",
+  almanac: "an almanac window opens, and a week before it does",
 };
 
 /** A short, human device name — the passkey manager's sniff, same reasoning:

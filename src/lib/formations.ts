@@ -149,6 +149,7 @@ function tripwireLedger(
     line("silence", silenceDay, silenceSource && ` · ${silenceSource}`),
     line("upkeep", fired.chores),
     line("health", fired.health),
+    line("almanac", fired.almanac),
   ];
   const days = Object.values(fired).filter((d): d is string => d !== undefined);
   const newest =
@@ -178,7 +179,7 @@ export function formationRows(
   const tripwires: FormationRow = {
     key: "tripwires",
     name: "the tripwires",
-    what: "push · ingest silence · chores · health · shares · sign-ins",
+    what: "push · ingest silence · chores · health · shares · sign-ins · almanac",
     status: ev.vapid === "ok" ? "armed" : ev.vapid === "off" ? "off" : "broken",
     // The armed row carries the newest firing so the band can say the wires
     // are REAL, not just configured; a broken or off trio keeps its own
