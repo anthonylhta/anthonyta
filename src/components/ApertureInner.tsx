@@ -2362,12 +2362,12 @@ function InheritanceEntry({
 }
 
 /**
- * The ten sealed envelope stores of the aevcontext config family (fin,
- * transit, todo, totp, gym, meals, agenda, jobs, gu-marks, circle) — the
- * gu-house census's one code constant. An eleventh store bumps this by hand:
+ * The eleven sealed envelope stores of the aevcontext config family (fin,
+ * transit, todo, totp, gym, meals, agenda, jobs, gu-marks, circle, study) —
+ * the gu-house census's one code constant. A twelfth store bumps this by hand:
  * the census is a colophon, not an inventory system.
  */
-const SEALED_STORES = 10;
+const SEALED_STORES = 11;
 
 /**
  * 府 — the gu house band, the page's colophon (canon: a gu house IS a
