@@ -41,7 +41,7 @@ import {
   ledgerEntries,
   ledgerPage,
 } from "@/lib/apertureview";
-import { lastInvestedDay, recoveredThisWeek } from "@/lib/fin";
+import { debitDays, lastInvestedDay, recoveredThisWeek } from "@/lib/fin";
 import { lastSessionDate, type GymConfig } from "@/lib/gym";
 import {
   EMPTY_GU_MARKS,
@@ -163,7 +163,8 @@ export function GuInner({
 
   // Every log the page can see, by the name a gu uses: the server's map plus
   // the ones opened here — the two logs, the vault's journal edge, and the fin
-  // ledger's last weekly buy (the hook already carries the money rider). A log
+  // ledger's last weekly buy (the hook already carries the money rider), and each
+  // recurring debit's due day under `debit:<name>`. A log
   // with no days yet is simply not in the map, so its gu falls back to the
   // sealed day rather than reading never-fed.
   const logs = useMemo(() => {
@@ -176,8 +177,9 @@ export function GuInner({
       ...(meals !== null ? { meals } : {}),
       ...(vaultDay !== null ? { vault: vaultDay } : {}),
       ...(buy !== null ? { fin: buy } : {}),
+      ...(fin ? debitDays(fin, today) : {}),
     };
-  }, [logDays, gymCfg, mealsCfg, vaultDay, fin]);
+  }, [logDays, gymCfg, mealsCfg, vaultDay, fin, today]);
 
   const putMarks = useCallback(
     async (
