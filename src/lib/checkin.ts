@@ -233,6 +233,15 @@ export interface CountersInput {
   mealDays: number | null;
   /** The gu book's pending marks; null until the marks store has answered. */
   marks: { since: string[]; casts: { name: string; date: string }[] } | null;
+  /** Net worth off the fin envelope, all in cents; null while it is locked. The
+   *  week's delta is null when the ledger does not reach back seven days. */
+  wealth: {
+    totalCents: number;
+    investedCents: number;
+    cashCents: number;
+    hisaCents: number;
+    weekDeltaCents: number | null;
+  } | null;
 }
 
 /** The counters the check-in also takes, in the order it takes them. */
@@ -254,6 +263,7 @@ export function countersBlock(input: CountersInput): string {
     `Craft: ${craft}`,
     "Japanese: ? study days",
     `Training: ${training} · Meals: ${meals}`,
+    `Net worth: ${wealthLine(input.wealth)}`,
     `gu marks unsealed: ${marksLine(input.marks)}`,
     "platform: ? (bait held · bar met · bar spoken)",
   ].join("\n");
@@ -270,4 +280,29 @@ function marksLine(marks: CountersInput["marks"]): string {
       ? "none"
       : `${marks.casts.length} (${marks.casts.map((c) => `${c.name} ${md(c.date)}`).join(" · ")})`;
   return `${since} · casts unsealed: ${casts}`;
+}
+
+function wealthLine(wealth: CountersInput["wealth"]): string {
+  if (!wealth) return "?";
+  const week =
+    wealth.weekDeltaCents === null ? "?" : signedDollars(wealth.weekDeltaCents);
+  return (
+    `${dollars(wealth.totalCents)} (invested ${dollars(wealth.investedCents)}` +
+    ` · cash ${dollars(wealth.cashCents)} · HISA ${dollars(wealth.hisaCents)})` +
+    ` · wk ${week}`
+  );
+}
+
+/** Whole dollars with thousands separators — `2000012` → `$20,000`. Written out
+ *  rather than through `Intl` so the block never shifts with the device locale. */
+function dollars(cents: number): string {
+  const whole = Math.round(Math.abs(cents) / 100);
+  const grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${cents < 0 && whole > 0 ? "-" : ""}$${grouped}`;
+}
+
+/** A delta always carries its sign; a week that rounds to nothing is `+$0`. */
+function signedDollars(cents: number): string {
+  const text = dollars(cents);
+  return text.startsWith("-") ? text : `+${text}`;
 }
