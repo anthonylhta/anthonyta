@@ -13,7 +13,12 @@ import {
   rememberSavedSeq,
   SeqAlarm,
 } from "@/components/SeqAlarm";
-import { gymConfig, mealsConfig, vaultIndex } from "@/components/logRiders";
+import {
+  gymConfig,
+  mealsConfig,
+  studyConfig,
+  vaultIndex,
+} from "@/components/logRiders";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
 import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
 import {
@@ -57,6 +62,7 @@ import {
 import { lastLoggedDay, type MealsConfig } from "@/lib/meals";
 import { aud } from "@/lib/money";
 import { nextSeq } from "@/lib/seqrule";
+import { lastStudyDay, type StudyConfig } from "@/lib/study";
 import { useApertureDoc } from "./useApertureDoc";
 
 /**
@@ -125,6 +131,7 @@ export function GuInner({
   // same edge the inward page measures the seal against.
   const [gymCfg, setGymCfg] = useState<GymConfig | null>(null);
   const [mealsCfg, setMealsCfg] = useState<MealsConfig | null>(null);
+  const [studyCfg, setStudyCfg] = useState<StudyConfig | null>(null);
   const [vaultDay, setVaultDay] = useState<string | null>(null);
   const hasDoc = doc !== null;
   const [hadDoc, setHadDoc] = useState(hasDoc);
@@ -136,6 +143,7 @@ export function GuInner({
       setNotice(null);
       setGymCfg(null);
       setMealsCfg(null);
+      setStudyCfg(null);
       setVaultDay(null);
     }
   }
@@ -148,6 +156,8 @@ export function GuInner({
       if (meals && !cancelled) setMealsCfg(meals);
       const gymLog = await gymConfig(openItem);
       if (gymLog && !cancelled) setGymCfg(gymLog);
+      const study = await studyConfig(openItem);
+      if (study && !cancelled) setStudyCfg(study);
       const idx = await vaultIndex(openItem);
       if (idx && !cancelled)
         setVaultDay(
@@ -163,16 +173,18 @@ export function GuInner({
   }, [doc, openItem, today]);
 
   // Every log the page can see, by the name a gu uses: the server's map plus
-  // the ones opened here — the two logs, the vault's journal edge, and the fin
-  // ledger's last weekly buy (the hook already carries the money rider), and each
-  // recurring debit's due day under `debit:<name>`. A log
+  // the ones opened here — the two logs and the study log, the vault's journal
+  // edge, and the fin ledger's last weekly buy (the hook already carries the
+  // money rider), and each recurring debit's due day under `debit:<name>`. A log
   // with no days yet is simply not in the map, so its gu falls back to the
   // sealed day rather than reading never-fed.
   const logs = useMemo(() => {
     const gym = gymCfg ? lastSessionDate(gymCfg) : null;
     const meals = mealsCfg ? lastLoggedDay(mealsCfg) : null;
+    const study = studyCfg ? lastStudyDay(studyCfg) : null;
     const buy = fin ? lastInvestedDay(fin) : null;
     return {
+      ...(study !== null ? { study } : {}),
       ...logDays,
       ...(gym !== null ? { gym } : {}),
       ...(meals !== null ? { meals } : {}),
@@ -180,7 +192,7 @@ export function GuInner({
       ...(buy !== null ? { fin: buy } : {}),
       ...(fin ? debitDays(fin, today) : {}),
     };
-  }, [logDays, gymCfg, mealsCfg, vaultDay, fin, today]);
+  }, [logDays, gymCfg, mealsCfg, studyCfg, vaultDay, fin, today]);
 
   const putMarks = useCallback(
     async (

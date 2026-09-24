@@ -6,7 +6,12 @@ import { ActivityStrip } from "@/components/terminal/ActivityStrip";
 import { ExceptionLine } from "@/components/terminal/ExceptionLine";
 import { Sparkline } from "@/components/terminal/Sparkline";
 import { ZoneHeader } from "@/components/terminal/ZoneHeader";
-import { gymConfig, mealsConfig, vaultIndex } from "@/components/logRiders";
+import {
+  gymConfig,
+  mealsConfig,
+  studyConfig,
+  vaultIndex,
+} from "@/components/logRiders";
 import { ACTIVITY_DAYS, toLevels } from "@/lib/activity";
 import {
   apertureHistPath,
@@ -133,6 +138,7 @@ import {
   weightTrend,
   type MealsConfig,
 } from "@/lib/meals";
+import { studyDaysIn, studyDaysTrailing, type StudyConfig } from "@/lib/study";
 import type { FormationRow, FormationStatus } from "@/lib/formations";
 import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
@@ -442,6 +448,9 @@ export function ApertureInner({
   /** The sealed meal log, once it lands — the protein strip and the vessel are
    *  both derived from it below. */
   const [mealsCfg, setMealsCfg] = useState<MealsConfig | null>(null);
+  /** The sealed Japanese study log, once it lands — the check-in's Japanese
+   *  line and the dao band's live week read it. */
+  const [studyCfg, setStudyCfg] = useState<StudyConfig | null>(null);
   /** The archived seal history, once it lands — see `recordSeries`. */
   const [record, setRecord] = useState<RecordState | null>(null);
   /** Raw journal days have run ≥2 days past the seal — flag, never resolve. */
@@ -486,6 +495,7 @@ export function ApertureInner({
     if (!unlocked) {
       setGymCfg(null);
       setMealsCfg(null);
+      setStudyCfg(null);
       setRecord(null);
       setPending(false);
       setSoulDays(null);
@@ -529,6 +539,9 @@ export function ApertureInner({
 
       const gymLog = await gymConfig(openItem);
       if (gymLog && !cancelled) setGymCfg(gymLog);
+
+      const study = await studyConfig(openItem);
+      if (study && !cancelled) setStudyCfg(study);
 
       // The sect-search rider — same best-effort terms.
       const apps = await jobsApps(openItem);
@@ -636,6 +649,10 @@ export function ApertureInner({
               trailingProtein(mealsCfg, today, ACTIVITY_DAYS),
             )
           : null;
+      if (activity === "study")
+        return studyCfg
+          ? evidenceDaysThisWeek(studyDaysTrailing(studyCfg, today))
+          : null;
       const s = (series as Record<string, EvidenceSeries | undefined>)[
         activity
       ];
@@ -649,6 +666,8 @@ export function ApertureInner({
         return gymCfg ? sessionCounts(gymCfg, 7, today) : null;
       if (activity === "meals")
         return mealsCfg ? trailingProtein(mealsCfg, today, 7) : null;
+      if (activity === "study")
+        return studyCfg ? studyDaysTrailing(studyCfg, today) : null;
       return (
         (series as Record<string, EvidenceSeries | undefined>)[activity]
           ?.levels ?? null
@@ -664,7 +683,7 @@ export function ApertureInner({
       // read as a week nothing landed in.
       sea: list.length > 0 ? seaFill(list, today) : null,
     };
-  }, [doc, gymCfg, mealsCfg, series, today]);
+  }, [doc, gymCfg, mealsCfg, studyCfg, series, today]);
 
   switch (detailStatus(status, dataErr, doc)) {
     case "offline":
@@ -923,6 +942,7 @@ export function ApertureInner({
       : null,
     gymSessions: checkinGym?.length ?? null,
     mealDays: checkinMeals,
+    studyDays: studyCfg ? studyDaysIn(studyCfg, checkinWin) : null,
     marks: checkin?.marks ?? null,
     wealth: checkinWealth,
   });
