@@ -389,6 +389,40 @@ export function burnWeekly(
   return { cents: Math.round(sum / spent.length), weeks: spent.length };
 }
 
+/** The first day of `todayISO`'s calendar quarter — Jan, Apr, Jul or Oct 1st. */
+export function quarterStart(todayISO: string): string {
+  const month = Number(todayISO.slice(5, 7));
+  const first = month - ((month - 1) % 3);
+  return `${todayISO.slice(0, 4)}-${String(first).padStart(2, "0")}-01`;
+}
+
+/**
+ * What went out so far this quarter: the SUM of the knowable `spentThisWeek`
+ * readings at today, today − 7, … for every anchor whose trailing week starts on or
+ * after the quarter's first day — so no week straddling the quarter line counts.
+ * `weeks` says how many went in; an unknowable week adds nothing rather than a
+ * zero the site made up. Null until one week of the quarter is knowable.
+ */
+export function spentThisQuarter(
+  cfg: FinConfig,
+  todayISO: string,
+): { cents: number; weeks: number } | null {
+  const start = quarterStart(todayISO);
+  let cents = 0;
+  let weeks = 0;
+  for (
+    let anchor = todayISO;
+    weekStart(anchor) >= start;
+    anchor = addDays(anchor, -WEEK_DAYS)
+  ) {
+    const s = spentThisWeek(cfg, anchor);
+    if (s === null) continue;
+    cents += s;
+    weeks++;
+  }
+  return weeks === 0 ? null : { cents, weeks };
+}
+
 /** How many weeks of flow the /aperture strips read back over. */
 const FLOW_WEEKS = 10;
 
