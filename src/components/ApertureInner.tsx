@@ -92,6 +92,7 @@ import {
   isDailyTitle,
   journalDaysIn,
   unsealedSince,
+  type CountersInput,
 } from "@/lib/checkin";
 import {
   absorbedThisWeek,
@@ -101,6 +102,7 @@ import {
   lastInvestedDay,
   latestEntry,
   monthToDateBaseline,
+  pickBaseline,
   recoveredThisWeek,
   weeklyFlow,
 } from "@/lib/fin";
@@ -811,6 +813,9 @@ export function ApertureInner({
   // envelope already open here. Month-to-date rather than a 7-day Δ: on weekly pay
   // a week's diff just echoes whether payday has happened yet.
   let wealth: Wealth | null = null;
+  // The same figure in cents for the check-in's counters, with a week's diff
+  // rather than the month's — the seal is weekly, so the week is its unit.
+  let checkinWealth: CountersInput["wealth"] = null;
   if (fin) {
     const netSeries = buildFullSeries(fin, today);
     const base = monthToDateBaseline(netSeries, today);
@@ -820,6 +825,20 @@ export function ApertureInner({
       delta:
         base && newest ? (newest.totalCents - base.totalCents) / 100 : null,
     };
+    if (entry || fin.invested.length > 0) {
+      const investedCents = invested ?? 0;
+      const cashCents = Math.round((entry?.cash ?? 0) * 100);
+      const hisaCents = Math.round((entry?.hisa ?? 0) * 100);
+      const totalCents = investedCents + cashCents + hisaCents;
+      const weekBase = pickBaseline(netSeries, 7, today);
+      checkinWealth = {
+        totalCents,
+        investedCents,
+        cashCents,
+        hisaCents,
+        weekDeltaCents: weekBase ? totalCents - weekBase.totalCents : null,
+      };
+    }
   }
 
   // What share of the week's pay was put away. Only when both ends are real —
@@ -905,6 +924,7 @@ export function ApertureInner({
     gymSessions: checkinGym?.length ?? null,
     mealDays: checkinMeals,
     marks: checkin?.marks ?? null,
+    wealth: checkinWealth,
   });
 
   // The one trial grave enough to be read at the TOP of the page rather than in
