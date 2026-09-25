@@ -27,6 +27,7 @@ import {
   bookStatus,
   castReading,
   castsThisMonth,
+  castsThisQuarter,
   ledgerEntries,
   ledgerMonthLabel,
   ledgerPage,
@@ -1478,6 +1479,34 @@ describe("apertureview — experienceBudget + castsThisMonth", () => {
       casts: [],
       stones: 0,
     });
+  });
+});
+
+describe("apertureview — castsThisQuarter", () => {
+  const casts = [
+    { date: "2026-06-30", name: "last quarter", stones: 9900 },
+    { date: "2026-07-01", name: "the quarter's first day", stones: 1500 },
+    { date: "2026-08-10", name: "a day off the road" },
+    { date: "2026-09-20", name: "the cinema", stones: 2400 },
+  ];
+
+  it("counts and sums the casts inside today's calendar quarter", () => {
+    expect(castsThisQuarter(casts, "2026-09-25")).toEqual({
+      casts: 3,
+      stones: 3900,
+    });
+    expect(castsThisQuarter(casts, "2026-06-30")).toEqual({
+      casts: 1,
+      stones: 9900,
+    });
+  });
+
+  it("reads a new quarter as empty, not as broken", () => {
+    expect(castsThisQuarter(casts, "2026-10-01")).toEqual({
+      casts: 0,
+      stones: 0,
+    });
+    expect(castsThisQuarter([], "2026-09-25")).toEqual({ casts: 0, stones: 0 });
   });
 });
 
