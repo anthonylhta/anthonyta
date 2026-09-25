@@ -5,6 +5,11 @@ import {
   buildStepSeries,
   burnWeekly,
   cashAt,
+  committedWeeklyCents,
+  debitDays,
+  debitDueDay,
+  debitLogKey,
+  debitNextDay,
   importPortfolioCsv,
   indexBaseline,
   investedAt,
@@ -17,15 +22,18 @@ import {
   normalizeFinConfig,
   pickBaseline,
   recoveredThisWeek,
+  removeDebit,
   spentThisWeek,
   weeklyFlow,
   SNAP_INDEX_MAX_DAYS,
   sydneyDaysAgo,
   sydneyToday,
+  upsertDebit,
   upsertEntry,
   upsertIncome,
   upsertInvested,
   upsertIndexDay,
+  type DebitEntry,
   type FinConfig,
   type NetWorthPoint,
   type SnapIndex,
@@ -910,5 +918,108 @@ describe("sydneyToday / sydneyDaysAgo", () => {
     expect(sydneyDaysAgo(7, new Date("2026-07-03T02:00:00Z"))).toBe(
       "2026-06-26",
     );
+  });
+});
+
+describe("recurring debits", () => {
+  // The premium: fortnightly, Fridays, last seen Fri 2026-09-11.
+  const premium: DebitEntry = {
+    name: "private health insurance",
+    amountCents: 6420,
+    everyDays: 14,
+    last: "2026-09-11",
+  };
+  const phone: DebitEntry = {
+    name: "Phone",
+    amountCents: 3000,
+    everyDays: 30,
+    last: "2026-09-01",
+  };
+
+  it("validates: absent is fine, a well-formed list passes", () => {
+    expect(isFinConfig(cfg2())).toBe(true);
+    expect(isFinConfig(cfg2({ debits: [] }))).toBe(true);
+    expect(isFinConfig(cfg2({ debits: [phone, premium] }))).toBe(true);
+  });
+
+  it("rejects malformed rows, bad order, duplicates and oversize lists", () => {
+    const bad = (debits: unknown) =>
+      isFinConfig({ ...cfg2(), debits } as unknown);
+    expect(bad("x")).toBe(false);
+    expect(bad([{ ...premium, name: "" }])).toBe(false);
+    expect(bad([{ ...premium, name: " padded" }])).toBe(false);
+    expect(bad([{ ...premium, name: "x".repeat(61) }])).toBe(false);
+    expect(bad([{ ...premium, name: "x".repeat(60) }])).toBe(true);
+    expect(bad([{ ...premium, amountCents: -1 }])).toBe(false);
+    expect(bad([{ ...premium, amountCents: 1.5 }])).toBe(false);
+    expect(bad([{ ...premium, everyDays: 0 }])).toBe(false);
+    expect(bad([{ ...premium, everyDays: 367 }])).toBe(false);
+    expect(bad([{ ...premium, everyDays: 366 }])).toBe(true);
+    expect(bad([{ ...premium, last: "2026-02-30" }])).toBe(false);
+    expect(bad([{ ...premium, last: "11/09/2026" }])).toBe(false);
+    expect(bad([premium, phone])).toBe(false); // out of name order
+    expect(bad([phone, { ...phone, name: "phone" }])).toBe(false); // dup
+    const many = Array.from({ length: 51 }, (_, i) => ({
+      ...premium,
+      name: `d${String(i).padStart(2, "0")}`,
+    }));
+    expect(bad(many)).toBe(false);
+    expect(bad(many.slice(0, 50))).toBe(true);
+  });
+
+  it("upserts by name case-insensitively, trims, keeps name order", () => {
+    let c = upsertDebit(cfg2(), premium);
+    c = upsertDebit(c, { ...phone, name: "  Phone " });
+    expect(c.debits?.map((d) => d.name)).toEqual([
+      "Phone",
+      "private health insurance",
+    ]);
+    c = upsertDebit(c, { ...premium, name: "Private Health Insurance" });
+    expect(c.debits).toHaveLength(2);
+    expect(c.debits?.[1].name).toBe("Private Health Insurance");
+    expect(isFinConfig(c)).toBe(true);
+    const before = cfg2({ debits: [premium] });
+    upsertDebit(before, phone);
+    expect(before.debits).toEqual([premium]); // never mutates
+  });
+
+  it("removes by name case-insensitively", () => {
+    const c = removeDebit(cfg2({ debits: [phone, premium] }), "PHONE");
+    expect(c.debits).toEqual([premium]);
+    expect(removeDebit(cfg2(), "x").debits).toEqual([]);
+  });
+
+  it("dates the latest due day on the grid, and the next one after today", () => {
+    expect(debitDueDay(premium, "2026-09-11")).toBe("2026-09-11");
+    expect(debitDueDay(premium, "2026-09-24")).toBe("2026-09-11");
+    expect(debitDueDay(premium, "2026-09-25")).toBe("2026-09-25");
+    expect(debitDueDay(premium, "2026-10-12")).toBe("2026-10-09");
+    expect(debitNextDay(premium, "2026-09-11")).toBe("2026-09-25");
+    expect(debitNextDay(premium, "2026-09-25")).toBe("2026-10-09");
+    // Before the anchor: the anchor is both the due and the next day.
+    expect(debitDueDay(premium, "2026-09-01")).toBe("2026-09-11");
+    expect(debitNextDay(premium, "2026-09-01")).toBe("2026-09-11");
+    // Across a year and a DST edge (Sydney springs forward 2026-10-04).
+    expect(debitDueDay(premium, "2026-12-31")).toBe("2026-12-18");
+    expect(debitDueDay(premium, "2027-01-01")).toBe("2027-01-01");
+  });
+
+  it("keys each debit's due day by its log name", () => {
+    expect(debitLogKey("  Private Health Insurance ")).toBe(
+      "debit:private health insurance",
+    );
+    expect(debitDays(cfg2({ debits: [phone, premium] }), "2026-09-25")).toEqual(
+      {
+        "debit:phone": "2026-09-01",
+        "debit:private health insurance": "2026-09-25",
+      },
+    );
+    expect(debitDays(cfg2(), "2026-09-25")).toEqual({});
+  });
+
+  it("sums the week's committed cents, rounding per row", () => {
+    expect(committedWeeklyCents(cfg2())).toBe(0);
+    // 6420 × 7 / 14 = 3210; 3000 × 7 / 30 = 700
+    expect(committedWeeklyCents(cfg2({ debits: [phone, premium] }))).toBe(3910);
   });
 });

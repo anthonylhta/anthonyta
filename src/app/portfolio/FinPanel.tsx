@@ -14,14 +14,20 @@ import { scrubIndex } from "@/lib/spark";
 import {
   buildFullSeries,
   burnWeekly,
+  committedWeeklyCents,
+  debitDueDay,
+  debitNextDay,
   importPortfolioCsv,
   investedAt,
   latestEntry,
   normalizeFinConfig,
+  removeDebit,
   spentThisWeek,
   sydneyToday,
+  upsertDebit,
   upsertEntry,
   upsertIncome,
+  type DebitEntry,
   type FinConfig,
   type FinEntry,
   type IncomeEntry,
@@ -87,6 +93,12 @@ export function FinPanel({ offline }: { offline: boolean }) {
   const [seqAlarm, setSeqAlarm] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editingIncome, setEditingIncome] = useState(false);
+  // The debit form: a row being edited, a new one, or closed.
+  const [editingDebit, setEditingDebit] = useState<DebitEntry | "new" | null>(
+    null,
+  );
+  const [debitBusy, setDebitBusy] = useState(false);
+  const [debitErr, setDebitErr] = useState(false);
 
   // Render-phase adjustment (not an effect): reset the per-unlock state on the
   // lock/unlock edge, per the lint-blessed reset pattern.
@@ -97,6 +109,8 @@ export function FinPanel({ offline }: { offline: boolean }) {
     setCfg(null);
     setEditing(false);
     setEditingIncome(false);
+    setEditingDebit(null);
+    setDebitErr(false);
   }
 
   // Load + decrypt once per unlock. A cancelled flag drops a late resolve after
@@ -234,6 +248,28 @@ export function FinPanel({ offline }: { offline: boolean }) {
     return ok;
   }
 
+  // Upsert a debit by name — dropping the row it was edited from first, so a
+  // rename moves the row rather than leaving the old name behind.
+  async function saveDebit(
+    entry: DebitEntry,
+    from: string | null,
+  ): Promise<boolean> {
+    const ok = await saveConfig((base) =>
+      upsertDebit(from !== null ? removeDebit(base, from) : base, entry),
+    );
+    if (ok) setEditingDebit(null);
+    return ok;
+  }
+
+  async function deleteDebit(name: string) {
+    if (debitBusy) return;
+    setDebitBusy(true);
+    setDebitErr(false);
+    const ok = await saveConfig((base) => removeDebit(base, name));
+    if (!ok) setDebitErr(true);
+    setDebitBusy(false);
+  }
+
   // Parse a dropped CSV in-browser and seal the result. Parsing happens ONCE, up
   // front — a malformed export errors here and nothing is written.
   async function importCsv(text: string): Promise<"ok" | "bad-csv" | "failed"> {
@@ -312,6 +348,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
   // nothing is typed for them (ADR 0185).
   const spent = spentThisWeek(cfg, today);
   const burn = burnWeekly(cfg, today);
+  const debits = cfg.debits ?? [];
   // The WHOLE history, not a window: a 30-day slice of a savings staircase is
   // mostly flat between paydays and reads as stagnation. All-time is the story.
   const series = buildFullSeries(cfg, today);
@@ -424,6 +461,87 @@ export function FinPanel({ offline }: { offline: boolean }) {
               </span>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* What goes out on a schedule — the premium, the subscriptions. Each row
+          dates its own charges from its cadence, which is what a gu naming
+          `debit:<name>` reads its clock off; the balance never itemises them. */}
+      <div className="border-t border-hairline px-4 py-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-muted">
+            debits
+          </p>
+          {editingDebit === null && (
+            <button
+              type="button"
+              onClick={() => setEditingDebit("new")}
+              className="text-xs text-muted transition-colors hover:text-amber"
+            >
+              add
+            </button>
+          )}
+        </div>
+        {editingDebit !== null ? (
+          <DebitEditor
+            initial={editingDebit === "new" ? null : editingDebit}
+            taken={debits
+              .filter((d) => editingDebit === "new" || d !== editingDebit)
+              .map((d) => d.name.toLowerCase())}
+            today={today}
+            onSave={(entry) =>
+              saveDebit(
+                entry,
+                editingDebit === "new" ? null : editingDebit.name,
+              )
+            }
+            onCancel={() => setEditingDebit(null)}
+          />
+        ) : debits.length === 0 ? (
+          <p className="text-xs text-muted">no debits yet</p>
+        ) : (
+          <div className="space-y-1.5 text-sm">
+            {debits.map((d) => (
+              <div
+                key={d.name}
+                className="flex items-baseline justify-between gap-3"
+              >
+                <span className="min-w-0 break-words">
+                  <span className="text-fg/90">{d.name}</span>
+                  <span className="tabular-nums text-muted">
+                    {` · ${aud(d.amountCents / 100)} every ${d.everyDays} d · last ${debitDueDay(
+                      d,
+                      today,
+                    ).slice(5)} · next ${debitNextDay(d, today).slice(5)}`}
+                  </span>
+                </span>
+                <span className="flex shrink-0 gap-3 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setEditingDebit(d)}
+                    disabled={debitBusy}
+                    className="text-muted transition-colors hover:text-amber disabled:opacity-30"
+                  >
+                    edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteDebit(d.name)}
+                    disabled={debitBusy}
+                    className="text-muted transition-colors hover:text-amber disabled:opacity-30"
+                  >
+                    del
+                  </button>
+                </span>
+              </div>
+            ))}
+            <p className="pt-1 text-xs tabular-nums text-muted">
+              committed {aud(committedWeeklyCents(cfg) / 100)}/wk
+            </p>
+          </div>
+        )}
+        {debitErr && (
+          <p className="mt-2 text-xs text-down">save failed — try again</p>
         )}
       </div>
     </>
@@ -726,6 +844,128 @@ function IncomeEditor({
   return (
     <div className="flex flex-col gap-2">
       {field("this week's pay", payInput, setPayInput, "0")}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={saving || !valid}
+          className={btn}
+        >
+          {saving ? "sealing…" : "save"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className={btn}
+        >
+          cancel
+        </button>
+      </div>
+      {err && <p className="text-xs text-down">save failed — try again</p>}
+    </div>
+  );
+}
+
+/**
+ * One recurring debit: its name, the amount, the cadence in days, and the day it
+ * last came out (today by default — the form is usually opened on the day the
+ * charge is seen). A name another row already holds is refused rather than
+ * silently replacing it.
+ */
+function DebitEditor({
+  initial,
+  taken,
+  today,
+  onSave,
+  onCancel,
+}: {
+  initial: DebitEntry | null;
+  taken: string[];
+  today: string;
+  onSave: (entry: DebitEntry) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [nameInput, setNameInput] = useState(initial?.name ?? "");
+  const [amountInput, setAmountInput] = useState(
+    initial ? String(initial.amountCents / 100) : "",
+  );
+  const [everyInput, setEveryInput] = useState(
+    initial ? String(initial.everyDays) : "",
+  );
+  const [lastInput, setLastInput] = useState(initial?.last ?? today);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const name = nameInput.trim();
+  const amountNum = Number(amountInput);
+  const everyNum = Number(everyInput);
+  const clash = taken.includes(name.toLowerCase());
+  const valid =
+    name.length > 0 &&
+    name.length <= 60 &&
+    !clash &&
+    amountInput.trim() !== "" &&
+    Number.isFinite(amountNum) &&
+    amountNum >= 0 &&
+    Number.isInteger(everyNum) &&
+    everyNum >= 1 &&
+    everyNum <= 366 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(lastInput);
+
+  async function submit() {
+    if (!valid || saving) return;
+    setSaving(true);
+    setErr(false);
+    // dollars → cents, rounded, so float drift can't leak into the figure
+    const ok = await onSave({
+      name,
+      amountCents: Math.round(amountNum * 100),
+      everyDays: everyNum,
+      last: lastInput,
+    });
+    if (ok) return;
+    setErr(true);
+    setSaving(false);
+  }
+
+  const field = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    placeholder: string,
+    mode: "text" | "decimal" | "numeric",
+  ) => (
+    <label className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted">{label}</span>
+      <input
+        value={value}
+        disabled={saving}
+        inputMode={mode}
+        maxLength={mode === "text" ? 60 : undefined}
+        onChange={(e) => set(e.target.value)}
+        placeholder={placeholder}
+        className={`${input} min-w-0 ${mode === "text" ? "w-44" : "w-32"} text-right`}
+      />
+    </label>
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      {field("name", nameInput, setNameInput, "premium", "text")}
+      {field("amount", amountInput, setAmountInput, "0", "decimal")}
+      {field("every n days", everyInput, setEveryInput, "14", "numeric")}
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="text-muted">last debit</span>
+        <input
+          type="date"
+          value={lastInput}
+          disabled={saving}
+          onChange={(e) => setLastInput(e.target.value)}
+          className={`${input} w-40 text-right`}
+        />
+      </label>
+      {clash && <p className="text-xs text-muted">name already in the list</p>}
       <div className="flex items-center gap-2 pt-1">
         <button
           type="button"
