@@ -13,7 +13,9 @@
  * draws are just these labels.
  */
 
+import { MAX_NAME as MAX_CAST_NAME } from "./gumarks";
 import { dayHeading } from "./meals";
+import { aud } from "./money";
 import { MAX_NOW_KEY, MAX_NOW_TEXT } from "./now";
 import { MAX_TEXT } from "./todo";
 
@@ -21,7 +23,9 @@ import { MAX_TEXT } from "./todo";
 export type QuickLogAction =
   | { kind: "weigh"; kg: number; day: string }
   | { kind: "todo"; text: string }
-  | { kind: "now"; key: string; text: string };
+  | { kind: "now"; key: string; text: string }
+  /** `stones` in cents, the gu book's unit. */
+  | { kind: "cast"; name: string; stones: number; day: string };
 
 /**
  * Sane bodyweight, in kilos. Tighter than the meal log's own storage bounds
@@ -40,6 +44,12 @@ const TODO = /^todo\s+(\S.*)$/i;
 
 /** `now <key> <the sentence>` — the front door's block, one line at a time. */
 const NOW = /^now\s+(\S+)\s+(\S.*)$/i;
+
+/** `cast <what> <dollars>` — the name is everything up to the last figure, so a
+ *  name may carry spaces, dashes and numbers of its own. */
+const CAST = /^cast\s+(\S.*?)\s+(\d+(?:\.\d{1,2})?)$/i;
+/** The book's stones bound — a cast of ten million dollars is a typo. */
+const MAX_STONES = 1e9;
 
 /** Read a palette query as a log line, or `null` for "this is not one". */
 export function parseQuickLog(
@@ -75,6 +85,16 @@ export function parseQuickLog(
     if (key && line) return { kind: "now", key, text: line };
   }
 
+  const cast = CAST.exec(text);
+  if (cast) {
+    // Refused past the cap, not clipped (the `now` precedent): the check-in
+    // folds a cast by its name, so a shortened one would never match its seal.
+    const name = cast[1].trim();
+    const stones = Math.round(Number(cast[2]) * 100);
+    if (name.length > MAX_CAST_NAME || stones >= MAX_STONES) return null;
+    if (name) return { kind: "cast", name, stones, day: today };
+  }
+
   return null;
 }
 
@@ -92,6 +112,8 @@ export function quickLogLabel(action: QuickLogAction): string {
       return `capture · ${action.text}`;
     case "now":
       return `set now · ${action.key} · ${clip(action.text)}`;
+    case "cast":
+      return `cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
   }
 }
 
@@ -105,5 +127,7 @@ export function quickLogSaved(action: QuickLogAction): string {
       return `saved ✓ captured · ${action.text}`;
     case "now":
       return `saved ✓ now · ${action.key} · ${clip(action.text)}`;
+    case "cast":
+      return `saved ✓ cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
   }
 }

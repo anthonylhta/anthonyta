@@ -2,11 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useVault } from "@/app/files/useVault";
+import { rememberSavedSeq } from "@/components/SeqAlarm";
 import { useMeals } from "@/components/useMeals";
 import { useTodo } from "@/components/useTodo";
+import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
 import { sydneyToday } from "@/lib/fin";
+import {
+  EMPTY_GU_MARKS,
+  normalizeGuMarks,
+  withFreeCast,
+  type GuMarksConfig,
+} from "@/lib/gumarks";
 import { setWeight } from "@/lib/meals";
 import { DEFAULT_NOW, normalizeNow, setLine, type NowConfig } from "@/lib/now";
+import { nextSeq } from "@/lib/seqrule";
 import {
   parseQuickLog,
   quickLogLabel,
@@ -65,6 +75,8 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       return <WeighRow action={action} onDone={onDone} onStage={onStage} />;
     if (action.kind === "todo")
       return <CaptureRow action={action} onDone={onDone} onStage={onStage} />;
+    if (action.kind === "cast")
+      return <CastRow action={action} onDone={onDone} onStage={onStage} />;
     return <NowRow action={action} onDone={onDone} onStage={onStage} />;
   }
 
@@ -79,7 +91,7 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       </li>
       {/* The section's one advertisement — the verbs, not a row to select. */}
       <li className="flex items-center justify-between px-3 py-2 text-sm text-muted">
-        <span className="truncate">w 67.4 · todo … · now …</span>
+        <span className="truncate">w 67.4 · todo … · now … · cast …</span>
         <span className="text-xs text-muted">type to log</span>
       </li>
     </>
@@ -195,6 +207,126 @@ function NowRow({
       if (!res.ok) return false;
       setCfg(next);
       return true;
+    },
+    onDone,
+    onStage,
+  });
+  return <ActionRow {...row} />;
+}
+
+/**
+ * The cast verb — a one-shot spend logged the moment it happens rather than
+ * hand-typed from the journal on Wednesday. It lands as a FREE cast in the gu
+ * book's marks (lib/gumarks), the envelope /gu already writes, and reads there
+ * as `unsealed` until the check-in folds it into the seal.
+ *
+ * The same seal → PUT → retry-once dance as /gu's own marks, inline like the
+ * now verb's store. It never reconciles: that needs the sealed document, which
+ * the palette doesn't open — and reconciling against nothing would retire every
+ * mark in the book. /gu retires what the seal caught up with the next time it
+ * opens.
+ */
+function CastRow({
+  action,
+  onDone,
+  onStage,
+}: {
+  action: Extract<QuickLogAction, { kind: "cast" }>;
+  onDone: () => void;
+  onStage: StageLog;
+}) {
+  const vault = useVault(false);
+  const { openItem, sealItem } = vault;
+  const unlocked = vault.status === "unlocked";
+  const [cfg, setCfg] = useState<GuMarksConfig | null>(null);
+  const [existed, setExisted] = useState(false);
+  const [dataErr, setDataErr] = useState(false);
+
+  const fetchMarks = useCallback(async (): Promise<{
+    cfg: GuMarksConfig;
+    existed: boolean;
+  }> => {
+    const res = await fetch("/api/gu-marks");
+    if (res.status === 404) return { cfg: EMPTY_GU_MARKS, existed: false };
+    if (res.status !== 200) throw new Error(`gu-marks: ${res.status}`);
+    const { bytes } = await openItem(
+      new Uint8Array(await res.arrayBuffer()),
+      GU_MARKS_CONTEXT,
+    );
+    const parsed = normalizeGuMarks(
+      JSON.parse(new TextDecoder().decode(bytes)),
+    );
+    if (!parsed) throw new Error("gu-marks: bad shape");
+    return { cfg: parsed, existed: true };
+  }, [openItem]);
+
+  useEffect(() => {
+    if (!unlocked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const loaded = await fetchMarks();
+        if (cancelled) return;
+        setCfg(loaded.cfg);
+        setExisted(loaded.existed);
+      } catch {
+        if (!cancelled) setDataErr(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [unlocked, fetchMarks]);
+
+  async function put(
+    base: GuMarksConfig,
+    overwrite: boolean,
+  ): Promise<GuMarksConfig | "conflict" | null> {
+    const next = withFreeCast(base, {
+      date: action.day,
+      name: action.name,
+      stones: action.stones,
+    });
+    // Unchanged means the list is at its cap — a refused write, not a ✓.
+    if (next === base) return null;
+    const written = { ...next, seq: Math.max(nextSeq(base), nextSeq(next)) };
+    const bytes = new TextEncoder().encode(JSON.stringify(written));
+    const sealed = await sealItem(
+      { n: "gu-marks.json", t: "application/json", s: bytes.length },
+      bytes,
+      GU_MARKS_CONTEXT,
+    );
+    const res = await fetch("/api/gu-marks", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/octet-stream",
+        ...(overwrite ? { "x-gu-marks-overwrite": "1" } : {}),
+      },
+      body: new Blob([sealed as BlobPart]),
+    });
+    if (res.status === 409) return "conflict";
+    if (!res.ok) return null;
+    rememberSavedSeq("gu-marks", written);
+    return written;
+  }
+
+  const row = useStaged({
+    action,
+    ready: cfg !== null,
+    storeErr: dataErr,
+    write: async () => {
+      if (!cfg) return false;
+      try {
+        let r = await put(cfg, existed);
+        // The phone and the desk may both have marked something meanwhile.
+        if (r === "conflict") r = await put((await fetchMarks()).cfg, true);
+        if (r === null || r === "conflict") return false;
+        setCfg(r);
+        setExisted(true);
+        return true;
+      } catch {
+        return false;
+      }
     },
     onDone,
     onStage,
