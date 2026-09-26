@@ -21,6 +21,7 @@ import { JOBS_PATH } from "./jobsstore";
 import { KEYSTORE_PATH } from "./inbox";
 import { LAYOUT_PATH } from "./layoutstore";
 import { MEALS_PATH } from "./mealsstore";
+import { STUDY_PATH } from "./studystore";
 import { PRF_WRAP_PATH } from "./prfstore";
 import { PUSH_PATH } from "./pushstore";
 import { classifyKey, partitionEstate, ROTATION_PATH } from "./rotationset";
@@ -108,6 +109,11 @@ describe("drift guards", () => {
       action: "rewrite",
       kind: "envelope",
       context: CIRCLE_PATH,
+    });
+    expect(classifyKey(STUDY_PATH)).toEqual({
+      action: "rewrite",
+      kind: "envelope",
+      context: STUDY_PATH,
     });
     // The aperture envelope: sealed by the sync script rather than a browser,
     // but MK-sealed AEV2 all the same — unclassified it silently blocked every

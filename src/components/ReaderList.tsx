@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { useStudy } from "@/components/useStudy";
 import { useTodo } from "@/components/useTodo";
 import {
   captureText,
@@ -153,6 +154,24 @@ export function ReaderList({
     null,
   );
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+
+  // "Studied" — a japan-lane headline into the E2EE study log, as today's
+  // sitting: the same hook the palette's `ja` verb writes through, offered on
+  // the same terms as the save beside it.
+  const study = useStudy(offline);
+  const [studyFlash, setStudyFlash] = useState<{
+    link: string;
+    ok: boolean;
+  } | null>(null);
+
+  async function studyItem(item: FeedItem) {
+    const ok = await study.log(item.title);
+    setStudyFlash({ link: item.link, ok });
+    setTimeout(
+      () => setStudyFlash((f) => (f?.link === item.link ? null : f)),
+      FLASH_MS,
+    );
+  }
 
   async function saveItem(item: FeedItem) {
     const ok = await todo.capture(captureText(item.title, item.link));
@@ -324,21 +343,53 @@ export function ReaderList({
                       </span>
                     </span>
                   </a>
-                  {/* Fixed width so "saved" doesn't shove the headline sideways. */}
+                  {/* Fixed width so "saved" doesn't shove the headline sideways;
+                      the japan lane's cell is wider for its second verb. */}
                   {todo.unlocked && (
-                    <button
-                      type="button"
-                      aria-label="save to needs doing"
-                      disabled={todo.busy}
-                      onClick={() => void saveItem(item)}
-                      className="w-16 shrink-0 py-2 pl-2 pr-4 text-right text-xs text-muted/60 transition-colors hover:text-amber disabled:opacity-40"
+                    <span
+                      className={`flex shrink-0 items-baseline ${
+                        lane.key === "japan" ? "w-24" : "w-16"
+                      }`}
                     >
-                      {flash?.link === item.link
-                        ? flash.ok
-                          ? "saved"
-                          : "!"
-                        : "+"}
-                    </button>
+                      {lane.key === "japan" && (
+                        <button
+                          type="button"
+                          aria-label="log as studied today"
+                          title="studied"
+                          disabled={study.busy}
+                          onClick={() => void studyItem(item)}
+                          className="shrink-0 whitespace-nowrap py-2 pl-2 text-xs text-muted/60 transition-colors hover:text-amber disabled:opacity-40"
+                        >
+                          {studyFlash?.link === item.link ? (
+                            studyFlash.ok ? (
+                              "logged"
+                            ) : (
+                              "!"
+                            )
+                          ) : (
+                            <span
+                              lang="ja"
+                              className="font-[family-name:var(--font-jp)]"
+                            >
+                              学
+                            </span>
+                          )}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        aria-label="save to needs doing"
+                        disabled={todo.busy}
+                        onClick={() => void saveItem(item)}
+                        className="flex-1 whitespace-nowrap py-2 pl-2 pr-4 text-right text-xs text-muted/60 transition-colors hover:text-amber disabled:opacity-40"
+                      >
+                        {flash?.link === item.link
+                          ? flash.ok
+                            ? "saved"
+                            : "!"
+                          : "+"}
+                      </button>
+                    </span>
                   )}
                 </div>
               ))}
