@@ -108,8 +108,13 @@ describe("parsePushConfig", () => {
         share: true,
         chores: true,
         health: true,
+        almanac: true,
       },
-      episodes: { steps: "2026-08-10", chores: "2026-08-18" },
+      episodes: {
+        steps: "2026-08-10",
+        chores: "2026-08-18",
+        almanac: "2026-08-20",
+      },
       health: { riichi: { fails: 2, told: true } },
     });
     expect(parsePushConfig(serializePushConfig(source))).toEqual(source);
@@ -146,6 +151,7 @@ describe("parsePushConfig", () => {
       share: true,
       chores: true,
       health: true,
+      almanac: true,
     });
   });
 
@@ -333,6 +339,7 @@ describe("category gating", () => {
 
   it("covers every declared category", () => {
     expect([...PUSH_CATEGORIES].sort()).toEqual([
+      "almanac",
       "chores",
       "dropbox",
       "health",
@@ -361,6 +368,15 @@ describe("category gating", () => {
     expect(categoryOn(one, "health")).toBe(true);
     expect(categoryOn(setCategory(one, "health", false), "health")).toBe(false);
     expect(categoryOn(EMPTY_PUSH_CONFIG, "health")).toBe(false);
+  });
+
+  it("gates the almanac push like the rest", () => {
+    const one = cfg({ subs: [sub()] });
+    expect(categoryOn(one, "almanac")).toBe(true);
+    expect(categoryOn(setCategory(one, "almanac", false), "almanac")).toBe(
+      false,
+    );
+    expect(categoryOn(EMPTY_PUSH_CONFIG, "almanac")).toBe(false);
   });
 });
 

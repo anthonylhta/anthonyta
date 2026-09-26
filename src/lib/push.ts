@@ -25,7 +25,8 @@ export type PushCategory =
   | "ingest"
   | "share"
   | "chores"
-  | "health";
+  | "health"
+  | "almanac";
 
 export const PUSH_CATEGORIES: readonly PushCategory[] = [
   "dropbox",
@@ -34,6 +35,7 @@ export const PUSH_CATEGORIES: readonly PushCategory[] = [
   "share",
   "chores",
   "health",
+  "almanac",
 ];
 
 /** The ingest sources the staleness alarm watches — everything the hub is fed by
@@ -48,14 +50,15 @@ export const INGEST_SOURCES: readonly IngestSource[] = [
 ];
 
 /** What the episodes map may be keyed by: one marker per ingest source, plus the
- *  maintenance digest's own. Two different meanings share the map (see
- *  `PushConfig.episodes`), but both are a day and both answer "have I said this
- *  already", so they share the bookkeeping. */
-export type EpisodeKey = IngestSource | "chores";
+ *  maintenance digest's and the almanac's own. Different meanings share the map
+ *  (see `PushConfig.episodes`), but all are a day and all answer "have I said
+ *  this already", so they share the bookkeeping. */
+export type EpisodeKey = IngestSource | "chores" | "almanac";
 
 export const EPISODE_KEYS: readonly EpisodeKey[] = [
   ...INGEST_SOURCES,
   "chores",
+  "almanac",
 ];
 
 /**
@@ -75,6 +78,7 @@ export const FIRED_KEYS: readonly FiredKey[] = [
   ...INGEST_SOURCES,
   "chores",
   "health",
+  "almanac",
 ];
 
 /** One sibling project's standing in the nightly health tripwire. Absent = that
@@ -115,6 +119,8 @@ export interface PushConfig {
    *    overdue upkeep has no episode identity — it just stays overdue, and the
    *    marker is what keeps a nightly job from saying so nightly
    *    (`checkChoresDigest`).
+   *  - `almanac` stores the day the window push last SENT — a same-day rerun
+   *    of the cron must not say it twice (`almanacpush.checkAlmanacWindows`).
    */
   episodes: Partial<Record<EpisodeKey, string>>;
   /**
@@ -191,6 +197,7 @@ export const EMPTY_PUSH_CONFIG: PushConfig = {
     share: true,
     chores: true,
     health: true,
+    almanac: true,
   },
   episodes: {},
   health: {},
