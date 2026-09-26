@@ -27,6 +27,7 @@ import {
   bookPageCount,
   bookStatus,
   castsThisMonth,
+  castsThisQuarter,
   detailStatus,
   experienceBudget,
   feedingDot,
@@ -41,10 +42,15 @@ import {
   ledgerEntries,
   ledgerPage,
 } from "@/lib/apertureview";
-import { lastInvestedDay, recoveredThisWeek } from "@/lib/fin";
+import {
+  lastInvestedDay,
+  recoveredThisWeek,
+  spentThisQuarter,
+} from "@/lib/fin";
 import { lastSessionDate, type GymConfig } from "@/lib/gym";
 import {
   EMPTY_GU_MARKS,
+  clearCast,
   normalizeGuMarks,
   reconcileMarks,
   unsealedCasts,
@@ -245,7 +251,11 @@ export function GuInner({
       if (cancelled) return;
       // Retire what the seal has caught up with. The write-back is best-effort:
       // the page already reads the settled record either way.
-      const settled = reconcileMarks(loaded.cfg, doc.sealed.refining ?? []);
+      const settled = reconcileMarks(
+        loaded.cfg,
+        doc.sealed.refining ?? [],
+        doc.sealed.consumables?.casts ?? [],
+      );
       setMarks(settled);
       setMarksExisted(loaded.existed);
       void checkSeqAndRemember("gu-marks", loaded.cfg).then((rolled) => {
@@ -273,7 +283,11 @@ export function GuInner({
       let r = await putMarks(apply(base), base, existed);
       if (r.state === "conflict") {
         const fresh = await fetchMarks();
-        base = reconcileMarks(fresh.cfg, doc.sealed.refining ?? []);
+        base = reconcileMarks(
+          fresh.cfg,
+          doc.sealed.refining ?? [],
+          doc.sealed.consumables?.casts ?? [],
+        );
         existed = true;
         r = await putMarks(apply(base), base, existed);
       }
@@ -309,6 +323,7 @@ export function GuInner({
     const all = [...(doc?.sealed.consumables?.casts ?? []), ...pending];
     return {
       month: castsThisMonth(all, today),
+      quarter: castsThisQuarter(all, today),
       ledger: ledgerEntries(all),
       unsealed: new Set(pending.map((c) => `${c.date}|${c.name}`)),
     };
@@ -359,6 +374,7 @@ export function GuInner({
         consumables.budgetPct,
       )
     : null;
+  const quarterSpent = fin ? spentThisQuarter(fin, today) : null;
 
   return (
     <>
@@ -403,6 +419,33 @@ export function GuInner({
             <span className="text-fg/80">{aud(casts.month.stones / 100)}</span>{" "}
             this month · regenerates with the week
           </p>
+          {/* The quarter against the DERIVED spend (lib/fin) — summed over the
+              quarter's knowable weeks, so the budget is the same share of what
+              actually went out. A plain read: no over/under word, no colour. */}
+          <p className="text-[11px] tabular-nums text-muted">
+            this quarter · cast{" "}
+            <span className="text-fg/80">
+              {aud(casts.quarter.stones / 100)}
+            </span>{" "}
+            {quarterSpent === null ? (
+              "· spend not yet known"
+            ) : (
+              <>
+                of{" "}
+                <span className="text-fg/80">
+                  {aud(
+                    (experienceBudget(
+                      quarterSpent.cents,
+                      consumables.budgetPct,
+                    ) ?? 0) / 100,
+                  )}
+                </span>{" "}
+                · {consumables.budgetPct}% of {aud(quarterSpent.cents / 100)}{" "}
+                spent over {quarterSpent.weeks} wk
+                {quarterSpent.weeks === 1 ? "" : "s"}
+              </>
+            )}
+          </p>
           <LedgerBand
             entries={casts.ledger}
             unsealed={casts.unsealed}
@@ -410,7 +453,7 @@ export function GuInner({
             onClear={
               busy
                 ? undefined
-                : (name) => saveMarks((b) => withCast(b, name, null))
+                : (name, date) => saveMarks((b) => clearCast(b, name, date))
             }
           />
           <Flavor>
@@ -693,7 +736,7 @@ function LedgerBand({
   entries: LedgerEntry[];
   unsealed: ReadonlySet<string>;
   today: string;
-  onClear?: (name: string) => void;
+  onClear?: (name: string, date: string) => void;
 }) {
   const [selKey, setSelKey] = useState<string | null>(null);
   const idBase = useId();
@@ -781,7 +824,7 @@ function LedgerBand({
               onSelect={() => select(row.entry.n - 1)}
               onClear={
                 onClear && unsealed.has(keyOf(row.entry))
-                  ? () => onClear(row.entry.cast.name)
+                  ? () => onClear(row.entry.cast.name, row.entry.cast.date)
                   : undefined
               }
             />
