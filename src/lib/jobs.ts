@@ -213,6 +213,36 @@ export function sortActive(apps: JobApp[]): JobApp[] {
     });
 }
 
+/** One quiet application as the command center's waiting-on row reads it. */
+export interface WaitingOn {
+  company: string;
+  role: string;
+  kind: JobEventKind;
+  days: number;
+}
+
+/** The active applications that have gone quiet — last event `quietDays` or
+ *  more ago — longest wait first, ties by company. Event-free rows are left out:
+ *  with no date there is no wait to name. Empty means the row says nothing. */
+export function waitingOn(
+  apps: JobApp[],
+  todayISO: string,
+  quietDays = QUIET_DAYS,
+): WaitingOn[] {
+  const out: WaitingOn[] = [];
+  for (const a of apps) {
+    if (!isActive(a)) continue;
+    const last = lastEvent(a);
+    if (last === null) continue;
+    const days = daysSince(last.date, todayISO);
+    if (days >= quietDays)
+      out.push({ company: a.company, role: a.role, kind: last.kind, days });
+  }
+  return out.sort(
+    (x, y) => y.days - x.days || x.company.localeCompare(y.company),
+  );
+}
+
 /** Closed rows newest first — the recent verdicts on top of the pile. */
 export function sortClosed(apps: JobApp[]): JobApp[] {
   return apps

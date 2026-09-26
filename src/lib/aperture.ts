@@ -185,6 +185,24 @@ export interface ApertureGlance {
   stage: string;
 }
 
+/** One dated almanac window as the plaintext windows file carries it. */
+export interface AlmanacWindow {
+  name: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * The second plaintext blob beside the glance: the almanac's WINDOWED lines,
+ * name and dates only, so the nightly cron can push when one opens without
+ * the seal. The world's calendar, not the owner's — nothing else rides here.
+ */
+export interface AlmanacWindowsFile {
+  v: 1;
+  sealedAt: string;
+  windows: AlmanacWindow[];
+}
+
 /** One tracked streak. `state` is open vocabulary; the counters are adjudicated. */
 export interface ApertureStreak {
   count: number;
@@ -1547,6 +1565,27 @@ export function normalizeApertureGlance(x: unknown): ApertureGlance | null {
   if (!isObj(x) || x.v !== 1 || !isInstant(x.sealedAt)) return null;
   if (!isPosInt(x.rank) || !isNonEmptyStr(x.stage)) return null;
   return { v: 1, sealedAt: x.sealedAt, rank: x.rank, stage: x.stage };
+}
+
+/**
+ * The plaintext windows blob → the file, or null on any wrong row. Stricter
+ * than the sealed normalizer on purpose: every row must carry a real window
+ * (both ends, same shape — the pairing rule), because a line without one has
+ * no business in the plaintext at all, and a half-read list would push some
+ * openings and silently drop others.
+ */
+export function normalizeAlmanacWindows(x: unknown): AlmanacWindowsFile | null {
+  if (!isObj(x) || x.v !== 1 || !isInstant(x.sealedAt)) return null;
+  const windows = normArray(x.windows, (w): AlmanacWindow | null => {
+    if (!isObj(w) || !isProse(w.name, MAX_TITLE_CHARS)) return null;
+    const { from, to } = w;
+    if (!isStr(from) || !isStr(to)) return null;
+    if (!(isDay(from) && isDay(to)) && !(isMonthDay(from) && isMonthDay(to)))
+      return null;
+    return { name: w.name, from, to };
+  });
+  if (windows === null || windows.length > MAX_ALMANAC) return null;
+  return { v: 1, sealedAt: x.sealedAt, windows };
 }
 
 // --- essence canon (colour is DERIVED from rank + stage, NEVER stored) --------

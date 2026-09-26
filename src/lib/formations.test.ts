@@ -115,6 +115,7 @@ describe("formations — the tripwires' firing ledger", () => {
       "silence",
       "upkeep",
       "health",
+      "almanac",
     ]);
     expect(detail?.find((d) => d.label === "mail")?.value).toBe("1d ago");
     expect(detail?.find((d) => d.label === "silence")?.value).toBe(
@@ -139,7 +140,16 @@ describe("formations — the tripwires' firing ledger", () => {
   it("a broken trio keeps its own headline — history is context, not cover", () => {
     const row = wires({ ...ev, vapid: "misconfigured" });
     expect(row?.last).toBe("push broken — see /system");
-    expect(row?.detail?.length).toBe(6);
+    expect(row?.detail?.length).toBe(7);
+  });
+
+  it("the almanac wire reads its own day", () => {
+    const row = wires({ ...ev, fired: { almanac: "2026-08-30" } });
+    expect(row?.detail?.find((d) => d.label === "almanac")).toEqual({
+      label: "almanac",
+      value: "2d ago",
+      fired: true,
+    });
   });
 
   it("old firings switch to the week register", () => {

@@ -41,6 +41,7 @@ import {
   toB64url,
   unwrapMk,
 } from "../src/lib/crypto";
+import { journalDateLint } from "../src/lib/journallint";
 import { deriveKekForKdf } from "../src/lib/kdf";
 import {
   buildManifest,
@@ -424,9 +425,18 @@ async function main(): Promise<void> {
   let uploaded = 0;
 
   const indexNotes: VaultIndexNote[] = [];
+  const dateWarnings: string[] = [];
   for (const note of notes) {
     const title = note.name.replace(/\.md$/i, "");
-    const preview = notePreview(new TextDecoder().decode(note.bytes));
+    const text = new TextDecoder().decode(note.bytes);
+    const preview = notePreview(text);
+    // warn-only: the filename is the truth, a drifted/missing field never blocks
+    const lint = journalDateLint(title, text);
+    if (lint?.kind === "drift")
+      dateWarnings.push(
+        `⚠ journal-date drift: ${note.name} says ${lint.found}`,
+      );
+    else if (lint) dateWarnings.push(`⚠ journal-date missing: ${note.name}`);
     if (priorH.get(note.id) !== note.h) {
       console.error(
         `  note ${indexNotes.length + 1}/${notes.length}: uploading ${title}`,
@@ -566,6 +576,12 @@ async function main(): Promise<void> {
   console.log(
     `synced: ${notes.length} notes, ${images.length} images (${uploaded} uploaded, ${pruned} pruned)`,
   );
+  if (dateWarnings.length > 0) {
+    for (const w of dateWarnings) console.error(w);
+    console.error(
+      `${dateWarnings.length} journal-date warning(s) — filenames are the truth`,
+    );
+  }
   process.exit(0);
 }
 

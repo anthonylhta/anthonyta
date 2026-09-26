@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getAlmanacWindowsRaw } from "@/lib/aperturestore";
 import { getStoredBriefing } from "@/lib/briefingstore";
 import { getChoreReads } from "@/lib/connectors/chores";
 import { probeHealth } from "@/lib/connectors/health";
@@ -9,6 +10,7 @@ import { isSnapIndex, sydneyDaysAgo, sydneyToday } from "@/lib/fin";
 import { getSnapIndex, putSnapIndex } from "@/lib/finstore";
 import {
   EMPTY_PUSH_CONFIG,
+  parsePushConfig,
   serializePushConfig,
   utcToday,
   type PushConfig,
@@ -49,6 +51,7 @@ vi.mock("@/lib/sleepstore", () => ({ getSleepRaw: vi.fn() }));
 vi.mock("@/lib/briefingstore", () => ({ getStoredBriefing: vi.fn() }));
 vi.mock("@/lib/connectors/chores", () => ({ getChoreReads: vi.fn() }));
 vi.mock("@/lib/connectors/health", () => ({ probeHealth: vi.fn() }));
+vi.mock("@/lib/aperturestore", () => ({ getAlmanacWindowsRaw: vi.fn() }));
 
 const req = () => new Request("http://localhost/api/cron/snapshot");
 
@@ -123,6 +126,7 @@ describe("snapshot cron route", () => {
       apertureSealedAt: null,
     });
     vi.mocked(probeHealth).mockResolvedValue({ ok: true, ms: 12 });
+    vi.mocked(getAlmanacWindowsRaw).mockResolvedValue({ state: "absent" });
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -413,6 +417,123 @@ describe("snapshot cron route", () => {
         "sleep last posted 4d ago",
         "briefing last posted 1d ago",
       ]);
+    });
+  });
+
+  describe("the almanac windows push", () => {
+    /** A windows file whose one window opens `inDays` from today (Sydney). */
+    const windowsOpening = (inDays: number) => {
+      const opens = new Date(
+        Date.parse(`${sydneyToday()}T00:00:00Z`) + inDays * 86_400_000,
+      )
+        .toISOString()
+        .slice(0, 10);
+      return {
+        state: "ok",
+        value: JSON.stringify({
+          v: 1,
+          sealedAt: "2026-09-24T21:00:00+10:00",
+          windows: [{ name: "JLPT registration", from: opens, to: opens }],
+        }),
+      } as const;
+    };
+
+    /** The calls the cron made under the "almanac" category. */
+    const almanacCalls = () =>
+      vi.mocked(deliver).mock.calls.filter((c) => c[1] === "almanac");
+
+    beforeEach(() => {
+      vi.mocked(pushConfigured).mockReturnValue(true);
+      vi.mocked(getPushRaw).mockResolvedValue({
+        state: "ok",
+        value: storedPush(),
+      });
+    });
+
+    it("buzzes the day a window opens, landing on /gu, and stamps the day", async () => {
+      vi.mocked(getAlmanacWindowsRaw).mockResolvedValue(windowsOpening(0));
+
+      const body = await (await GET(req())).json();
+      expect(body.almanac).toBe("written");
+      expect(almanacCalls().map((c) => [c[2], c[3]])).toEqual([
+        ["JLPT registration opens today", "/gu"],
+      ]);
+      const written = parsePushConfig(
+        vi.mocked(putPush).mock.calls.at(-1)?.[0] ?? "",
+      );
+      expect(written.episodes.almanac).toBe(body.date);
+      expect(written.fired.almanac).toBe(body.date);
+    });
+
+    it("buzzes a week before", async () => {
+      vi.mocked(getAlmanacWindowsRaw).mockResolvedValue(windowsOpening(7));
+
+      const body = await (await GET(req())).json();
+      expect(body.almanac).toBe("written");
+      expect(almanacCalls().map((c) => c[2])).toEqual([
+        "JLPT registration opens in 7 days",
+      ]);
+    });
+
+    it("stays quiet on any other day, writing nothing", async () => {
+      vi.mocked(getAlmanacWindowsRaw).mockResolvedValue(windowsOpening(3));
+
+      const body = await (await GET(req())).json();
+      expect(body.almanac).toBe("skipped");
+      expect(almanacCalls()).toEqual([]);
+      expect(putPush).not.toHaveBeenCalled();
+    });
+
+    it("never says it twice in one day", async () => {
+      vi.mocked(getAlmanacWindowsRaw).mockResolvedValue(windowsOpening(0));
+      vi.mocked(getPushRaw).mockResolvedValue({
+        state: "ok",
+        value: storedPush({ almanac: sydneyToday() }),
+      });
+
+      const body = await (await GET(req())).json();
+      expect(body.almanac).toBe("skipped");
+      expect(almanacCalls()).toEqual([]);
+    });
+
+    it("is silent when the windows file is absent, unreadable or malformed", async () => {
+      for (const read of [
+        { state: "absent" },
+        { state: "error" },
+        { state: "ok", value: "{not json" },
+        { state: "ok", value: JSON.stringify({ v: 1, windows: [] }) },
+      ] as const) {
+        vi.mocked(getAlmanacWindowsRaw).mockResolvedValue(read);
+        const body = await (await GET(req())).json();
+        expect(body.almanac).toBe("skipped");
+      }
+      expect(almanacCalls()).toEqual([]);
+    });
+
+    it("is silent with the category off, and never reads the file", async () => {
+      vi.mocked(getAlmanacWindowsRaw).mockResolvedValue(windowsOpening(0));
+      const cfg = parsePushConfig(storedPush());
+      vi.mocked(getPushRaw).mockResolvedValue({
+        state: "ok",
+        value: serializePushConfig({
+          ...cfg,
+          categories: { ...cfg.categories, almanac: false },
+        }),
+      });
+
+      const body = await (await GET(req())).json();
+      expect(body.almanac).toBe("skipped");
+      expect(getAlmanacWindowsRaw).not.toHaveBeenCalled();
+      expect(almanacCalls()).toEqual([]);
+    });
+
+    it("is off without VAPID", async () => {
+      vi.mocked(pushConfigured).mockReturnValue(false);
+      vi.mocked(getAlmanacWindowsRaw).mockResolvedValue(windowsOpening(0));
+
+      const body = await (await GET(req())).json();
+      expect(body.almanac).toBe("skipped");
+      expect(almanacCalls()).toEqual([]);
     });
   });
 });

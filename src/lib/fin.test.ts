@@ -21,8 +21,10 @@ import {
   monthToDateBaseline,
   normalizeFinConfig,
   pickBaseline,
+  quarterStart,
   recoveredThisWeek,
   removeDebit,
+  spentThisQuarter,
   spentThisWeek,
   weeklyFlow,
   SNAP_INDEX_MAX_DAYS,
@@ -561,6 +563,63 @@ describe("spentThisWeek / burnWeekly", () => {
     });
     expect(burnWeekly(short, TODAY)).toEqual({ cents: 70000, weeks: 2 });
     expect(burnWeekly(cfg2(), TODAY)).toBeNull();
+  });
+});
+
+describe("quarterStart / spentThisQuarter", () => {
+  const entry = (date: string, cash: number, hisa: number) => ({
+    date,
+    cash,
+    hisa,
+    rate: null,
+  });
+
+  it("reads the calendar quarter's first day", () => {
+    expect(quarterStart("2026-01-01")).toBe("2026-01-01");
+    expect(quarterStart("2026-03-31")).toBe("2026-01-01");
+    expect(quarterStart("2026-05-14")).toBe("2026-04-01");
+    expect(quarterStart("2026-09-25")).toBe("2026-07-01");
+    expect(quarterStart("2026-10-01")).toBe("2026-10-01");
+    expect(quarterStart("2026-12-31")).toBe("2026-10-01");
+  });
+
+  // Anchors back from 2026-10-22: 10-22 (week 10-16…), 10-15 (10-09…),
+  // 10-08 (10-02…); 10-01's week starts 09-25, over the quarter line.
+  const TODAY = "2026-10-22";
+  const cfg = cfg2({
+    income: [
+      { date: "2026-10-01", amountCents: 120000 },
+      { date: "2026-10-08", amountCents: 120000 },
+      { date: "2026-10-15", amountCents: 120000 },
+      { date: "2026-10-22", amountCents: 120000 },
+    ],
+    invested: [],
+    entries: [
+      entry("2026-09-24", 5000, 20000),
+      entry("2026-10-01", 5000, 20000), // flat → spent 1200 (straddles, never counted)
+      entry("2026-10-08", 5200, 20000), // +200 → 1000
+      entry("2026-10-15", 5100, 20000), // −100 → 1300
+      entry("2026-10-22", 5400, 20000), // +300 → 900
+    ],
+  });
+
+  it("sums the knowable weeks inside the quarter and says how many", () => {
+    expect(spentThisQuarter(cfg, TODAY)).toEqual({ cents: 320000, weeks: 3 });
+  });
+
+  it("skips an unknowable week rather than counting it as zero", () => {
+    const gap = cfg2({
+      ...cfg,
+      income: cfg.income!.filter((e) => e.date !== "2026-10-15"),
+    });
+    // 1000 + 900; the 10-15 week has no pay logged.
+    expect(spentThisQuarter(gap, TODAY)).toEqual({ cents: 190000, weeks: 2 });
+  });
+
+  it("is null before a single week of the quarter is knowable", () => {
+    // 10-05's week starts 09-29 — the quarter holds no whole week yet.
+    expect(spentThisQuarter(cfg, "2026-10-05")).toBeNull();
+    expect(spentThisQuarter(cfg2(), TODAY)).toBeNull();
   });
 });
 

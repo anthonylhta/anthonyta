@@ -27,6 +27,7 @@ import {
   bookStatus,
   castReading,
   castsThisMonth,
+  castsThisQuarter,
   ledgerEntries,
   ledgerMonthLabel,
   ledgerPage,
@@ -85,6 +86,7 @@ import {
   trialCountdown,
   STAGE_GLYPH,
   trialsSummary,
+  windowOpensOn,
   type FeedingRead,
 } from "./apertureview";
 
@@ -1324,6 +1326,30 @@ describe("apertureview — almanacGroups", () => {
   });
 });
 
+describe("apertureview — windowOpensOn", () => {
+  it("reads a recurring window's next opening on or after today", () => {
+    const jlpt = { from: "03-01", to: "03-20" };
+    expect(windowOpensOn(jlpt, "2026-09-25")).toBe("2027-03-01");
+    expect(windowOpensOn(jlpt, "2027-03-01")).toBe("2027-03-01");
+    expect(windowOpensOn(jlpt, "2027-02-22")).toBe("2027-03-01");
+    // Inside the window its opening is behind it — the next is a year on.
+    expect(windowOpensOn(jlpt, "2027-03-05")).toBe("2028-03-01");
+  });
+
+  it("reads a window that wraps the new year from its opening year", () => {
+    const summer = { from: "12-01", to: "02-28" };
+    expect(windowOpensOn(summer, "2026-11-24")).toBe("2026-12-01");
+    expect(windowOpensOn(summer, "2027-01-15")).toBe("2027-12-01");
+  });
+
+  it("reads a one-off as itself, and null once it has opened", () => {
+    const fringe = { from: "2026-09-01", to: "2026-09-30" };
+    expect(windowOpensOn(fringe, "2026-08-25")).toBe("2026-09-01");
+    expect(windowOpensOn(fringe, "2026-09-01")).toBe("2026-09-01");
+    expect(windowOpensOn(fringe, "2026-09-02")).toBeNull();
+  });
+});
+
 describe("apertureview — feedingDot", () => {
   const dot = (gu: ApertureGu, feeding: FeedingRead | null) =>
     feedingDot({ gu, feeding });
@@ -1478,6 +1504,34 @@ describe("apertureview — experienceBudget + castsThisMonth", () => {
       casts: [],
       stones: 0,
     });
+  });
+});
+
+describe("apertureview — castsThisQuarter", () => {
+  const casts = [
+    { date: "2026-06-30", name: "last quarter", stones: 9900 },
+    { date: "2026-07-01", name: "the quarter's first day", stones: 1500 },
+    { date: "2026-08-10", name: "a day off the road" },
+    { date: "2026-09-20", name: "the cinema", stones: 2400 },
+  ];
+
+  it("counts and sums the casts inside today's calendar quarter", () => {
+    expect(castsThisQuarter(casts, "2026-09-25")).toEqual({
+      casts: 3,
+      stones: 3900,
+    });
+    expect(castsThisQuarter(casts, "2026-06-30")).toEqual({
+      casts: 1,
+      stones: 9900,
+    });
+  });
+
+  it("reads a new quarter as empty, not as broken", () => {
+    expect(castsThisQuarter(casts, "2026-10-01")).toEqual({
+      casts: 0,
+      stones: 0,
+    });
+    expect(castsThisQuarter([], "2026-09-25")).toEqual({ casts: 0, stones: 0 });
   });
 });
 

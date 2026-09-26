@@ -1,4 +1,5 @@
 import type {
+  AlmanacWindowsFile,
   ApertureCondition,
   ApertureDoc,
   ApertureGlance,
@@ -43,6 +44,29 @@ export function apertureGlance(doc: ApertureDoc): ApertureGlance {
     rank: doc.public.rank,
     stage: doc.public.stage,
   };
+}
+
+/**
+ * The plaintext almanac windows: every sealed almanac line that carries a
+ * window, as its name and its two ends and NOTHING else — no source, note,
+ * feeds, tier, free or pair. The nightly cron reads this to push when a
+ * window opens (and a week before); it cannot open the seal, so the dates it
+ * speaks about have to land beside it. Names and dates of public-world events
+ * are the world's calendar, not the owner's, which is the whole licence for
+ * this file — anything more personal stays sealed.
+ *
+ * The document is already normalized, so a lone end or a mismatched pair was
+ * dropped there; a line without both ends simply isn't here. No windowed lines
+ * (or no almanac at all) is an empty list, never an absent file, so a seal that
+ * retires the last dated line also silences the pushes. `sealedAt` is copied
+ * like the glance's. `normalizeAlmanacWindows` is the read-side mirror.
+ */
+export function almanacWindows(doc: ApertureDoc): AlmanacWindowsFile {
+  const windows: AlmanacWindowsFile["windows"] = [];
+  for (const { name, from, to } of doc.sealed.almanac ?? [])
+    if (from !== undefined && to !== undefined)
+      windows.push({ name, from, to });
+  return { v: 1, sealedAt: doc.sealedAt, windows };
 }
 
 // --- the archive day ----------------------------------------------------------

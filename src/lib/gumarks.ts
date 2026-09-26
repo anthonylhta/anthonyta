@@ -20,11 +20,19 @@ import { isValidSeq } from "./seqrule";
  *
  * Keyed by the entry's NAME — the book has no ids, and the check-in already
  * treats the name as the identity it edits by.
+ *
+ * A cast of something never in the book — the cinema, a day trip, logged from
+ * the palette the moment it happens — has no entry to hang a mark off, so it
+ * lands in `casts[]` as a FREE cast: a dated name and its stones, nothing else.
+ * It rides the same fold: unsealed on /gu and in the check-in's counters until
+ * the seal carries a cast of the same day and name, then `reconcile` retires it.
  */
 
 export const GU_MARKS_MAX_BYTES = 65_536;
 /** Marks keyed by name; a book is capped at 200 and each name is short. */
 export const MAX_MARKS = 400;
+/** Free casts wait a week for the seal; a hundred is months of forgetting. */
+export const MAX_FREE_CASTS = 100;
 
 export interface GuCastMark {
   /** The day it was cast, `YYYY-MM-DD`. */
@@ -38,17 +46,29 @@ export interface GuMark {
   cast?: GuCastMark;
 }
 
+/** A cast of something the book never held, waiting on the seal. */
+export interface GuFreeCast {
+  /** The day it was cast, `YYYY-MM-DD`. */
+  date: string;
+  name: string;
+  /** What it cost, in cents. Absent = nothing typed (a free cast is real). */
+  stones?: number;
+}
+
 export interface GuMarksConfig {
   v: 1;
   /** The sealed write counter (ADR 0108's 58b) — see lib/seqrule. */
   seq?: number;
   marks: Record<string, GuMark>;
+  /** Free casts, oldest first. Absent until the first one. */
+  casts?: GuFreeCast[];
 }
 
 export const EMPTY_GU_MARKS: GuMarksConfig = { v: 1, marks: {} };
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const MAX_NAME = 200;
+/** A mark's key and a free cast's name share the one cap. */
+export const MAX_NAME = 200;
 
 function isObj(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x);
@@ -84,6 +104,20 @@ function normMark(x: unknown): GuMark | null {
   };
 }
 
+function normFreeCast(x: unknown): GuFreeCast | null {
+  if (!isObj(x) || !isDay(x.date)) return null;
+  const { name, stones } = x;
+  if (typeof name !== "string") return null;
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_NAME) return null;
+  if (stones !== undefined && !isStones(stones)) return null;
+  return {
+    date: x.date,
+    name: trimmed,
+    ...(stones !== undefined ? { stones } : {}),
+  };
+}
+
 /** The whole record → a config, or null when the FRAME is wrong. Strict: one
  *  bad mark rejects the record, the way every sealed config here rejects. */
 export function normalizeGuMarks(x: unknown): GuMarksConfig | null {
@@ -99,10 +133,20 @@ export function normalizeGuMarks(x: unknown): GuMarksConfig | null {
     if (m === null) return null;
     marks[name] = m;
   }
+  const casts: GuFreeCast[] = [];
+  if (x.casts !== undefined) {
+    if (!Array.isArray(x.casts) || x.casts.length > MAX_FREE_CASTS) return null;
+    for (const c of x.casts) {
+      const cast = normFreeCast(c);
+      if (cast === null) return null;
+      casts.push(cast);
+    }
+  }
   return {
     v: 1,
     ...(x.seq !== undefined ? { seq: x.seq as number } : {}),
     marks,
+    ...(casts.length > 0 ? { casts } : {}),
   };
 }
 
@@ -135,6 +179,39 @@ export function withCast(
   return replaceMark(cfg, name, next);
 }
 
+/** Log a free cast, newest last. Past the cap it is the SAME object back — a
+ *  refused write the caller reports, never a record the next load rejects. */
+export function withFreeCast(
+  cfg: GuMarksConfig,
+  cast: GuFreeCast,
+): GuMarksConfig {
+  const casts = cfg.casts ?? [];
+  if (casts.length >= MAX_FREE_CASTS) return cfg;
+  return { ...cfg, casts: [...casts, cast] };
+}
+
+/** Take back an unsealed cast, whichever kind it is: the book entry's cast
+ *  mark under that name, and any free cast of that name on that day. */
+export function clearCast(
+  cfg: GuMarksConfig,
+  name: string,
+  date: string,
+): GuMarksConfig {
+  const next = withCast(cfg, name, null);
+  if (!next.casts) return next;
+  return withCasts(
+    next,
+    next.casts.filter((c) => !(c.name === name && c.date === date)),
+  );
+}
+
+function withCasts(cfg: GuMarksConfig, casts: GuFreeCast[]): GuMarksConfig {
+  const next = { ...cfg };
+  if (casts.length > 0) next.casts = casts;
+  else delete next.casts;
+  return next;
+}
+
 function replaceMark(
   cfg: GuMarksConfig,
   name: string,
@@ -149,12 +226,14 @@ function replaceMark(
 /**
  * Retire marks the seal has caught up with: a name no longer in the book (the
  * check-in dropped it — cast folded in, or the entry refined into the held
- * list) loses its whole mark; an entry the seal now dates loses its `since`.
+ * list) loses its whole mark; an entry the seal now dates loses its `since`;
+ * a free cast the seal now carries — same day, same name — is folded, and goes.
  * Returns the SAME object when nothing changed, so a caller can skip the write.
  */
 export function reconcileMarks(
   cfg: GuMarksConfig,
   refining: readonly ApertureRefinement[],
+  sealedCasts: readonly ApertureCast[] = [],
 ): GuMarksConfig {
   const sealed = new Map(refining.map((r) => [r.name, r]));
   let changed = false;
@@ -172,11 +251,22 @@ export function reconcileMarks(
     }
     marks[name] = mark;
   }
-  return changed ? { ...cfg, marks } : cfg;
+  let casts = cfg.casts;
+  if (casts) {
+    const folded = new Set(sealedCasts.map((c) => `${c.date}|${c.name}`));
+    const kept = casts.filter((c) => !folded.has(`${c.date}|${c.name}`));
+    if (kept.length !== casts.length) {
+      changed = true;
+      casts = kept;
+    }
+  }
+  if (!changed) return cfg;
+  return withCasts({ ...cfg, marks }, casts ?? []);
 }
 
 /** The unsealed casts, as cast rows the meter can add to the month — typed
- *  with the entry's own type line so the fold reads like a sealed one. */
+ *  with the entry's own type line so the fold reads like a sealed one. The
+ *  free casts follow, untyped: the book never gave them a type line. */
 export function unsealedCasts(
   cfg: GuMarksConfig,
   refining: readonly ApertureRefinement[],
@@ -192,5 +282,6 @@ export function unsealedCasts(
       type: r.type,
     });
   }
+  for (const c of cfg.casts ?? []) out.push({ ...c });
   return out;
 }

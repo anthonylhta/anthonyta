@@ -218,12 +218,21 @@ describe("checkin — the six lines", () => {
   });
 });
 
+const WEALTH: NonNullable<CountersInput["wealth"]> = {
+  totalCents: 2000000,
+  investedCents: 1200000,
+  cashCents: 500000,
+  hisaCents: 300000,
+  weekDeltaCents: 25000,
+};
+
 const COUNTERS: CountersInput = {
   window: W,
   commitDays: 5,
   gymSessions: 2,
   mealDays: 6,
   marks: { since: [], casts: [] },
+  wealth: WEALTH,
 };
 
 describe("checkin — the counters", () => {
@@ -233,6 +242,7 @@ describe("checkin — the counters", () => {
         "Craft: +5 commit days (09-09..09-15, the github calendar)",
         "Japanese: ? study days",
         "Training: +2 sessions · Meals: +6 days logged",
+        "Net worth: $20,000 (invested $12,000 · cash $5,000 · HISA $3,000) · wk +$250",
         "gu marks unsealed: none · casts unsealed: none",
         "platform: ? (bait held · bar met · bar spoken)",
       ].join("\n"),
@@ -261,15 +271,45 @@ describe("checkin — the counters", () => {
         gymSessions: null,
         mealDays: null,
         marks: null,
+        wealth: null,
       }),
     ).toBe(
       [
         "Craft: ? commit days",
         "Japanese: ? study days",
         "Training: ? sessions · Meals: ? days logged",
+        "Net worth: ?",
         "gu marks unsealed: ? · casts unsealed: ?",
         "platform: ? (bait held · bar met · bar spoken)",
       ].join("\n"),
+    );
+  });
+
+  const wealthOf = (wealth: Partial<typeof WEALTH>) =>
+    countersBlock({ ...COUNTERS, wealth: { ...WEALTH, ...wealth } });
+
+  it("writes wk ? when the ledger does not reach back a week", () => {
+    expect(wealthOf({ weekDeltaCents: null })).toContain(
+      "Net worth: $20,000 (invested $12,000 · cash $5,000 · HISA $3,000) · wk ?",
+    );
+  });
+
+  it("signs the week's delta either way, +$0 for a flat week", () => {
+    expect(wealthOf({ weekDeltaCents: -250075 })).toContain("· wk -$2,501");
+    expect(wealthOf({ weekDeltaCents: 0 })).toContain("· wk +$0");
+    expect(wealthOf({ weekDeltaCents: -40 })).toContain("· wk +$0");
+  });
+
+  it("rounds cents to whole dollars and groups the thousands", () => {
+    expect(
+      wealthOf({
+        totalCents: 123456789,
+        investedCents: 49,
+        cashCents: 50,
+        hisaCents: 99999,
+      }),
+    ).toContain(
+      "Net worth: $1,234,568 (invested $0 · cash $1 · HISA $1,000) · wk +$250",
     );
   });
 });

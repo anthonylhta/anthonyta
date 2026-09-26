@@ -5,7 +5,11 @@ import {
   ROTATION_CONTEXT,
 } from "./aevcontext";
 import { AGENDA_PATH } from "./agendastore";
-import { APERTURE_GLANCE_PATH, APERTURE_PATH } from "./aperturestore";
+import {
+  ALMANAC_WINDOWS_PATH,
+  APERTURE_GLANCE_PATH,
+  APERTURE_PATH,
+} from "./aperturestore";
 import { AUTHLOG_PATH } from "./authlogstore";
 import { BRIEFING_PATH } from "./briefingstore";
 import { BACKUP_STAMP_PATH } from "./chores";
@@ -115,6 +119,7 @@ describe("drift guards", () => {
     });
     expect(APERTURE_CONTEXT).toBe(APERTURE_PATH);
     expect(classifyKey(APERTURE_GLANCE_PATH).action).toBe("skip");
+    expect(classifyKey(ALMANAC_WINDOWS_PATH).action).toBe("skip");
   });
 });
 
