@@ -790,6 +790,25 @@ export function castsThisMonth(
   };
 }
 
+/**
+ * How many casts fell inside today's calendar quarter (Jan/Apr/Jul/Oct 1st on) and
+ * what they cost together — the figure the quarter's spend is read against. Same
+ * Sydney-day anchoring as `castsThisMonth`.
+ */
+export function castsThisQuarter(
+  casts: ApertureCast[],
+  todayISO: string,
+): { casts: number; stones: number } {
+  const month = Number(todayISO.slice(5, 7));
+  const first = month - ((month - 1) % 3);
+  const start = `${todayISO.slice(0, 4)}-${String(first).padStart(2, "0")}-01`;
+  const inQuarter = casts.filter((c) => c.date >= start && c.date <= todayISO);
+  return {
+    casts: inQuarter.length,
+    stones: inQuarter.reduce((sum, c) => sum + (c.stones ?? 0), 0),
+  };
+}
+
 // --- the cast ledger (ADR 0176) --------------------------------------------------
 
 /** One cast as the ledger reads it: the cast itself, its running number in

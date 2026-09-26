@@ -17,6 +17,7 @@ import {
   sectSearch,
   sortActive,
   sortClosed,
+  waitingOn,
   type JobApp,
   type JobsConfig,
 } from "./jobs";
@@ -163,6 +164,47 @@ describe("jobs — reading the log", () => {
     expect(filterApps(apps, "PLATFORM")).toHaveLength(1);
     expect(filterApps(apps, "  ")).toHaveLength(2);
     expect(filterApps(apps, "zzz")).toHaveLength(0);
+  });
+});
+
+describe("jobs — waitingOn", () => {
+  const today = "2026-09-25";
+
+  it("names active rows quiet 14+ days, longest wait first, ties by company", () => {
+    const deloitte = app(
+      "d",
+      "Deloitte",
+      [
+        { date: "2026-08-20", kind: "applied" },
+        { date: "2026-09-04", kind: "assessment" },
+      ],
+      "graduate",
+    );
+    const acme = app("a", "Acme", [{ date: "2026-09-11", kind: "applied" }]);
+    const beta = app("b", "Beta", [{ date: "2026-09-11", kind: "applied" }]);
+    const old = app("o", "Old", [{ date: "2026-08-01", kind: "screen" }]);
+    expect(waitingOn([acme, deloitte, beta, old], today)).toEqual([
+      { company: "Old", role: "engineer", kind: "screen", days: 55 },
+      { company: "Deloitte", role: "graduate", kind: "assessment", days: 21 },
+      { company: "Acme", role: "engineer", kind: "applied", days: 14 },
+      { company: "Beta", role: "engineer", kind: "applied", days: 14 },
+    ]);
+  });
+
+  it("leaves out fresh, closed and event-free rows", () => {
+    const fresh = app("f", "Fresh", [{ date: "2026-09-12", kind: "applied" }]);
+    const closed = app("c", "Closed", [
+      { date: "2026-07-01", kind: "applied" },
+      { date: "2026-07-10", kind: "rejected" },
+    ]);
+    const blank = app("n", "None", []);
+    expect(waitingOn([fresh, closed, blank], today)).toEqual([]);
+    expect(waitingOn([], today)).toEqual([]);
+  });
+
+  it("takes a custom threshold", () => {
+    const fresh = app("f", "Fresh", [{ date: "2026-09-12", kind: "applied" }]);
+    expect(waitingOn([fresh], today, 7)).toHaveLength(1);
   });
 });
 

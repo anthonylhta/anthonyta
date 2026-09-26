@@ -124,6 +124,55 @@ describe("parseQuickLog — the front-door verb", () => {
   });
 });
 
+describe("parseQuickLog — the cast verb", () => {
+  it("reads the last figure as dollars and the rest as the name", () => {
+    expect(parseQuickLog("cast the cinema — Resident Evil 0", TODAY)).toEqual({
+      kind: "cast",
+      name: "the cinema — Resident Evil",
+      stones: 0,
+      day: TODAY,
+    });
+    expect(parseQuickLog("cast karaoke 25.50", TODAY)).toEqual({
+      kind: "cast",
+      name: "karaoke",
+      stones: 2550,
+      day: TODAY,
+    });
+  });
+
+  it("takes any case, trims, and keeps a name's own numbers", () => {
+    expect(parseQuickLog("  CAST   Resident Evil 2   18.5 ", TODAY)).toEqual({
+      kind: "cast",
+      name: "Resident Evil 2",
+      stones: 1850,
+      day: TODAY,
+    });
+  });
+
+  it("is not an action until there is a name and a figure", () => {
+    expect(parseQuickLog("cast", TODAY)).toBeNull();
+    expect(parseQuickLog("cast   ", TODAY)).toBeNull();
+    expect(parseQuickLog("cast karaoke", TODAY)).toBeNull();
+    expect(parseQuickLog("cast 25", TODAY)).toBeNull();
+    expect(parseQuickLog("cast karaoke 25.505", TODAY)).toBeNull();
+    expect(parseQuickLog("cast karaoke $25", TODAY)).toBeNull();
+  });
+
+  it("refuses a name past the cap rather than clipping it", () => {
+    expect(parseQuickLog(`cast ${"x".repeat(201)} 5`, TODAY)).toBeNull();
+    expect(parseQuickLog(`cast ${"x".repeat(200)} 5`, TODAY)).toEqual({
+      kind: "cast",
+      name: "x".repeat(200),
+      stones: 500,
+      day: TODAY,
+    });
+  });
+
+  it("refuses a figure past the book's stones bound", () => {
+    expect(parseQuickLog("cast a car 10000000", TODAY)).toBeNull();
+  });
+});
+
 describe("parseQuickLog — everything else is navigation", () => {
   it("leaves an ordinary query alone", () => {
     expect(parseQuickLog("", TODAY)).toBeNull();
@@ -156,6 +205,27 @@ describe("quickLogLabel", () => {
   });
 });
 
+describe("quickLogLabel — the cast", () => {
+  it("spells out the cast with its stones and day", () => {
+    expect(
+      quickLogLabel({
+        kind: "cast",
+        name: "karaoke",
+        stones: 2550,
+        day: TODAY,
+      }),
+    ).toBe("cast · karaoke · $25.50 · tue 15 sep");
+    expect(
+      quickLogLabel({
+        kind: "cast",
+        name: "the cinema",
+        stones: 0,
+        day: TODAY,
+      }),
+    ).toBe("cast · the cinema · $0.00 · tue 15 sep");
+  });
+});
+
 describe("quickLogSaved", () => {
   it("marks the weigh-in written", () => {
     expect(quickLogSaved({ kind: "weigh", kg: 67, day: TODAY })).toBe(
@@ -173,5 +243,16 @@ describe("quickLogSaved", () => {
     expect(
       quickLogSaved({ kind: "now", key: "reading", text: "a new serial" }),
     ).toBe("saved ✓ now · reading · a new serial");
+  });
+
+  it("marks the cast written", () => {
+    expect(
+      quickLogSaved({
+        kind: "cast",
+        name: "karaoke",
+        stones: 2550,
+        day: TODAY,
+      }),
+    ).toBe("saved ✓ cast · karaoke · $25.50 · tue 15 sep");
   });
 });
