@@ -17,6 +17,7 @@ import { MAX_NAME as MAX_CAST_NAME } from "./gumarks";
 import { dayHeading } from "./meals";
 import { aud } from "./money";
 import { MAX_NOW_KEY, MAX_NOW_TEXT } from "./now";
+import { MAX_STUDY_MINUTES, MAX_STUDY_SOURCE } from "./study";
 import { MAX_TEXT } from "./todo";
 
 /** One parsed log line — the write the section will make on ↵. */
@@ -25,7 +26,8 @@ export type QuickLogAction =
   | { kind: "todo"; text: string }
   | { kind: "now"; key: string; text: string }
   /** `stones` in cents, the gu book's unit. */
-  | { kind: "cast"; name: string; stones: number; day: string };
+  | { kind: "cast"; name: string; stones: number; day: string }
+  | { kind: "study"; source: string; minutes?: number; day: string };
 
 /**
  * Sane bodyweight, in kilos. Tighter than the meal log's own storage bounds
@@ -51,6 +53,10 @@ const CAST = /^cast\s+(\S.*?)\s+(\d+(?:\.\d{1,2})?)$/i;
 /** The book's stones bound — a cast of ten million dollars is a typo. */
 const MAX_STONES = 1e9;
 
+/** `ja <what was studied>` with an optional trailing `20m` / `20 min`. */
+const JA = /^ja\s+(\S.*)$/i;
+const JA_MINUTES = /^(?:(.*?)\s+)?(\d+)\s*(?:m|min)$/i;
+
 /** Read a palette query as a log line, or `null` for "this is not one". */
 export function parseQuickLog(
   query: string,
@@ -71,6 +77,29 @@ export function parseQuickLog(
     // captured rather than a line the store will quietly shorten.
     const clean = todo[1].trim().slice(0, MAX_TEXT);
     if (clean) return { kind: "todo", text: clean };
+  }
+
+  const ja = JA.exec(text);
+  if (ja) {
+    let source = ja[1].trim();
+    let minutes: number | undefined;
+    const timed = JA_MINUTES.exec(source);
+    if (timed) {
+      minutes = Number(timed[2]);
+      // A sitting of no minutes, or ten hours, is a typo — refused, not logged.
+      if (minutes < 1 || minutes > MAX_STUDY_MINUTES) return null;
+      source = (timed[1] ?? "").trim();
+    }
+    // Clipped to the log's own cap, the `todo` way; a bare duration names
+    // nothing studied, so it is not a line yet.
+    source = source.slice(0, MAX_STUDY_SOURCE);
+    if (source)
+      return {
+        kind: "study",
+        source,
+        ...(minutes !== undefined ? { minutes } : {}),
+        day: today,
+      };
   }
 
   const now = NOW.exec(text);
@@ -114,7 +143,15 @@ export function quickLogLabel(action: QuickLogAction): string {
       return `set now · ${action.key} · ${clip(action.text)}`;
     case "cast":
       return `cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
+    case "study":
+      return `study · ${studyText(action)}`;
   }
+}
+
+/** A sitting's middle — what, how long when said, and the day. */
+function studyText(action: Extract<QuickLogAction, { kind: "study" }>): string {
+  const mins = action.minutes !== undefined ? ` · ${action.minutes} min` : "";
+  return `${clip(action.source)}${mins} · ${dayHeading(action.day)}`;
 }
 
 /** The same row once it is written — held for a beat before the palette closes,
@@ -129,5 +166,7 @@ export function quickLogSaved(action: QuickLogAction): string {
       return `saved ✓ now · ${action.key} · ${clip(action.text)}`;
     case "cast":
       return `saved ✓ cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
+    case "study":
+      return `saved ✓ study · ${studyText(action)}`;
   }
 }

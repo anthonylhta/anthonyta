@@ -231,6 +231,7 @@ const COUNTERS: CountersInput = {
   commitDays: 5,
   gymSessions: 2,
   mealDays: 6,
+  studyDays: ["2026-09-10", "2026-09-13"],
   marks: { since: [], casts: [] },
   wealth: WEALTH,
 };
@@ -240,12 +241,18 @@ describe("checkin — the counters", () => {
     expect(countersBlock(COUNTERS)).toBe(
       [
         "Craft: +5 commit days (09-09..09-15, the github calendar)",
-        "Japanese: ? study days",
+        "Japanese: +2 study days (09-10, 09-13)",
         "Training: +2 sessions · Meals: +6 days logged",
         "Net worth: $20,000 (invested $12,000 · cash $5,000 · HISA $3,000) · wk +$250",
         "gu marks unsealed: none · casts unsealed: none",
         "platform: ? (bait held · bar met · bar spoken)",
       ].join("\n"),
+    );
+  });
+
+  it("counts a week with no sittings as +0, not ?", () => {
+    expect(countersBlock({ ...COUNTERS, studyDays: [] })).toContain(
+      "Japanese: +0 study days",
     );
   });
 
@@ -270,6 +277,7 @@ describe("checkin — the counters", () => {
         commitDays: null,
         gymSessions: null,
         mealDays: null,
+        studyDays: null,
         marks: null,
         wealth: null,
       }),

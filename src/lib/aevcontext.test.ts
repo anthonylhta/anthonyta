@@ -11,6 +11,7 @@ import {
   GYM_CONTEXT,
   JOBS_CONTEXT,
   MEALS_CONTEXT,
+  STUDY_CONTEXT,
   TODO_CONTEXT,
   TOTP_CONTEXT,
   TRANSIT_CONTEXT,
@@ -24,6 +25,7 @@ import { GU_MARKS_PATH } from "./gumarksstore";
 import { GYM_PATH } from "./gymstore";
 import { JOBS_PATH } from "./jobsstore";
 import { MEALS_PATH } from "./mealsstore";
+import { STUDY_PATH } from "./studystore";
 import { TODO_PATH } from "./todostore";
 import { TOTP_PATH } from "./totpstore";
 import { TRANSIT_PATH } from "./transitstore";
@@ -39,6 +41,7 @@ const STORES = [
   { name: "jobs", ctx: JOBS_CONTEXT, path: JOBS_PATH },
   { name: "gu-marks", ctx: GU_MARKS_CONTEXT, path: GU_MARKS_PATH },
   { name: "circle", ctx: CIRCLE_CONTEXT, path: CIRCLE_PATH },
+  { name: "study", ctx: STUDY_CONTEXT, path: STUDY_PATH },
 ];
 
 const meta: EnvelopeMeta = { n: "x.json", t: "application/json", s: 3 };

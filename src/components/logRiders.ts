@@ -1,8 +1,9 @@
 "use client";
 
-import { GYM_CONTEXT, MEALS_CONTEXT } from "@/lib/aevcontext";
+import { GYM_CONTEXT, MEALS_CONTEXT, STUDY_CONTEXT } from "@/lib/aevcontext";
 import { normalizeGymConfig, type GymConfig } from "@/lib/gym";
 import { normalizeMealsConfig, type MealsConfig } from "@/lib/meals";
+import { EMPTY_STUDY, normalizeStudy, type StudyConfig } from "@/lib/study";
 import {
   isVaultIndex,
   VAULT_INDEX_PATH,
@@ -11,8 +12,8 @@ import {
 
 /**
  * logRiders — the sealed logs an inward surface opens beside the document: the
- * gym log (`meta/gym`), the meal log (`meta/meals`) and the vault's note index
- * (`vault/index`, the journal's edge). Lifted out of the
+ * gym log (`meta/gym`), the meal log (`meta/meals`), the Japanese study log
+ * (`meta/study`) and the vault's note index (`vault/index`, the journal's edge). Lifted out of the
  * inward page when the gu compendium wanted the same fetch → decrypt → normalize
  * walk for its feeding clocks, on the `useApertureDoc` precedent — one copy of
  * the rider doctrine, not two.
@@ -73,6 +74,26 @@ export async function mealsConfig(
     );
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     return normalizeMealsConfig(parsed);
+  } catch {
+    return null;
+  }
+}
+
+/** The Japanese study log, opened once. A healthy 404 is a log with no
+ *  sittings yet — read as empty, so the check-in counts `+0` rather than `?`. */
+export async function studyConfig(
+  openItem: Opener,
+): Promise<StudyConfig | null> {
+  try {
+    const res = await fetch("/api/study");
+    if (res.status === 404) return EMPTY_STUDY;
+    if (res.status !== 200) return null;
+    const { bytes } = await openItem(
+      new Uint8Array(await res.arrayBuffer()),
+      STUDY_CONTEXT,
+    );
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return normalizeStudy(parsed);
   } catch {
     return null;
   }

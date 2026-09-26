@@ -231,6 +231,9 @@ export interface CountersInput {
   commitDays: number | null;
   gymSessions: number | null;
   mealDays: number | null;
+  /** The distinct days the study log holds inside the window, oldest first;
+   *  null until the log has answered. */
+  studyDays: string[] | null;
   /** The gu book's pending marks; null until the marks store has answered. */
   marks: { since: string[]; casts: { name: string; date: string }[] } | null;
   /** Net worth off the fin envelope, all in cents; null while it is locked. The
@@ -259,9 +262,15 @@ export function countersBlock(input: CountersInput): string {
     input.mealDays === null
       ? "? days logged"
       : `+${input.mealDays} days logged`;
+  const japanese =
+    input.studyDays === null
+      ? "? study days"
+      : input.studyDays.length === 0
+        ? "+0 study days"
+        : `+${input.studyDays.length} study days (${input.studyDays.map(md).join(", ")})`;
   return [
     `Craft: ${craft}`,
-    "Japanese: ? study days",
+    `Japanese: ${japanese}`,
     `Training: ${training} · Meals: ${meals}`,
     `Net worth: ${wealthLine(input.wealth)}`,
     `gu marks unsealed: ${marksLine(input.marks)}`,
