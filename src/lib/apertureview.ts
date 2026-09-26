@@ -566,10 +566,43 @@ function dayWord(iso: string): string {
 }
 
 /**
- * Where today falls against an entry's window. A recurring window is read as
- * its occurrences around today (last year's, this year's, next year's — a
- * window that wraps the new year opens in one year and closes in the next);
- * a one-off is itself. ISO days compare as strings, so containment needs no
+ * A window's occurrences around today as [opens, closes] ISO pairs. A
+ * recurring window is read as last year's, this year's and next year's — a
+ * window that wraps the new year opens in one year and closes in the next; a
+ * one-off is itself.
+ */
+function windowOccurrences(
+  from: string,
+  to: string,
+  todayISO: string,
+): [string, string][] {
+  if (from.length !== 5) return [[from, to]];
+  const year = Number(todayISO.slice(0, 4));
+  const wraps = to < from;
+  return [year - 1, year, year + 1].map((y) => [
+    `${y}-${from}`,
+    `${wraps ? y + 1 : y}-${to}`,
+  ]);
+}
+
+/**
+ * The ISO day a window next opens, on or after today — null for a one-off
+ * whose opening is already behind it. The almanac pushes (the cron) read this
+ * against today and today + 7; ISO days compare as strings, so no clock.
+ */
+export function windowOpensOn(
+  entry: { from: string; to: string },
+  todayISO: string,
+): string | null {
+  let best: string | null = null;
+  for (const [opens] of windowOccurrences(entry.from, entry.to, todayISO))
+    if (opens >= todayISO && (best === null || opens < best)) best = opens;
+  return best;
+}
+
+/**
+ * Where today falls against an entry's window, read across its occurrences
+ * (`windowOccurrences`). ISO days compare as strings, so containment needs no
  * clock; only the "opens within sixty days" read counts days.
  */
 function almanacWindow(
@@ -578,15 +611,7 @@ function almanacWindow(
 ): { state: "ripe" | "next" | "off"; opens: string; closes: string } | null {
   const { from, to } = entry;
   if (from === undefined || to === undefined) return null;
-  const year = Number(todayISO.slice(0, 4));
-  let occurrences: [string, string][];
-  if (from.length === 5) {
-    const wraps = to < from;
-    occurrences = [year - 1, year, year + 1].map((y) => [
-      `${y}-${from}`,
-      `${wraps ? y + 1 : y}-${to}`,
-    ]);
-  } else occurrences = [[from, to]];
+  const occurrences = windowOccurrences(from, to, todayISO);
   for (const [opens, closes] of occurrences)
     if (opens <= todayISO && todayISO <= closes)
       return { state: "ripe", opens, closes };
@@ -762,6 +787,25 @@ export function castsThisMonth(
   return {
     casts: inMonth,
     stones: inMonth.reduce((sum, c) => sum + (c.stones ?? 0), 0),
+  };
+}
+
+/**
+ * How many casts fell inside today's calendar quarter (Jan/Apr/Jul/Oct 1st on) and
+ * what they cost together — the figure the quarter's spend is read against. Same
+ * Sydney-day anchoring as `castsThisMonth`.
+ */
+export function castsThisQuarter(
+  casts: ApertureCast[],
+  todayISO: string,
+): { casts: number; stones: number } {
+  const month = Number(todayISO.slice(5, 7));
+  const first = month - ((month - 1) % 3);
+  const start = `${todayISO.slice(0, 4)}-${String(first).padStart(2, "0")}-01`;
+  const inQuarter = casts.filter((c) => c.date >= start && c.date <= todayISO);
+  return {
+    casts: inQuarter.length,
+    stones: inQuarter.reduce((sum, c) => sum + (c.stones ?? 0), 0),
   };
 }
 

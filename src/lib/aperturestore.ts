@@ -11,7 +11,7 @@ import { readKey, type StoreRead } from "./r2";
  * Like every connector (ADR 0003) it degrades rather than throws: no `R2_*` env
  * (local dev, CI) → the store is off and both reads report "error".
  *
- * Two paths, two shapes of opacity — finstore's precedent (`meta/fin` ciphertext
+ * Three paths, two shapes of opacity — finstore's precedent (`meta/fin` ciphertext
  * beside a plaintext `meta/snap/index.json`), for the same reason:
  *   - `meta/aperture` — the AEV2 envelope, raw ciphertext bytes the server never
  *     parses; the owner's browser opens it under the master key.
@@ -19,6 +19,10 @@ import { readKey, type StoreRead } from "./r2";
  *     unsealed so the band draws before any unlock. It is the ONE part of the
  *     status the seal doesn't cover, which is why it holds nothing but rank,
  *     stage, and the seal's timestamp.
+ *   - `meta/almanac-windows.json` — the almanac's windowed lines as name + two
+ *     dates, the same bargain for the nightly cron: it cannot open the seal,
+ *     so the world's calendar it pushes about lands beside it
+ *     (`aperturesync.almanacWindows`), and nothing personal does.
  *
  * The three-state read matters here exactly as it does everywhere else: "absent"
  * is ONLY a genuine NoSuchKey (nothing synced yet), never a flaky fetch or a
@@ -29,6 +33,7 @@ import { readKey, type StoreRead } from "./r2";
 
 export const APERTURE_PATH = "meta/aperture";
 export const APERTURE_GLANCE_PATH = "meta/aperture-glance.json";
+export const ALMANAC_WINDOWS_PATH = "meta/almanac-windows.json";
 
 /**
  * Read the raw sealed envelope bytes, three-state. Only moves bytes: the server
@@ -45,6 +50,16 @@ export function getAperture(): Promise<StoreRead<Uint8Array>> {
  */
 export async function getApertureGlanceRaw(): Promise<StoreRead<string>> {
   const read = await readKey(APERTURE_GLANCE_PATH);
+  if (read.state !== "ok") return read;
+  return { state: "ok", value: new TextDecoder().decode(read.value) };
+}
+
+/**
+ * Read the raw plaintext almanac windows JSON, three-state — the glance
+ * reader's twin; the caller owns the shape (`normalizeAlmanacWindows`).
+ */
+export async function getAlmanacWindowsRaw(): Promise<StoreRead<string>> {
+  const read = await readKey(ALMANAC_WINDOWS_PATH);
   if (read.state !== "ok") return read;
   return { state: "ok", value: new TextDecoder().decode(read.value) };
 }

@@ -32,6 +32,7 @@ import {
   bookPageCount,
   bookStatus,
   castsThisMonth,
+  castsThisQuarter,
   detailStatus,
   experienceBudget,
   feedingDot,
@@ -46,7 +47,12 @@ import {
   ledgerEntries,
   ledgerPage,
 } from "@/lib/apertureview";
-import { debitDays, lastInvestedDay, recoveredThisWeek } from "@/lib/fin";
+import {
+  debitDays,
+  lastInvestedDay,
+  recoveredThisWeek,
+  spentThisQuarter,
+} from "@/lib/fin";
 import { lastSessionDate, type GymConfig } from "@/lib/gym";
 import {
   EMPTY_GU_MARKS,
@@ -332,6 +338,7 @@ export function GuInner({
     const all = [...(doc?.sealed.consumables?.casts ?? []), ...pending];
     return {
       month: castsThisMonth(all, today),
+      quarter: castsThisQuarter(all, today),
       ledger: ledgerEntries(all),
       unsealed: new Set(pending.map((c) => `${c.date}|${c.name}`)),
     };
@@ -382,6 +389,7 @@ export function GuInner({
         consumables.budgetPct,
       )
     : null;
+  const quarterSpent = fin ? spentThisQuarter(fin, today) : null;
 
   return (
     <>
@@ -425,6 +433,33 @@ export function GuInner({
             this wk · spent{" "}
             <span className="text-fg/80">{aud(casts.month.stones / 100)}</span>{" "}
             this month · regenerates with the week
+          </p>
+          {/* The quarter against the DERIVED spend (lib/fin) — summed over the
+              quarter's knowable weeks, so the budget is the same share of what
+              actually went out. A plain read: no over/under word, no colour. */}
+          <p className="text-[11px] tabular-nums text-muted">
+            this quarter · cast{" "}
+            <span className="text-fg/80">
+              {aud(casts.quarter.stones / 100)}
+            </span>{" "}
+            {quarterSpent === null ? (
+              "· spend not yet known"
+            ) : (
+              <>
+                of{" "}
+                <span className="text-fg/80">
+                  {aud(
+                    (experienceBudget(
+                      quarterSpent.cents,
+                      consumables.budgetPct,
+                    ) ?? 0) / 100,
+                  )}
+                </span>{" "}
+                · {consumables.budgetPct}% of {aud(quarterSpent.cents / 100)}{" "}
+                spent over {quarterSpent.weeks} wk
+                {quarterSpent.weeks === 1 ? "" : "s"}
+              </>
+            )}
           </p>
           <LedgerBand
             entries={casts.ledger}

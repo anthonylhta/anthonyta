@@ -173,6 +173,14 @@ export const CENTER_UNITS: UnitDef[] = [
       { key: "health", label: "project health (riichi / webnovel / ishin)" },
     ],
   },
+  // The job hunt's exception row: silent until an open application has gone
+  // quiet past QUIET_DAYS, and silent on a locked vault (the ledger is sealed).
+  {
+    key: "jobs",
+    zone: "today",
+    label: "jobs (quiet applications)",
+    modules: [{ key: "jobs", label: "jobs (quiet applications)" }],
+  },
 ];
 
 /**

@@ -31,12 +31,15 @@
  *      destroys the only other copy of that document, so this write goes first and
  *      a failure aborts with nothing changed. This is what makes the weekly
  *      overwrite non-destructive: every seal survives at its date (ADR 0116).
- *   5. Write the two objects the render side reads:
+ *   5. Write the three objects the site reads:
  *        · `meta/aperture` — the AEV2 envelope (AAD = APERTURE_CONTEXT), whose
  *          plaintext is the whole document as JSON; the owner's browser opens it and
  *          re-validates with `normalizeAperture`.
  *        · `meta/aperture-glance.json` — the plaintext rank/stage/sealedAt glance the
  *          band draws before any unlock.
+ *        · `meta/almanac-windows.json` — the almanac's windowed lines as name +
+ *          from/to only, which the nightly cron pushes about (an empty list when
+ *          nothing is windowed, so retiring the last dated line silences it).
  *      Plain overwrites: this script is the store's SINGLE writer, so there is no
  *      no-clobber dance and no conflict to resolve.
  *   6. Archive THIS seal at its own dated key too, so the record carries the
@@ -55,8 +58,13 @@ import path from "node:path";
 
 import { APERTURE_CONTEXT, apertureHistPath } from "../src/lib/aevcontext";
 import { normalizeAperture, type ApertureDoc } from "../src/lib/aperture";
-import { APERTURE_GLANCE_PATH, APERTURE_PATH } from "../src/lib/aperturestore";
 import {
+  ALMANAC_WINDOWS_PATH,
+  APERTURE_GLANCE_PATH,
+  APERTURE_PATH,
+} from "../src/lib/aperturestore";
+import {
+  almanacWindows,
   apertureGlance,
   diffSummary,
   explainApertureRejection,
@@ -355,6 +363,19 @@ async function main(): Promise<void> {
   if (glanced !== "ok")
     throw new Error(
       `envelope sealed, glance write FAILED (${glanced}) — rerun to converge`,
+    );
+
+  // 6b. the almanac windows beside it, same overwrite — the cron's plaintext
+  // read of the world's calendar. Same convergence story as the glance.
+  const windowsBody = JSON.stringify(almanacWindows(doc));
+  console.error("· writing the almanac windows…");
+  const windowed = await writeKey(ALMANAC_WINDOWS_PATH, windowsBody, {
+    overwrite: true,
+    contentType: "application/json",
+  });
+  if (windowed !== "ok")
+    throw new Error(
+      `envelope + glance written, almanac windows write FAILED (${windowed}) — rerun to converge`,
     );
 
   // 7. this seal's own dated copy, LAST — the two live objects the band reads are
