@@ -181,6 +181,14 @@ export const CENTER_UNITS: UnitDef[] = [
     label: "jobs (quiet applications)",
     modules: [{ key: "jobs", label: "jobs (quiet applications)" }],
   },
+  // The fin ledger's exception row: silent while a pay-in sits in the trailing
+  // 7 days (the derived burn's week), and silent on a locked vault.
+  {
+    key: "pay",
+    zone: "today",
+    label: "pay-in (fin)",
+    modules: [{ key: "pay", label: "pay-in (fin)" }],
+  },
 ];
 
 /**

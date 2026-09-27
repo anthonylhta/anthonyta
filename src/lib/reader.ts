@@ -377,17 +377,37 @@ export function isMuted(item: FeedItem, prefs: ReaderPrefs): boolean {
   return hasWord(item, prefs.mute);
 }
 
+/** The journal-affinity floor (share of a headline's weighable trigrams found in
+ *  the last two weeks of daily notes) a row must clear to rise. Below it a shared
+ *  word or two is coincidence, and the row keeps its feed place. */
+export const AFFINITY_MIN = 0.35;
+
+/** Whether a row overlaps the journal enough to lift — owner-only, after unlock. */
+export function isLifted(
+  item: FeedItem,
+  affinity: Map<string, number> | undefined,
+): boolean {
+  return (affinity?.get(item.link) ?? 0) >= AFFINITY_MIN;
+}
+
 /** A lane's rows under the device's words: muted rows leave (counted), boosted
- *  rows rise to the top in their existing order, the rest keep theirs. A mute
- *  wins over a boost — hiding is the stronger wish. */
+ *  rows rise to the top in their existing order, then rows overlapping the
+ *  journal (best first), then the rest in theirs. A mute wins over a boost —
+ *  hiding is the stronger wish. */
 export function rankLane(
   items: FeedItem[],
   prefs: ReaderPrefs,
+  affinity?: Map<string, number>,
 ): { shown: FeedItem[]; muted: number } {
   const kept = items.filter((i) => !isMuted(i, prefs));
+  const rest = kept.filter((i) => !isBoosted(i, prefs));
+  const score = (i: FeedItem) => affinity?.get(i.link) ?? 0;
   const shown = [
     ...kept.filter((i) => isBoosted(i, prefs)),
-    ...kept.filter((i) => !isBoosted(i, prefs)),
+    ...rest
+      .filter((i) => isLifted(i, affinity))
+      .sort((a, b) => score(b) - score(a)),
+    ...rest.filter((i) => !isLifted(i, affinity)),
   ];
   return { shown, muted: items.length - kept.length };
 }

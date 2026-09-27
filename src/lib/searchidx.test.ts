@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  affinityOf,
   buildIndex,
   deserializeIndex,
   emptyIndex,
   highlightSegments,
+  idf,
   indexStats,
   INDEX_VERSION,
   MAX_POSITIONS_PER_TOKEN,
+  overlapScores,
   query,
+  relatedDocs,
   removeDoc,
   serializeIndex,
   trigrams,
@@ -381,5 +385,71 @@ describe("highlightSegments", () => {
       { text: "東京", hit: false },
       { text: "タワー", hit: true },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// overlap — related notes + journal affinity
+// ---------------------------------------------------------------------------
+
+describe("overlap", () => {
+  // Every note carries the same frontmatter and most share the walk line, so those
+  // trigrams sit past the half-corpus ceiling; only "quokkaberry" / "zephyrine" are rare.
+  const fm = "---\ntags: journal\n---\n";
+  const notes: IndexDoc[] = [
+    {
+      id: "a",
+      title: "2026-01-01",
+      text: fm + "walked at dusk. quokkaberry ridge with zephyrine",
+    },
+    {
+      id: "b",
+      title: "2026-01-02",
+      text: fm + "zephyrine found the quokkaberry ridge again",
+    },
+    { id: "c", title: "2026-01-03", text: fm + "walked at dusk." },
+    { id: "d", title: "2026-01-04", text: fm + "walked at dusk. rain" },
+    { id: "e", title: "2026-01-05", text: fm + "walked at dusk. tired" },
+    { id: "f", title: "2026-01-06", text: fm + "groceries and laundry" },
+  ];
+  const idx = buildIndex(notes);
+
+  it("weighs a rare trigram above a common one, and zeroes past half the corpus", () => {
+    expect(idf(idx, "lau")).toBeGreaterThan(idf(idx, "quo")); // rarer weighs more
+    expect(idf(idx, "quo")).toBeGreaterThan(idf(idx, "wal"));
+    expect(idf(idx, "tag")).toBe(0); // in every note
+    expect(idf(idx, "wal")).toBe(0); // in 4 of 6
+    expect(idf(idx, "zzz")).toBe(0); // absent
+  });
+
+  it("ranks the note sharing rare words first and never returns itself", () => {
+    const rel = relatedDocs(idx, "a");
+    expect(rel[0].id).toBe("b");
+    expect(rel.map((r) => r.id)).not.toContain("a");
+    // c shares only ceiling-zeroed trigrams with a — it weighs nothing.
+    expect(rel.map((r) => r.id)).not.toContain("c");
+  });
+
+  it("drops docs below the shared-trigram floor", () => {
+    const q = idx.docTokens.get("a")!;
+    expect(overlapScores(idx, q, { exclude: "a" }).has("b")).toBe(true);
+    expect(overlapScores(idx, q, { exclude: "a", minShared: 1000 }).size).toBe(
+      0,
+    );
+  });
+
+  it("returns nothing for an unknown id", () => {
+    expect(relatedDocs(idx, "ghost")).toEqual([]);
+  });
+
+  it("bounds affinity to [0, 1] and lifts a headline reusing a journal's rare word", () => {
+    expect(affinityOf(idx, ["a"], "")).toBe(0);
+    expect(affinityOf(idx, [], "quokkaberry")).toBe(0);
+    expect(affinityOf(idx, ["a"], "quokkaberry")).toBe(1);
+    const hit = affinityOf(idx, ["a", "b"], "Quokkaberry season opens early");
+    const miss = affinityOf(idx, ["a", "b"], "Markets slide on rate fears");
+    expect(hit).toBeGreaterThan(miss);
+    expect(hit).toBeLessThanOrEqual(1);
+    expect(miss).toBeGreaterThanOrEqual(0);
   });
 });

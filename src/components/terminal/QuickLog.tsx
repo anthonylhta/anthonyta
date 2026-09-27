@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useVault } from "@/app/files/useVault";
+import { useFin } from "@/app/portfolio/useFin";
 import { rememberSavedSeq } from "@/components/SeqAlarm";
 import { useMeals } from "@/components/useMeals";
 import { useStudy } from "@/components/useStudy";
 import { useTodo } from "@/components/useTodo";
 import { GU_MARKS_CONTEXT } from "@/lib/aevcontext";
-import { sydneyToday } from "@/lib/fin";
+import { sydneyToday, upsertIncome } from "@/lib/fin";
 import {
   EMPTY_GU_MARKS,
   normalizeGuMarks,
@@ -81,6 +82,8 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       return <CastRow action={action} onDone={onDone} onStage={onStage} />;
     if (action.kind === "study")
       return <StudyRow action={action} onDone={onDone} onStage={onStage} />;
+    if (action.kind === "pay")
+      return <PayRow action={action} onDone={onDone} onStage={onStage} />;
     return <NowRow action={action} onDone={onDone} onStage={onStage} />;
   }
 
@@ -96,7 +99,7 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       {/* The section's one advertisement — the verbs, not a row to select. */}
       <li className="flex items-center justify-between px-3 py-2 text-sm text-muted">
         <span className="truncate">
-          w 67.4 · todo … · ja … · now … · cast …
+          w 67.4 · todo … · ja … · now … · cast … · pay 1234
         </span>
         <span className="text-xs text-muted">type to log</span>
       </li>
@@ -175,6 +178,39 @@ function StudyRow({
           date: action.day,
           source: action.source,
           ...(action.minutes !== undefined ? { minutes: action.minutes } : {}),
+        }),
+      ),
+    onDone,
+    onStage,
+  });
+  return <ActionRow {...row} />;
+}
+
+/**
+ * The pay verb, over the fin ledger — the same store and save as the pay field
+ * on /portfolio, so a pay-in logged on payday keeps the derived burn honest
+ * (ADR 0185) without opening the page. Like that field it REPLACES the day's
+ * row (`upsertIncome`): a second `pay` today corrects the figure, never adds.
+ */
+function PayRow({
+  action,
+  onDone,
+  onStage,
+}: {
+  action: Extract<QuickLogAction, { kind: "pay" }>;
+  onDone: () => void;
+  onStage: StageLog;
+}) {
+  const fin = useFin(false);
+  const row = useStaged({
+    action,
+    ready: fin.cfg !== null,
+    storeErr: fin.dataErr !== null,
+    write: () =>
+      fin.save((base) =>
+        upsertIncome(base, {
+          date: action.day,
+          amountCents: action.amountCents,
         }),
       ),
     onDone,

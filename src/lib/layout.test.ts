@@ -39,6 +39,7 @@ const TODAY_DEFAULT = [
   "arena",
   "health",
   "jobs",
+  "pay",
 ];
 
 describe("unit / module registries", () => {
@@ -407,12 +408,12 @@ describe("moveUnit + canMove", () => {
   });
 
   it("never crosses a zone boundary", () => {
-    // weather opens TODAY and jobs closes it: up is a no-op, not a promotion
+    // weather opens TODAY and pay closes it: up is a no-op, not a promotion
     // into the pinned row above, and down is a no-op, not a fall off the end.
     expect(moveUnit(EMPTY_LAYOUT, "center", "weather", -1)).toEqual(
       EMPTY_LAYOUT,
     );
-    expect(moveUnit(EMPTY_LAYOUT, "center", "jobs", 1)).toEqual(EMPTY_LAYOUT);
+    expect(moveUnit(EMPTY_LAYOUT, "center", "pay", 1)).toEqual(EMPTY_LAYOUT);
   });
 
   it("refuses to move a fixed or unknown unit", () => {
@@ -434,7 +435,7 @@ describe("moveUnit + canMove", () => {
   it("canMove greys the arrows at the zone edges", () => {
     expect(canMove(EMPTY_LAYOUT, "center", "weather", -1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "weather", 1)).toBe(true);
-    expect(canMove(EMPTY_LAYOUT, "center", "jobs", 1)).toBe(false);
+    expect(canMove(EMPTY_LAYOUT, "center", "pay", 1)).toBe(false);
     expect(canMove(EMPTY_LAYOUT, "center", "dropbox", 1)).toBe(false);
   });
 

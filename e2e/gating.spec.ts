@@ -497,6 +497,12 @@ test.describe("guest gating", () => {
     expect((await request.get("/api/cron/snapshot")).status()).toBe(401);
   });
 
+  test("the backup cron rejects an unauthenticated call", async ({
+    request,
+  }) => {
+    expect((await request.get("/api/cron/backup")).status()).toBe(401);
+  });
+
   // The pageview recorder is the OTHER deliberately public surface (with share
   // links): the beacon POSTs here without auth. It must NOT 404 — but it must also
   // leak nothing, always answering an empty 204 whatever the input. There is no
