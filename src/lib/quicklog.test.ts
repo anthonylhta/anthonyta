@@ -174,6 +174,52 @@ describe("parseQuickLog — the cast verb", () => {
   });
 });
 
+describe("parseQuickLog — the pay verb", () => {
+  it("reads whole dollars and cents as today's pay-in", () => {
+    expect(parseQuickLog("pay 1000", TODAY)).toEqual({
+      kind: "pay",
+      amountCents: 100000,
+      day: TODAY,
+    });
+    expect(parseQuickLog("  PAY   1000.5 ", TODAY)).toEqual({
+      kind: "pay",
+      amountCents: 100050,
+      day: TODAY,
+    });
+    expect(parseQuickLog("pay 1000.25", TODAY)).toEqual({
+      kind: "pay",
+      amountCents: 100025,
+      day: TODAY,
+    });
+  });
+
+  it("is not an action until there is exactly one figure", () => {
+    expect(parseQuickLog("pay", TODAY)).toBeNull();
+    expect(parseQuickLog("pay   ", TODAY)).toBeNull();
+    expect(parseQuickLog("pay 1000.255", TODAY)).toBeNull();
+    expect(parseQuickLog("pay $1000", TODAY)).toBeNull();
+    expect(parseQuickLog("pay 1000 bonus", TODAY)).toBeNull();
+    expect(parseQuickLog("payday", TODAY)).toBeNull();
+  });
+
+  it("refuses a pay of nothing or past the bound", () => {
+    expect(parseQuickLog("pay 0", TODAY)).toBeNull();
+    expect(parseQuickLog("pay 0.00", TODAY)).toBeNull();
+    expect(parseQuickLog("pay 10000000", TODAY)).toBeNull();
+    expect(parseQuickLog("pay 0.01", TODAY)).toEqual({
+      kind: "pay",
+      amountCents: 1,
+      day: TODAY,
+    });
+  });
+
+  it("labels the row and the ✓", () => {
+    const action = { kind: "pay" as const, amountCents: 100000, day: TODAY };
+    expect(quickLogLabel(action)).toBe("pay $1,000.00 · today");
+    expect(quickLogSaved(action)).toBe("saved ✓ logged $1,000.00 pay");
+  });
+});
+
 describe("parseQuickLog — everything else is navigation", () => {
   it("leaves an ordinary query alone", () => {
     expect(parseQuickLog("", TODAY)).toBeNull();
