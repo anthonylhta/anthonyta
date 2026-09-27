@@ -159,7 +159,7 @@ export function quickLogLabel(action: QuickLogAction): string {
     case "study":
       return `study · ${studyText(action)}`;
     case "pay":
-      return `pay ${aud(action.amountCents / 100)} · today`;
+      return `pay · ${aud(action.amountCents / 100)} · ${dayHeading(action.day)}`;
   }
 }
 
@@ -184,6 +184,6 @@ export function quickLogSaved(action: QuickLogAction): string {
     case "study":
       return `saved ✓ study · ${studyText(action)}`;
     case "pay":
-      return `saved ✓ logged ${aud(action.amountCents / 100)} pay`;
+      return `saved ✓ pay · ${aud(action.amountCents / 100)} · ${dayHeading(action.day)}`;
   }
 }

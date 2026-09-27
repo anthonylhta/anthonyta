@@ -215,8 +215,8 @@ describe("parseQuickLog — the pay verb", () => {
 
   it("labels the row and the ✓", () => {
     const action = { kind: "pay" as const, amountCents: 100000, day: TODAY };
-    expect(quickLogLabel(action)).toBe("pay $1,000.00 · today");
-    expect(quickLogSaved(action)).toBe("saved ✓ logged $1,000.00 pay");
+    expect(quickLogLabel(action)).toBe("pay · $1,000.00 · tue 15 sep");
+    expect(quickLogSaved(action)).toBe("saved ✓ pay · $1,000.00 · tue 15 sep");
   });
 });
 
