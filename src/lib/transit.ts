@@ -15,6 +15,12 @@
  *     `coord: [lat, lon]`. `normalizeStopFinder` does the flip exactly once.
  *   - Times stay the ISO strings TfNSW returns; only `fmtSydneyTime` turns
  *     them into wall-clock text, always in Australia/Sydney.
+ *
+ * The leave-by pick (the command center's "make the shift" line) rides on two
+ * owner-word constants — `SHIFT_START_HM` and `SHIFT_ARRIVE_MARGIN_MIN` — and
+ * on `sydneyAnchor`, which turns a Sydney wall-clock time into an instant
+ * without trusting the device's zone (the shift is at 15:00 in Sydney, AEST or
+ * AEDT, wherever the browser thinks it is).
  */
 
 import { isValidSeq } from "./seqrule";
@@ -702,6 +708,89 @@ export function glanceSummary(result: TripResult): GlanceSummary | null {
     cancelled: journey.cancelled,
     live: journey.live,
   };
+}
+
+// ---------------------------------------------------------------------------
+// leave-by — the last run that still makes the shift
+// ---------------------------------------------------------------------------
+
+/** The owner's shift start, Sydney wall clock. His word (3pm–11pm), not
+ *  derived from anything — change it here when the roster changes. */
+export const SHIFT_START_HM = "15:00";
+/** Arrive this many minutes before the shift (15:00 → arrive by 14:50). */
+export const SHIFT_ARRIVE_MARGIN_MIN = 10;
+
+/** Sydney wall-clock `YYYY-MM-DD` + `HH:MM` → the instant. Unlike
+ *  `anchorFromParts` this never trusts the device clock's zone: guess the
+ *  instant as if Sydney were UTC, read what Sydney's clock says at the guess,
+ *  and shift by the difference — twice, so a guess that lands across a DST
+ *  change (AEST +10 ↔ AEDT +11) settles on the right side. */
+export function sydneyAnchor(ymd: string, hm: string): Date {
+  const [y, mo, d] = ymd.split("-").map(Number);
+  const [h, mi] = hm.split(":").map(Number);
+  const wanted = Date.UTC(y, mo - 1, d, h, mi);
+  let at = wanted;
+  for (let i = 0; i < 2; i++) {
+    const { date, time } = sydneyDateTime(new Date(at));
+    const seen = Date.UTC(
+      +date.slice(0, 4),
+      +date.slice(4, 6) - 1,
+      +date.slice(6, 8),
+      +time.slice(0, 2),
+      +time.slice(2, 4),
+    );
+    at += wanted - seen;
+  }
+  return new Date(at);
+}
+
+/** Today's arrive-by instant for the shift, or null when the line is moot:
+ *  at/after the shift start, or in the small hours (before 04:00) so a tab
+ *  left open overnight doesn't plan for a shift that already happened. */
+export function shiftTarget(now: Date): Date | null {
+  const { date, time } = sydneyDateTime(now);
+  if (time < "0400" || time >= SHIFT_START_HM.replace(":", "")) return null;
+  const ymd = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
+  const start = sydneyAnchor(ymd, SHIFT_START_HM);
+  return new Date(start.getTime() - SHIFT_ARRIVE_MARGIN_MIN * 60_000);
+}
+
+export interface LeaveBy {
+  depTime: string;
+  arriveTime: string;
+  line: string | null;
+  platform: string | null;
+  from: string | null;
+}
+
+/** From an arrive-by plan, the LATEST departure that still arrives by
+ *  `targetISO` (est over planned on both ends); cancelled runs never count.
+ *  Null when nothing makes it. */
+export function leaveBy(result: TripResult, targetISO: string): LeaveBy | null {
+  const target = Date.parse(targetISO);
+  let best: LeaveBy | null = null;
+  let bestMs = -Infinity;
+  for (const j of result.journeys) {
+    if (j.cancelled) continue;
+    const arriveTime = j.arriveEst ?? j.arrivePlanned;
+    if (!arriveTime || !(Date.parse(arriveTime) <= target)) continue;
+    const leg = j.legs.find((l) => l.kind === "transit") ?? null;
+    const depTime =
+      (leg ? (leg.from.timeEst ?? leg.from.timePlanned) : null) ??
+      j.departEst ??
+      j.departPlanned;
+    const depMs = depTime ? Date.parse(depTime) : NaN;
+    if (!depTime || Number.isNaN(depMs) || depMs <= bestMs) continue;
+    bestMs = depMs;
+    best = {
+      depTime,
+      arriveTime,
+      line: leg?.line ?? null,
+      platform: leg?.from.platform ?? null,
+      from: leg?.from.name ?? null,
+    };
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
