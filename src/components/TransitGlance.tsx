@@ -232,20 +232,32 @@ export function TransitGlance({ offline }: { offline: boolean }) {
       {leave &&
         (leave.pick ? (
           <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted">
-            <span>
-              leave by{" "}
-              <span className="font-semibold tabular-nums text-fg">
-                {fmtSydneyTime(leave.pick.depTime)}
-              </span>{" "}
-              ·
-            </span>
-            {leave.pick.line && (
-              <span className="border border-hairline px-1 text-fg">
-                {leave.pick.line}
-              </span>
-            )}
-            {leave.pick.platform && <span>plat {leave.pick.platform}</span>}
-            <span>· arrives {fmtSydneyTime(leave.pick.arriveTime)}</span>
+            {[
+              <span key="dep">
+                leave by{" "}
+                <span className="font-semibold tabular-nums text-fg">
+                  {fmtSydneyTime(leave.pick.depTime)}
+                </span>
+              </span>,
+              leave.pick.line && (
+                <span
+                  key="line"
+                  className="border border-hairline px-1 text-fg"
+                >
+                  {leave.pick.line}
+                </span>
+              ),
+              leave.pick.platform && (
+                <span key="plat">plat {leave.pick.platform}</span>
+              ),
+              <span key="arr">
+                arrives {fmtSydneyTime(leave.pick.arriveTime)}
+              </span>,
+            ]
+              .filter(Boolean)
+              .flatMap((part, i) =>
+                i === 0 ? [part] : [<span key={`sep${i}`}>·</span>, part],
+              )}
           </span>
         ) : (
           <span className="text-xs text-muted">
