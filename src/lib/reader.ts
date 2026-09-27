@@ -377,10 +377,11 @@ export function isMuted(item: FeedItem, prefs: ReaderPrefs): boolean {
   return hasWord(item, prefs.mute);
 }
 
-/** The journal-affinity floor (share of a headline's weighable trigrams found in
- *  the last two weeks of daily notes) a row must clear to rise. Below it a shared
- *  word or two is coincidence, and the row keeps its feed place. */
-export const AFFINITY_MIN = 0.35;
+/** The journal-affinity floor: how many of a headline's RARE trigrams the last
+ *  two weeks of daily notes must carry before the row rises — about one longer
+ *  word or two short ones. Below it a shared syllable is coincidence, and the row
+ *  keeps its feed place. */
+export const AFFINITY_MIN = 6;
 
 /** Whether a row overlaps the journal enough to lift — owner-only, after unlock. */
 export function isLifted(

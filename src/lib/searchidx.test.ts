@@ -442,14 +442,17 @@ describe("overlap", () => {
     expect(relatedDocs(idx, "ghost")).toEqual([]);
   });
 
-  it("bounds affinity to [0, 1] and lifts a headline reusing a journal's rare word", () => {
+  it("counts a headline's rare trigrams the journal carries, and nothing common", () => {
     expect(affinityOf(idx, ["a"], "")).toBe(0);
     expect(affinityOf(idx, [], "quokkaberry")).toBe(0);
-    expect(affinityOf(idx, ["a"], "quokkaberry")).toBe(1);
+    // nine trigrams, all in a (and b) — rare, since only two of six notes carry them
+    expect(affinityOf(idx, ["a"], "quokkaberry")).toBe(9);
+    // "walked at dusk" is in four of six notes: shared, but never rare
+    expect(affinityOf(idx, ["a", "b"], "walked at dusk")).toBe(0);
     const hit = affinityOf(idx, ["a", "b"], "Quokkaberry season opens early");
     const miss = affinityOf(idx, ["a", "b"], "Markets slide on rate fears");
-    expect(hit).toBeGreaterThan(miss);
-    expect(hit).toBeLessThanOrEqual(1);
-    expect(miss).toBeGreaterThanOrEqual(0);
+    expect(hit).toBeGreaterThanOrEqual(9);
+    // a syllable in common is not a lift: well under the reader floor of 6
+    expect(miss).toBeLessThan(3);
   });
 });

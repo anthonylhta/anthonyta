@@ -379,10 +379,23 @@ export function relatedDocs(
     .slice(0, k);
 }
 
+/** A trigram is RARE when it sits in at most this share of the corpus (never
+ *  fewer than two notes, so a tiny corpus still has a notion of rare). */
+export const RARE_DF_SHARE = 0.05;
+
+function isRare(index: TrigramIndex, trigram: string): boolean {
+  const df = index.inverted.get(trigram)?.size ?? 0;
+  const cap = Math.max(2, Math.ceil(index.docMeta.size * RARE_DF_SHARE));
+  return df > 0 && df <= cap;
+}
+
 /**
- * How much of `text` (a headline) the docs `ids` (recent journal notes) already
- * talk about, in [0, 1]: the idf mass of its distinct trigrams found in their union
- * over the idf mass of all of them. 0 when the text has no weighable trigrams.
+ * How many of `text`'s (a headline's) distinct RARE trigrams the docs `ids` (recent
+ * journal notes) already carry. Rare, not merely weighable: two weeks of daily notes
+ * cover nearly all of everyday English, so an idf-mass share lifted every headline —
+ * only vocabulary that few notes anywhere use (a name, a place, a word of this
+ * fortnight) can mean the journal and the headline are about the same thing.
+ * Roughly one long word or two short ones per 6.
  */
 export function affinityOf(
   index: TrigramIndex,
@@ -393,13 +406,9 @@ export function affinityOf(
   for (const id of ids)
     for (const t of index.docTokens.get(id) ?? []) pool.add(t);
   let hit = 0;
-  let total = 0;
-  for (const t of new Set(trigrams(text))) {
-    const w = idf(index, t);
-    total += w;
-    if (pool.has(t)) hit += w;
-  }
-  return total > 0 ? hit / total : 0;
+  for (const t of new Set(trigrams(text)))
+    if (pool.has(t) && isRare(index, t)) hit++;
+  return hit;
 }
 
 // --- highlighting (UI helper, pure) -------------------------------------------
