@@ -1,7 +1,7 @@
 /**
- * readeraffinity — journal affinity for the /reader lanes: how much of each
- * headline the owner's last two weeks of daily notes already talk about, scored
- * in the browser off the sealed trigram index (`affinityOf`). Literal overlap, not
+ * readeraffinity — journal affinity for the /reader lanes: how many of each
+ * headline's rare trigrams the owner's last two weeks of daily notes already
+ * carry, scored in the browser off the sealed trigram index (`affinityOf`). Literal overlap, not
  * meaning — a headline naming a place, a person or a word the journal used lately
  * lifts; a synonym doesn't. Only ever reached through a dynamic import after the
  * device key cache answers (ADR 0022), so neither the index format nor the crypto
