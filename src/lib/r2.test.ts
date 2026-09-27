@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   parseListXml,
+  r2Copy,
   r2Enabled,
   r2Origin,
   r2PresignGet,
@@ -328,5 +329,34 @@ describe("writeKey", () => {
         contentType: "application/json",
       }),
     ).toBe("failed");
+  });
+});
+
+describe("r2Copy", () => {
+  it("PUTs to the destination naming the per-segment-encoded source", async () => {
+    mockFetch.mockResolvedValue(new Response("<CopyObjectResult/>"));
+    const res = await r2Copy(
+      "vault/a b+c.md",
+      "backup/2026-09-27/vault/a b+c.md",
+    );
+    expect(res.status).toBe(200);
+    const req = mockFetch.mock.calls[0][0] as Request;
+    expect(req.url).toBe(
+      "https://acct123.r2.cloudflarestorage.com/hub/backup/2026-09-27/vault/a%20b%2Bc.md",
+    );
+    expect(req.method).toBe("PUT");
+    expect(req.headers.get("x-amz-copy-source")).toBe(
+      "/hub/vault/a%20b%2Bc.md",
+    );
+    expect(req.headers.get("authorization")).toContain("AWS4-HMAC-SHA256");
+  });
+
+  it("hands a non-2xx back to the caller", async () => {
+    mockFetch.mockImplementation(
+      async () => new Response("nope", { status: 403 }),
+    );
+    expect(
+      (await r2Copy("meta/fin", "backup/2026-09-27/meta/fin")).status,
+    ).toBe(403);
   });
 });

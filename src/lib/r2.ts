@@ -8,7 +8,7 @@ import { AwsClient } from "aws4fetch";
  * `https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`.
  *
  * Two altitudes live here:
- *  - transport (`r2Get`/`r2Put`/`r2Delete`/`r2List`/presign): thin signed fetches
+ *  - transport (`r2Get`/`r2Put`/`r2Copy`/`r2Delete`/`r2List`/presign): thin signed fetches
  *    that THROW on transport failure — callers own their guarding;
  *  - the guarded byte-movers (`readKey`/`writeKey`) the fixed-path stores
  *    (keystore, fin, snapkey, webauthn record) wrap one-line contracts around.
@@ -152,6 +152,26 @@ export async function r2Put(
 export async function r2Delete(key: string): Promise<Response> {
   const e = required();
   return client(e).fetch(objectUrl(e, key), { method: "DELETE" });
+}
+
+/**
+ * Server-side copy of one object inside the bucket (S3 CopyObject: a bodiless PUT
+ * to the destination naming the source in `x-amz-copy-source`). The bytes never
+ * leave R2, so a ciphertext copies as the same ciphertext. The source key is
+ * percent-encoded per segment like `objectUrl`. No body, so fetch sends
+ * `Content-Length: 0` itself (a null-body PUT) — the 411 trap in `r2Put` is a
+ * streamed body, which this never has. The caller interprets the status.
+ */
+export async function r2Copy(
+  srcKey: string,
+  destKey: string,
+): Promise<Response> {
+  const e = required();
+  const source = srcKey.split("/").map(encodeURIComponent).join("/");
+  return client(e).fetch(objectUrl(e, destKey), {
+    method: "PUT",
+    headers: { "x-amz-copy-source": `/${e.bucket}/${source}` },
+  });
 }
 
 /**
