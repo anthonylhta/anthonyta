@@ -15,12 +15,25 @@
  * page encrypts and uploads them. No crypto runs in the SW — it has no key and
  * never sees the passphrase; it only holds bytes for the window to collect.
  *
+ * The stash is per file: one file the phone won't hold no longer sinks the
+ * batch (a grouped gallery share used to fail whole while singles worked). And
+ * every exit names itself in the query string, so the landing says which stage
+ * broke instead of a one-size "share failed" (ADR 0206):
+ *   r=form   the multipart body couldn't be read (request.formData threw)
+ *   r=open   the share cache wouldn't open
+ *   r=empty  nothing usable arrived (n = entries seen, zero-byte ones included)
+ *   r=put:X  cache.put threw X (QuotaExceededError is the suspect); q = MB
+ *            used/quota from navigator.storage.estimate, when it answers
+ * A partial stash still lands as ?shared=1&n=<stashed>&f=<failed>, so the
+ * photos that fit go up and the landing asks for the rest. No file byte ever
+ * reaches the server on this path, so Vercel's 4.5 MB body cap is not it.
+ *
  * The second non-fetch job: Web Push. `push` shows the notification, and
  * `notificationclick` focuses an already-open tab or opens the payload's url.
  * The copy is whatever the server sent and is deliberately contentless — a
  * notification renders on a locked screen, so it never carries sealed detail.
  */
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = `anthonyta-${VERSION}`;
 // The share stash. NOT versioned with the SW cache and exempt from the
 // activate() wipe — a pending share must survive a worker update.
@@ -118,16 +131,36 @@ self.addEventListener("fetch", (event) => {
   if (request.method === "POST" && url.pathname === "/files/share-target") {
     event.respondWith(
       (async () => {
+        const fail = (r, n, q) => {
+          console.error(`[sw:share] failed: ${r} (${n ?? "?"} files)`);
+          return Response.redirect(
+            `/files?share=failed&r=${r}${n === undefined ? "" : `&n=${n}`}${q ? `&q=${q}` : ""}`,
+            303,
+          );
+        };
+        let form;
         try {
-          const form = await request.formData();
-          const files = form
-            .getAll("file")
-            .filter((f) => f instanceof File && f.size > 0);
-          if (files.length === 0)
-            return Response.redirect("/files?share=failed", 303);
-          const cache = await caches.open(SHARED_CACHE);
-          let i = 0;
-          for (const file of files) {
+          form = await request.formData();
+        } catch (e) {
+          console.error("[sw:share] formData threw", e);
+          return fail("form");
+        }
+        const entries = form.getAll("file");
+        const files = entries.filter((f) => f instanceof File && f.size > 0);
+        if (files.length === 0) return fail("empty", entries.length);
+        let cache;
+        try {
+          cache = await caches.open(SHARED_CACHE);
+        } catch (e) {
+          console.error("[sw:share] caches.open threw", e);
+          return fail("open", files.length);
+        }
+        let stashed = 0;
+        let failed = 0;
+        let putError = "";
+        let i = 0;
+        for (const file of files) {
+          try {
             await cache.put(
               new Request(`/__shared__/${Date.now()}-${i++}`),
               new Response(file, {
@@ -137,11 +170,27 @@ self.addEventListener("fetch", (event) => {
                 },
               }),
             );
+            stashed++;
+          } catch (e) {
+            failed++;
+            putError = (e && e.name) || "Error";
+            console.error(`[sw:share] put threw ${putError}`, file.size, e);
           }
-          return Response.redirect("/files?shared=1", 303);
-        } catch {
-          return Response.redirect("/files?share=failed", 303);
         }
+        if (failed === 0)
+          return Response.redirect(`/files?shared=1&n=${stashed}&f=0`, 303);
+        let q = "";
+        try {
+          const est = await navigator.storage.estimate();
+          q = `${Math.round(est.usage / 1048576)}/${Math.round(est.quota / 1048576)}`;
+        } catch {
+          /* the estimate is a hint; the code alone still names the stage */
+        }
+        if (stashed === 0) return fail(`put:${putError}`, files.length, q);
+        return Response.redirect(
+          `/files?shared=1&n=${stashed}&f=${failed}&r=put:${putError}${q ? `&q=${q}` : ""}`,
+          303,
+        );
       })(),
     );
     return;

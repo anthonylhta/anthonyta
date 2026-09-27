@@ -9,11 +9,15 @@ export const dynamic = "force-dynamic";
  * means the SW missed (fresh install before first activation, mid-deploy
  * update). Storing the body would mean accepting plaintext, so it stores
  * nothing: the owner gets bounced to the inbox with the failure banner and
- * shares again; a guest gets the usual 404 wall (ADR 0022).
+ * shares again; a guest gets the usual 404 wall (ADR 0022). `r=sw-miss` tells
+ * this exit apart from the worker's own failure codes (ADR 0206).
  */
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user) return new Response("Not found", { status: 404 });
 
-  return Response.redirect(new URL("/files?share=failed", request.url), 303);
+  return Response.redirect(
+    new URL("/files?share=failed&r=sw-miss", request.url),
+    303,
+  );
 }

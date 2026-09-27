@@ -31,6 +31,7 @@ import {
   type InboxFile,
 } from "@/lib/files";
 import { inspect, sniff, strip, type MetaFindings } from "@/lib/exif";
+import { shareLandingLine } from "@/lib/sharelanding";
 import { SHARE_TTL_DAYS } from "@/lib/shares";
 import { RecoverWithShares } from "@/components/RecoveryShares";
 import { usePrfCeremonySupported } from "./prfCeremony";
@@ -155,12 +156,18 @@ function stripForUpload(
   };
 }
 
-/** Drain the SW share stash (populated by sw.js on a share-sheet POST). */
-async function drainSharedCache(): Promise<File[]> {
-  if (!("caches" in window)) return [];
+/** Drain the SW share stash (populated by sw.js on a share-sheet POST). A
+ *  failure comes back as a line for the landing, never as a silent empty. */
+async function drainSharedCache(): Promise<{ files: File[]; error?: string }> {
+  if (!("caches" in window))
+    return {
+      files: [],
+      error:
+        "this browser has no share cache — share again from the installed app",
+    };
+  const out: File[] = [];
   try {
     const cache = await caches.open(SHARED_CACHE);
-    const out: File[] = [];
     for (const req of await cache.keys()) {
       const res = await cache.match(req);
       await cache.delete(req);
@@ -171,9 +178,14 @@ async function drainSharedCache(): Promise<File[]> {
       );
       out.push(new File([blob], name, { type: blob.type }));
     }
-    return out;
-  } catch {
-    return [];
+    return { files: out };
+  } catch (err) {
+    // Keep what already came out — those entries are gone from the stash.
+    const why = err instanceof Error ? err.name : "error";
+    return {
+      files: out,
+      error: `couldn't read the share stash after ${out.length} — share the rest again (drain:${why})`,
+    };
   }
 }
 
@@ -258,10 +270,17 @@ export function FilesInbox({
   files,
   offline,
   shared,
+  sharedCount,
+  sharedFailed = 0,
+  shareWhy,
 }: {
   files: InboxFile[];
   offline: boolean;
   shared?: boolean;
+  /** What sw.js says it stashed (`?n=`); absent from a pre-v3 worker. */
+  sharedCount?: number;
+  sharedFailed?: number;
+  shareWhy?: string;
 }) {
   const router = useRouter();
   const vault = useVault(offline);
@@ -476,15 +495,34 @@ export function FilesInbox({
   // vault is open, then run it through the same encrypt-and-upload path. The
   // busy guard matters: draining removes the stash, and handleFiles no-ops
   // while an upload is in flight — so drain only when it can actually run
-  // (the effect re-fires when busy clears).
+  // (the effect re-fires when busy clears). What arrived is checked against
+  // what the worker said it stashed, and any gap is said out loud (ADR 0206);
+  // it lands after handleFiles, which resets the notices when it finishes.
   useEffect(() => {
     if (!shared || !unlocked || busy || consumedShare.current) return;
     consumedShare.current = true;
     (async () => {
-      const stashed = await drainSharedCache();
+      const { files: stashed, error } = await drainSharedCache();
       if (stashed.length > 0) await handleFiles(stashed);
+      const line =
+        error ??
+        shareLandingLine(
+          sharedCount ?? stashed.length,
+          sharedFailed,
+          stashed.length,
+          shareWhy,
+        );
+      if (line) setNotices((prev) => [line, ...prev]);
     })();
-  }, [shared, unlocked, busy, handleFiles]);
+  }, [
+    shared,
+    unlocked,
+    busy,
+    handleFiles,
+    sharedCount,
+    sharedFailed,
+    shareWhy,
+  ]);
 
   return (
     <div className="px-4 py-4">
