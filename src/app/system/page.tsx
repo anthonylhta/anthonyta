@@ -17,9 +17,10 @@ import { StatusBar } from "@/components/terminal/StatusBar";
 import { TotpDrawer } from "@/components/TotpDrawer";
 import { readDays } from "@/lib/anastore";
 import { getAuthLog } from "@/lib/authlogstore";
-import { sydneyToday } from "@/lib/fin";
+import { datedKey, KEEP_DAYS, type BackupIndex } from "@/lib/backupcron";
+import { sydneyDaysAgo, sydneyToday } from "@/lib/fin";
 import { envVapidStatus } from "@/lib/pushsend";
-import { r2Enabled } from "@/lib/r2";
+import { r2Enabled, readKey } from "@/lib/r2";
 
 export const metadata = { title: "system" };
 
@@ -40,6 +41,7 @@ export default async function SystemPage() {
   // The journal ships RAW to a client island: the chain's verdict must come
   // from the browser, not from the server that authored the record.
   const journal = await getAuthLog();
+  const nightly = await latestBackup();
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -115,11 +117,42 @@ export default async function SystemPage() {
         <div className="px-4 py-3">
           <RotationPanel offline={!r2Enabled()} />
         </div>
+
+        {/* ───────────── BACKUP ───────────── */}
+        <Section label="backup" right="nightly, in-bucket" />
+        <p className="px-4 py-3 text-xs tabular-nums text-muted">
+          {nightly
+            ? `${nightly.date} · ${nightly.index.count} objects · ${nightly.index.failed.length} failed · keeps ${KEEP_DAYS}`
+            : "no nightly copy yet"}
+        </p>
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
     </main>
   );
+}
+
+/** The newest nightly copy's index (lib/backupcron), walking back from today
+ *  across the kept window — one small GET per day instead of listing the ~7k
+ *  copied objects. Store off, unreadable or malformed all read as "none". */
+async function latestBackup(): Promise<{
+  date: string;
+  index: BackupIndex;
+} | null> {
+  if (!r2Enabled()) return null;
+  for (let days = 0; days < KEEP_DAYS; days++) {
+    const date = sydneyDaysAgo(days);
+    const read = await readKey(datedKey(date, "index.json"));
+    if (read.state !== "ok") continue;
+    try {
+      const index = JSON.parse(new TextDecoder().decode(read.value));
+      if (typeof index?.count === "number" && Array.isArray(index.failed))
+        return { date, index };
+    } catch {
+      // Malformed — keep walking back.
+    }
+  }
+  return null;
 }
 
 /** A section divider — the Warm-Terminal zone shape reused for /system's three bands. */
