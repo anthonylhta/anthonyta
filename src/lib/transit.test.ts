@@ -11,6 +11,7 @@ import {
   isDepArr,
   isModeFilter,
   isValidHm,
+  leaveBy,
   nextDays,
   parseEndpointParam,
   pickJourneys,
@@ -19,7 +20,9 @@ import {
   normalizeTransitConfig,
   normalizeTrip,
   removeTrip,
+  shiftTarget,
   stopFinderParams,
+  sydneyAnchor,
   sydneyDateTime,
   tripParams,
   tripTitle,
@@ -732,6 +735,102 @@ describe("glanceSummary", () => {
     const s = glanceSummary({ journeys: [cancelled], alerts: [] });
     expect(s?.cancelled).toBe(true);
     expect(glanceSummary({ journeys: [], alerts: [] })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// leave-by
+// ---------------------------------------------------------------------------
+
+describe("sydneyAnchor", () => {
+  it("anchors a winter (AEST, +10) wall clock", () => {
+    expect(sydneyAnchor("2026-06-15", "15:00").toISOString()).toBe(
+      "2026-06-15T05:00:00.000Z",
+    );
+  });
+
+  it("anchors a summer (AEDT, +11) wall clock", () => {
+    expect(sydneyAnchor("2026-11-15", "15:00").toISOString()).toBe(
+      "2026-11-15T04:00:00.000Z",
+    );
+  });
+});
+
+describe("shiftTarget", () => {
+  it("is ten minutes before today's 15:00 before the shift", () => {
+    const now = new Date(Date.UTC(2026, 5, 14, 23, 0)); // 09:00 on the 15th in Sydney
+    expect(shiftTarget(now)?.toISOString()).toBe("2026-06-15T04:50:00.000Z");
+  });
+
+  it("is null from the shift start on", () => {
+    expect(shiftTarget(new Date(Date.UTC(2026, 5, 15, 5, 0)))).toBeNull(); // 15:00
+    expect(shiftTarget(new Date(Date.UTC(2026, 5, 15, 5, 30)))).toBeNull(); // 15:30
+  });
+
+  it("is null in the small hours", () => {
+    const now = new Date(Date.UTC(2026, 5, 14, 16, 0)); // 02:00 on the 15th in Sydney
+    expect(shiftTarget(now)).toBeNull();
+  });
+});
+
+describe("leaveBy", () => {
+  /** A one-leg journey departing `dep` and arriving `arr` (UTC HH:MM). */
+  function run(
+    line: string,
+    dep: string,
+    arr: string,
+    cancelled = false,
+  ): TransitJourney {
+    const j = journey([line], 20, cancelled);
+    j.legs[0].from = {
+      name: "Westmead Station",
+      platform: "2",
+      timePlanned: `2026-06-15T${dep}:00Z`,
+      timeEst: null,
+    };
+    j.arrivePlanned = `2026-06-15T${arr}:00Z`;
+    return j;
+  }
+  const target = "2026-06-15T04:50:00Z";
+
+  it("picks the latest departure that still arrives in time", () => {
+    const js = [
+      run("T1", "04:01", "04:22"),
+      run("T4", "04:31", "04:49"),
+      run("T1", "04:16", "04:37"),
+    ];
+    expect(leaveBy({ journeys: js, alerts: [] }, target)).toEqual({
+      depTime: "2026-06-15T04:31:00Z",
+      arriveTime: "2026-06-15T04:49:00Z",
+      line: "T4",
+      platform: "2",
+      from: "Westmead Station",
+    });
+  });
+
+  it("skips cancelled runs and late arrivals", () => {
+    const js = [
+      run("T1", "04:01", "04:22"),
+      run("T4", "04:31", "04:49", true),
+      run("T8", "04:40", "04:55"),
+    ];
+    expect(leaveBy({ journeys: js, alerts: [] }, target)?.line).toBe("T1");
+  });
+
+  it("is null when nothing arrives in time", () => {
+    const js = [run("T8", "04:40", "04:55"), run("T1", "04:45", "05:05")];
+    expect(leaveBy({ journeys: js, alerts: [] }, target)).toBeNull();
+    expect(leaveBy({ journeys: [], alerts: [] }, target)).toBeNull();
+  });
+
+  it("reads estimates over planned times", () => {
+    const late = run("T4", "04:31", "04:49");
+    late.arriveEst = "2026-06-15T04:53:00Z";
+    const early = run("T1", "04:16", "04:37");
+    early.legs[0].from.timeEst = "2026-06-15T04:18:00Z";
+    const out = leaveBy({ journeys: [late, early], alerts: [] }, target);
+    expect(out?.line).toBe("T1");
+    expect(out?.depTime).toBe("2026-06-15T04:18:00Z");
   });
 });
 

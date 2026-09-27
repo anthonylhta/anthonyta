@@ -77,8 +77,8 @@ describe("route manifest", () => {
     expect(count("public-inert")).toBe(2);
     expect(count("public-serving")).toBe(18);
     expect(count("auth-handler")).toBe(1);
-    expect(count("cron")).toBe(1);
-    expect(ROUTE_MANIFEST.length).toBe(75);
+    expect(count("cron")).toBe(2);
+    expect(ROUTE_MANIFEST.length).toBe(76);
   });
 
   it("exposes the shape helpers matching the partition", () => {
