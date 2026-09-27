@@ -6,7 +6,7 @@
  * them is ciphertext or non-secret metadata, so a plain local copy is safe on any
  * disk. NO passphrase is involved: this only moves opaque bytes, it never decrypts.
  *
- * Two modes, sibling in spirit to `scripts/vault-sync.ts` (same tsx invocation,
+ * Three modes, sibling in spirit to `scripts/vault-sync.ts` (same tsx invocation,
  * same IPv4-first flags, same `lib/r2` reuse, `console.error` for progress so
  * stdout carries only the final summary):
  *
@@ -24,7 +24,15 @@
  *     `--yes` flag is required because a restore overwrites live objects; without it
  *     the plan is printed and nothing is written.
  *
- * Run: `npm run hub-backup` / `npm run hub-backup -- --restore <dir> --yes`. The
+ *   restore from the bucket (`--from-bucket <YYYY-MM-DD> --yes`): list the
+ *     nightly cron's `backup/<date>/` copy (lib/backupcron, skipping its
+ *     `index.json`) and copy each object back to its original key server-side —
+ *     no bytes come down and there are no hashes to check (the copy never left
+ *     R2). Same `--yes` rule: without it the plan (count, bytes) is printed and
+ *     nothing is written. Keys outside the backed-up prefixes are refused.
+ *
+ * Run: `npm run hub-backup` / `npm run hub-backup -- --restore <dir> --yes` /
+ * `npm run hub-backup -- --from-bucket <YYYY-MM-DD> --yes`. The
  * npm script loads `.env.local` for the `R2_*` vars, passes tsx as a loader, and
  * pins `--dns-result-order=ipv4first --no-network-family-autoselection` — on WSL2
  * the dual-stack host's dead IPv6 + Node's Happy Eyeballs stalls every fetch
@@ -43,9 +51,11 @@ import {
   restoreKeyAllowed,
   type BackupEntry,
 } from "../src/lib/backup";
+import { datedKey } from "../src/lib/backupcron";
 import { BACKUP_STAMP_PATH } from "../src/lib/chores";
 import { formatSize } from "../src/lib/files";
 import {
+  r2Copy,
   r2Enabled,
   r2Get,
   r2List,
@@ -256,13 +266,61 @@ async function restore(dir: string, yes: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// restore from the bucket
+// ---------------------------------------------------------------------------
+
+async function restoreFromBucket(date: string, yes: boolean): Promise<void> {
+  if (!r2Enabled()) throw new Error(STORE_OFF);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+    throw new Error(`--from-bucket wants a YYYY-MM-DD date, got ${date}`);
+
+  const root = datedKey(date, "");
+  const objects = (await listPrefix(root)).filter(
+    (o) => o.key !== datedKey(date, "index.json"),
+  );
+  if (objects.length === 0) throw new Error(`nothing under ${root}`);
+  const bytes = objects.reduce((sum, o) => sum + o.size, 0);
+
+  console.error(
+    `Restore: ${objects.length} objects, ${formatSize(bytes)} from ${root} → their live keys (OVERWRITES live objects).`,
+  );
+  if (!yes) {
+    console.error("Nothing written. Re-run with --yes to perform the restore.");
+    return;
+  }
+
+  let i = 0;
+  for (const obj of objects) {
+    i++;
+    const key = obj.key.slice(root.length);
+    if (!backupKeyToRelPath(key) || !restoreKeyAllowed(key))
+      throw new Error(`refusing to restore an out-of-bounds key: ${obj.key}`);
+    const res = await r2Copy(obj.key, key);
+    if (!res.ok) throw new Error(`copy failed for ${key}: HTTP ${res.status}`);
+    console.error(`  ${i}/${objects.length}: ${key}`);
+  }
+
+  console.log(
+    `restored ${objects.length} objects from ${root} → the R2 bucket`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const restoreIdx = args.indexOf("--restore");
-  if (restoreIdx !== -1) {
+  const bucketIdx = args.indexOf("--from-bucket");
+  if (bucketIdx !== -1) {
+    const date = args[bucketIdx + 1];
+    if (!date || date.startsWith("--"))
+      throw new Error(
+        "--from-bucket requires a date: --from-bucket <YYYY-MM-DD> --yes",
+      );
+    await restoreFromBucket(date, args.includes("--yes"));
+  } else if (restoreIdx !== -1) {
     const dir = args[restoreIdx + 1];
     if (!dir || dir.startsWith("--"))
       throw new Error("--restore requires a directory: --restore <dir> --yes");
