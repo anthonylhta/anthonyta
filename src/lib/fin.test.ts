@@ -33,6 +33,7 @@ import {
   upsertDebit,
   upsertEntry,
   upsertIncome,
+  removeIncome,
   upsertInvested,
   upsertIndexDay,
   type DebitEntry,
@@ -358,6 +359,27 @@ describe("upsertIncome", () => {
     expect(JSON.stringify(base)).toBe(before);
     expect(out.entries).toEqual(base.entries);
     expect(out.invested).toEqual(base.invested);
+  });
+});
+
+describe("removeIncome", () => {
+  const base = cfg2({
+    income: [
+      { date: "2026-08-05", amountCents: 100000 },
+      { date: "2026-08-09", amountCents: 100 },
+    ],
+  });
+
+  it("drops the row on that date and keeps the rest in order", () => {
+    const out = removeIncome(base, "2026-08-09");
+    expect(out.income).toEqual([{ date: "2026-08-05", amountCents: 100000 }]);
+    expect(isFinConfig(out)).toBe(true);
+  });
+
+  it("is a no-op on a date with no row, and never mutates the input", () => {
+    const before = JSON.stringify(base);
+    expect(removeIncome(base, "2026-08-06").income).toEqual(base.income);
+    expect(JSON.stringify(base)).toBe(before);
   });
 });
 
