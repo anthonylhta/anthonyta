@@ -22,7 +22,7 @@ describe("shareFailureLine", () => {
   });
   it("names an empty share", () => {
     expect(shareFailureLine("empty", "2")).toBe(
-      "nothing arrived in the share — pick the photos again (empty · 2 files)",
+      "nothing arrived in the share — Chrome 153 on Android drops shared files (a Chrome bug); upload through this page until Chrome updates (empty · 2 files)",
     );
   });
   it("names a cache that wouldn't open", () => {

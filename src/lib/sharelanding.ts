@@ -24,7 +24,11 @@ export function shareFailureLine(
   else if (r.startsWith("put:"))
     line = `the phone refused to hold the batch${q ? ` (${q} MB used)` : ""} — share fewer at once`;
   else if (r === "empty")
-    line = "nothing arrived in the share — pick the photos again";
+    // Seen 2026-09-27 on Chrome 153 (Android): every share, single or grouped,
+    // posts a multipart body with no parts at all — a Chrome regression, not
+    // ours. Say so, and point at the door that works.
+    line =
+      "nothing arrived in the share — Chrome 153 on Android drops shared files (a Chrome bug); upload through this page until Chrome updates";
   else if (r === "open")
     line =
       "the app's share cache wouldn't open — reopen the app and share again";
