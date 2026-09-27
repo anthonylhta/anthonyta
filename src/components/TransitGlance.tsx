@@ -7,9 +7,12 @@ import {
   endpointParam,
   fmtSydneyTime,
   glanceSummary,
+  leaveBy,
   normalizeTransitConfig,
+  shiftTarget,
   tripTitle,
   type GlanceSummary,
+  type LeaveBy,
   type TransitTrip,
   type TripResult,
 } from "@/lib/transit";
@@ -25,6 +28,11 @@ const REFRESH_MS = 60_000;
  * dots until the key is in hand, and the endpoint pair goes to the owner-gated
  * proxy per refresh, never stored. Polls every 60s while the tab is visible;
  * a hidden tab spends nothing.
+ *
+ * Before the shift (`shiftTarget` — 04:00 to 15:00 Sydney) each tick plans
+ * twice: "leave now" for the live line, and an arrive-by plan anchored on the
+ * shift's arrive-by instant for a second line naming the last run that still
+ * makes it. From 15:00 a tick plans once and the second line is gone.
  */
 export function TransitGlance({ offline }: { offline: boolean }) {
   const { status, openItem } = useVault(offline);
@@ -33,6 +41,11 @@ export function TransitGlance({ offline }: { offline: boolean }) {
   // undefined = still loading the config; null = no saved trips.
   const [trip, setTrip] = useState<TransitTrip | null | undefined>(undefined);
   const [summary, setSummary] = useState<GlanceSummary | null>(null);
+  // null = no leave-by line (after the shift, or the arrive-by plan failed).
+  const [leave, setLeave] = useState<{
+    target: string;
+    pick: LeaveBy | null;
+  } | null>(null);
   const [sample, setSample] = useState(false);
   const [failed, setFailed] = useState(false);
   const seq = useRef(0);
@@ -42,6 +55,7 @@ export function TransitGlance({ offline }: { offline: boolean }) {
     setWasUnlocked(unlocked);
     setTrip(undefined);
     setSummary(null);
+    setLeave(null);
     setFailed(false);
   }
 
@@ -82,9 +96,39 @@ export function TransitGlance({ offline }: { offline: boolean }) {
     if (!trip) return;
     let disposed = false;
 
+    // The arrive-by plan for the shift — same tick, same seq guard.
+    async function refreshLeave(t: TransitTrip, s: number) {
+      const target = shiftTarget(new Date());
+      if (!target) {
+        setLeave(null);
+        return;
+      }
+      const at = target.toISOString();
+      try {
+        const qs = new URLSearchParams([
+          ["from", endpointParam(t.from)],
+          ["to", endpointParam(t.to)],
+          ["modes", t.modes],
+          ["when", "arr"],
+          ["at", at],
+        ]);
+        const res = await fetch(`/api/transit/trip?${qs}`);
+        const data = res.ok
+          ? ((await res.json()) as { result?: TripResult })
+          : null;
+        if (disposed || seq.current !== s) return;
+        setLeave(
+          data?.result ? { target: at, pick: leaveBy(data.result, at) } : null,
+        );
+      } catch {
+        if (!disposed && seq.current === s) setLeave(null);
+      }
+    }
+
     async function refresh() {
       if (!trip || document.visibilityState !== "visible") return;
       const s = ++seq.current;
+      void refreshLeave(trip, s);
       try {
         const qs = new URLSearchParams([
           ["from", endpointParam(trip.from)],
@@ -157,32 +201,57 @@ export function TransitGlance({ offline }: { offline: boolean }) {
     );
 
   return (
-    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-      <span className="font-semibold tabular-nums text-fg">
-        {fmtSydneyTime(summary.depTime)}
-      </span>
-      {summary.line && (
-        <span className="border border-hairline px-1 text-xs text-fg">
-          {summary.line}
+    <span className="flex flex-col gap-0.5">
+      <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="font-semibold tabular-nums text-fg">
+          {fmtSydneyTime(summary.depTime)}
         </span>
-      )}
-      {summary.platform && (
-        <span className="text-xs text-muted">plat {summary.platform}</span>
-      )}
-      {summary.cancelled ? (
-        <span className="text-xs text-down">✕ cancelled</span>
-      ) : summary.delayMin !== null && summary.delayMin > 0 ? (
-        <span className="text-xs text-amber">● +{summary.delayMin} min</span>
-      ) : summary.live ? (
-        <span className="text-xs text-up">● on time</span>
-      ) : (
-        <span className="text-xs text-muted">○ sched</span>
-      )}
-      <span className="text-xs text-muted">
-        → {fmtSydneyTime(summary.arriveTime)} · {tripTitle(trip)}
+        {summary.line && (
+          <span className="border border-hairline px-1 text-xs text-fg">
+            {summary.line}
+          </span>
+        )}
+        {summary.platform && (
+          <span className="text-xs text-muted">plat {summary.platform}</span>
+        )}
+        {summary.cancelled ? (
+          <span className="text-xs text-down">✕ cancelled</span>
+        ) : summary.delayMin !== null && summary.delayMin > 0 ? (
+          <span className="text-xs text-amber">● +{summary.delayMin} min</span>
+        ) : summary.live ? (
+          <span className="text-xs text-up">● on time</span>
+        ) : (
+          <span className="text-xs text-muted">○ sched</span>
+        )}
+        <span className="text-xs text-muted">
+          → {fmtSydneyTime(summary.arriveTime)} · {tripTitle(trip)}
+        </span>
+        {sample && <span className="text-[10px] text-muted/60">sample</span>}
+        <span className="text-xs">{link}</span>
       </span>
-      {sample && <span className="text-[10px] text-muted/60">sample</span>}
-      <span className="text-xs">{link}</span>
+      {leave &&
+        (leave.pick ? (
+          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted">
+            <span>
+              leave by{" "}
+              <span className="font-semibold tabular-nums text-fg">
+                {fmtSydneyTime(leave.pick.depTime)}
+              </span>{" "}
+              ·
+            </span>
+            {leave.pick.line && (
+              <span className="border border-hairline px-1 text-fg">
+                {leave.pick.line}
+              </span>
+            )}
+            {leave.pick.platform && <span>plat {leave.pick.platform}</span>}
+            <span>· arrives {fmtSydneyTime(leave.pick.arriveTime)}</span>
+          </span>
+        ) : (
+          <span className="text-xs text-muted">
+            no run arrives by {fmtSydneyTime(leave.target)} — leave now
+          </span>
+        ))}
     </span>
   );
 }
