@@ -27,7 +27,9 @@ export type QuickLogAction =
   | { kind: "now"; key: string; text: string }
   /** `stones` in cents, the gu book's unit. */
   | { kind: "cast"; name: string; stones: number; day: string }
-  | { kind: "study"; source: string; minutes?: number; day: string };
+  | { kind: "study"; source: string; minutes?: number; day: string }
+  /** `amountCents` in cents, the fin ledger's unit. */
+  | { kind: "pay"; amountCents: number; day: string };
 
 /**
  * Sane bodyweight, in kilos. Tighter than the meal log's own storage bounds
@@ -46,6 +48,9 @@ const TODO = /^todo\s+(\S.*)$/i;
 
 /** `now <key> <the sentence>` — the front door's block, one line at a time. */
 const NOW = /^now\s+(\S+)\s+(\S.*)$/i;
+
+/** `pay <dollars>` — the week's pay-in, the figure alone. */
+const PAY = /^pay\s+(\d+(?:\.\d{1,2})?)$/i;
 
 /** `cast <what> <dollars>` — the name is everything up to the last figure, so a
  *  name may carry spaces, dashes and numbers of its own. */
@@ -114,6 +119,14 @@ export function parseQuickLog(
     if (key && line) return { kind: "now", key, text: line };
   }
 
+  const pay = PAY.exec(text);
+  if (pay) {
+    // A pay of nothing is a typo, and so is ten million dollars (the cast's bound).
+    const amountCents = Math.round(Number(pay[1]) * 100);
+    if (amountCents < 1 || amountCents >= MAX_STONES) return null;
+    return { kind: "pay", amountCents, day: today };
+  }
+
   const cast = CAST.exec(text);
   if (cast) {
     // Refused past the cap, not clipped (the `now` precedent): the check-in
@@ -145,6 +158,8 @@ export function quickLogLabel(action: QuickLogAction): string {
       return `cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
     case "study":
       return `study · ${studyText(action)}`;
+    case "pay":
+      return `pay · ${aud(action.amountCents / 100)} · ${dayHeading(action.day)}`;
   }
 }
 
@@ -168,5 +183,7 @@ export function quickLogSaved(action: QuickLogAction): string {
       return `saved ✓ cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
     case "study":
       return `saved ✓ study · ${studyText(action)}`;
+    case "pay":
+      return `saved ✓ pay · ${aud(action.amountCents / 100)} · ${dayHeading(action.day)}`;
   }
 }

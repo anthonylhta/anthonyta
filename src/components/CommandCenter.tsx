@@ -7,6 +7,7 @@ import { JournalPulse } from "@/components/JournalPulse";
 import { MealsGlance } from "@/components/MealsGlance";
 import { MeSealed } from "@/components/MeSealed";
 import { NeedsDoing } from "@/components/NeedsDoing";
+import { NoPayRow } from "@/components/NoPayRow";
 import { CommandK } from "@/components/terminal/CommandPalette";
 import { LabelDoor } from "@/components/terminal/LabelDoor";
 import { StatusBar } from "@/components/terminal/StatusBar";
@@ -418,6 +419,13 @@ export async function CommandCenter({ userName }: { userName: string }) {
        empty or all-fresh says nothing. */
     jobs: !hidden.has("jobs") ? (
       <WaitingOnRow offline={!r2Enabled()} today={today} />
+    ) : null,
+
+    /* pay — no pay-in logged in the trailing 7 days, so the derived burn would
+       read the week as cheap (ADR 0185). Exception-only and sealed, the jobs
+       row's shape: the island decides its own absence. */
+    pay: !hidden.has("pay") ? (
+      <NoPayRow offline={!r2Enabled()} today={today} />
     ) : null,
   };
 
