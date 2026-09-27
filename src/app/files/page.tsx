@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { StatusBar } from "@/components/terminal/StatusBar";
 import { listInbox } from "@/lib/inbox";
+import { shareFailureLine } from "@/lib/sharelanding";
 import { FilesInbox } from "./FilesInbox";
 
 export const metadata = { title: "files" };
@@ -20,7 +21,12 @@ export default async function FilesPage({
   const session = await auth();
   if (!session?.user) notFound();
 
-  const { share, shared } = await searchParams;
+  const params = await searchParams;
+  const { share, shared } = params;
+  // The worker's share codes (sw.js, ADR 0206) — plain strings or nothing.
+  const code = (k: string) =>
+    typeof params[k] === "string" ? (params[k] as string) : undefined;
+  const [r, n, f, q] = [code("r"), code("n"), code("f"), code("q")];
   const { files, offline } = await listInbox();
   const who = session.user.name ?? "anthony";
 
@@ -41,7 +47,7 @@ export default async function FilesPage({
 
         {share === "failed" && (
           <p className="border-b border-hairline px-4 py-2 text-xs text-down">
-            share failed — file too large or store offline
+            {shareFailureLine(r, n, q)}
           </p>
         )}
 
@@ -51,7 +57,14 @@ export default async function FilesPage({
           </p>
         )}
 
-        <FilesInbox files={files} offline={offline} shared={shared === "1"} />
+        <FilesInbox
+          files={files}
+          offline={offline}
+          shared={shared === "1"}
+          sharedCount={n === undefined ? undefined : Number(n) || 0}
+          sharedFailed={Number(f) || 0}
+          shareWhy={r && (q ? `${r} · ${q} MB used` : r)}
+        />
       </div>
 
       <p className="mt-4 text-center text-xs text-muted/60">private · {who}</p>
