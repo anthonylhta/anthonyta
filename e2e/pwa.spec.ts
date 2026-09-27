@@ -33,6 +33,12 @@ test.describe("pwa", () => {
     expect(await res.text()).toContain("addEventListener");
   });
 
+  test("the service worker names its share outcomes", async ({ request }) => {
+    const src = await (await request.get("/sw.js")).text();
+    expect(src).toContain("share=failed&r=");
+    expect(src).toContain("shared=1&n=");
+  });
+
   test("the icon routes render PNGs", async ({ request }) => {
     for (const spec of ["192", "512", "maskable-192", "maskable-512"]) {
       const res = await request.get(`/icons/${spec}`);
