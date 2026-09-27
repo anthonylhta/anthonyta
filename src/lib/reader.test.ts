@@ -254,8 +254,8 @@ describe("rankLane journal affinity", () => {
   it("lifts rows past the floor by score, below a boost, the rest in feed order", () => {
     const a = aff([
       ["two", AFFINITY_MIN],
-      ["three", 0.9],
-      ["four", AFFINITY_MIN - 0.01],
+      ["three", AFFINITY_MIN + 3],
+      ["four", AFFINITY_MIN - 1],
     ]);
     const { shown } = rankLane(lane, { boost: ["four"], mute: [] }, a);
     expect(shown.map((i) => i.title)).toEqual(["four", "three", "two", "one"]);
@@ -266,10 +266,10 @@ describe("rankLane journal affinity", () => {
 
   it("keeps feed order on ties and below the floor", () => {
     const a = aff([
-      ["one", 0.1],
-      ["two", 0.5],
-      ["three", 0.2],
-      ["four", 0.5],
+      ["one", 1],
+      ["two", AFFINITY_MIN + 2],
+      ["three", 2],
+      ["four", AFFINITY_MIN + 2],
     ]);
     expect(rankLane(lane, EMPTY_PREFS, a).shown.map((i) => i.title)).toEqual([
       "two",
