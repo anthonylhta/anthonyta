@@ -15,6 +15,7 @@ import {
 } from "@/lib/vaultblob";
 import { manifestHashFor } from "@/lib/vaultverify";
 import { NoteBody } from "./NoteBody";
+import { RelatedNotes } from "./RelatedNotes";
 
 // Input/button idioms, lifted from the FinPanel/FilesInbox unlock prompts.
 const input =
@@ -45,6 +46,7 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
   const [phase, setPhase] = useState<Phase>("decrypting");
   const [note, setNote] = useState<VaultIndexNote | null>(null);
   const [md, setMd] = useState<string | null>(null);
+  const [notes, setNotes] = useState<VaultIndexNote[]>([]);
   // Valid decrypt, wrong lineage: the served ciphertext doesn't match the
   // integrity manifest (e.g. substituted with its own older valid envelope).
   // Distinct from the tamper phase — the body still renders, under a banner.
@@ -60,6 +62,7 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
     setPhase("decrypting");
     setNote(null);
     setMd(null);
+    setNotes([]);
     setIntegrityAlarm(false);
   }
 
@@ -165,6 +168,7 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
       if (cancelled) return;
       setNote(entry);
       setMd(processed);
+      setNotes(index.notes);
       setPhase("ready");
     })();
 
@@ -228,6 +232,7 @@ export function NoteReader({ id, offline }: { id: string; offline: boolean }) {
       )}
 
       <NoteBody md={md} openItem={openItem} />
+      <RelatedNotes id={id} notes={notes} openItem={openItem} />
     </>
   );
 }

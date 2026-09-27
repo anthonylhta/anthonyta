@@ -304,6 +304,104 @@ function prefixScan(index: TrigramIndex, qc: string[]): Map<string, number> {
   return scores;
 }
 
+// --- overlap (related notes, journal affinity) ---------------------------------
+//
+// `query` is an AND over one substring; overlap is the other question — how much of
+// one text's vocabulary another shares. Both sides reduce to distinct trigram sets
+// and are compared idf-weighted: a trigram in few notes (a place, a name, a word
+// only one week used) says far more than one in most of them. The index holds raw
+// markdown including frontmatter, so keys every note carries ("tags:", "date:") and
+// plain English glue (" th", "ing") would make every pair look alike — anything in
+// more than half the corpus weighs nothing. Literal, not semantic: "sea" and "ocean"
+// share no trigrams, the deliberate trade of the trigram pivot. Pure, like the rest.
+
+/** Default floor on distinct shared trigrams before a doc counts as related — a
+ *  couple of shared words is coincidence, not a connection. */
+export const MIN_SHARED = 8;
+
+/** Inverse document frequency of one trigram; 0 past the half-corpus ceiling. */
+export function idf(index: TrigramIndex, trigram: string): number {
+  const n = index.docMeta.size;
+  const df = index.inverted.get(trigram)?.size ?? 0;
+  if (df === 0 || df > n / 2) return 0;
+  return Math.log(1 + n / df);
+}
+
+/**
+ * Score every doc against a query trigram set: idf mass of the shared trigrams over
+ * sqrt(|query| × |doc|) — cosine over binary vectors, so a long note doesn't win by
+ * sheer size. Docs sharing fewer than `minShared` trigrams (or only zero-idf ones)
+ * are dropped.
+ */
+export function overlapScores(
+  index: TrigramIndex,
+  queryTokens: Set<string>,
+  opts: { exclude?: string; minShared?: number } = {},
+): Map<string, { score: number; shared: number }> {
+  const minShared = opts.minShared ?? MIN_SHARED;
+  const acc = new Map<string, { score: number; shared: number }>();
+  for (const t of queryTokens) {
+    const byId = index.inverted.get(t);
+    if (!byId) continue;
+    const w = idf(index, t);
+    for (const id of byId.keys()) {
+      if (id === opts.exclude) continue;
+      const a = acc.get(id);
+      if (a) {
+        a.score += w;
+        a.shared++;
+      } else acc.set(id, { score: w, shared: 1 });
+    }
+  }
+  const out = new Map<string, { score: number; shared: number }>();
+  for (const [id, a] of acc) {
+    if (a.shared < minShared || a.score <= 0) continue;
+    const size = index.docTokens.get(id)?.size ?? 0;
+    const norm = Math.sqrt(queryTokens.size * size);
+    if (norm > 0) out.set(id, { score: a.score / norm, shared: a.shared });
+  }
+  return out;
+}
+
+/** The `k` docs most like `id`, by its own trigram set; empty for an unknown id. */
+export function relatedDocs(
+  index: TrigramIndex,
+  id: string,
+  k = 5,
+): { id: string; score: number; shared: number }[] {
+  const tokens = index.docTokens.get(id);
+  if (!tokens) return [];
+  return [...overlapScores(index, tokens, { exclude: id })]
+    .map(([doc, s]) => ({ id: doc, ...s }))
+    .sort(
+      (a, b) => b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    )
+    .slice(0, k);
+}
+
+/**
+ * How much of `text` (a headline) the docs `ids` (recent journal notes) already
+ * talk about, in [0, 1]: the idf mass of its distinct trigrams found in their union
+ * over the idf mass of all of them. 0 when the text has no weighable trigrams.
+ */
+export function affinityOf(
+  index: TrigramIndex,
+  ids: string[],
+  text: string,
+): number {
+  const pool = new Set<string>();
+  for (const id of ids)
+    for (const t of index.docTokens.get(id) ?? []) pool.add(t);
+  let hit = 0;
+  let total = 0;
+  for (const t of new Set(trigrams(text))) {
+    const w = idf(index, t);
+    total += w;
+    if (pool.has(t)) hit += w;
+  }
+  return total > 0 ? hit / total : 0;
+}
+
 // --- highlighting (UI helper, pure) -------------------------------------------
 
 export interface HighlightSegment {
