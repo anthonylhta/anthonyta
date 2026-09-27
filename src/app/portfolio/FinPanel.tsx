@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PortfolioCard } from "@/components/terminal/PortfolioCard";
 import { SeqAlarm } from "@/components/SeqAlarm";
 import { Sparkline } from "@/components/terminal/Sparkline";
@@ -16,6 +16,7 @@ import {
   investedAt,
   latestEntry,
   removeDebit,
+  removeIncome,
   spentThisWeek,
   sydneyToday,
   upsertDebit,
@@ -124,6 +125,11 @@ export function FinPanel({ offline }: { offline: boolean }) {
     const ok = await saveConfig((base) => upsertIncome(base, entry));
     if (ok) setEditingIncome(false);
     return ok;
+  }
+
+  // Drop the newest pay-in — the undo for a `pay` typed on the wrong day.
+  async function deleteLatestIncome(date: string): Promise<boolean> {
+    return saveConfig((base) => removeIncome(base, date));
   }
 
   // Upsert a debit by name — dropping the row it was edited from first, so a
@@ -298,13 +304,20 @@ export function FinPanel({ offline }: { offline: boolean }) {
             income
           </p>
           {!editingIncome && (
-            <button
-              type="button"
-              onClick={() => setEditingIncome(true)}
-              className="text-xs text-muted transition-colors hover:text-amber"
-            >
-              edit
-            </button>
+            <span className="flex items-center gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => setEditingIncome(true)}
+                className="text-muted transition-colors hover:text-amber"
+              >
+                edit
+              </button>
+              {latestIncome && (
+                <DeleteIncomeButton
+                  onConfirm={() => void deleteLatestIncome(latestIncome.date)}
+                />
+              )}
+            </span>
           )}
         </div>
         {editingIncome ? (
@@ -742,6 +755,38 @@ function IncomeEditor({
       </div>
       {err && <p className="text-xs text-down">save failed — try again</p>}
     </div>
+  );
+}
+
+/** Two-tap delete for the newest pay-in, in-theme (the /transit precedent): the
+ *  first tap arms an amber-red "sure?", a second within 4s deletes. */
+function DeleteIncomeButton({ onConfirm }: { onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  if (armed)
+    return (
+      <button
+        type="button"
+        title="confirm delete"
+        onClick={onConfirm}
+        className="border border-down px-1.5 text-down transition-colors hover:bg-down hover:text-bg"
+      >
+        sure?
+      </button>
+    );
+  return (
+    <button
+      type="button"
+      title="delete the last pay-in"
+      onClick={() => setArmed(true)}
+      className="text-muted transition-colors hover:text-down"
+    >
+      del
+    </button>
   );
 }
 

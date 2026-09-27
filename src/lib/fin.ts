@@ -290,6 +290,13 @@ export function upsertIncome(cfg: FinConfig, entry: IncomeEntry): FinConfig {
   return { ...cfg, income: [...kept.slice(0, at), entry, ...kept.slice(at)] };
 }
 
+/** Drop the pay-in logged on `date` — the undo for a `pay` typed on the wrong
+ *  day, which would otherwise sit newest in the window and speak for the week.
+ *  A date with no row is a no-op. */
+export function removeIncome(cfg: FinConfig, date: string): FinConfig {
+  return { ...cfg, income: (cfg.income ?? []).filter((e) => e.date !== date) };
+}
+
 /** How far back "this week" reaches, `todayISO` included. */
 const WEEK_DAYS = 7;
 
