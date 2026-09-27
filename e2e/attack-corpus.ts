@@ -574,6 +574,13 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
     methods: ["GET"],
     note: "Nightly cron writer. Fail-closed 401 when unauthenticated (lib/cron-auth) — a locked machine endpoint, deliberately NOT the 404 wall.",
   },
+  {
+    routeKey: "/api/cron/backup",
+    probe: "/api/cron/backup",
+    shape: "cron",
+    methods: ["GET"],
+    note: "Nightly in-bucket backup copy. Fail-closed 401 when unauthenticated (lib/cron-auth) — a locked machine endpoint, deliberately NOT the 404 wall.",
+  },
 ];
 
 /** Every entry whose guest contract is the byte-identical 404 "Not found" wall. */
