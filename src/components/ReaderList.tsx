@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -13,6 +14,7 @@ import {
   captureText,
   EMPTY_PREFS,
   isBoosted,
+  isLifted,
   isNew,
   parsePrefs,
   parseVisit,
@@ -155,6 +157,40 @@ export function ReaderList({
   );
   const [open, setOpen] = useState<Set<string>>(() => new Set());
 
+  // Journal affinity — headlines overlapping the last two weeks of daily notes
+  // rise within their lane. Owner-only and unlock-gated through the palette's
+  // ordering (ADR 0022): the key cache answers first, and only then does the
+  // scoring module — index format, crypto and all — load, so none of it rides
+  // this page's chunk. Dropped on the lock edge; any failure is silence.
+  const [affinity, setAffinity] = useState<Map<string, number> | undefined>();
+  const [affinityFor, setAffinityFor] = useState(todo.unlocked);
+  if (affinityFor !== todo.unlocked) {
+    setAffinityFor(todo.unlocked);
+    setAffinity(undefined);
+  }
+  useEffect(() => {
+    if (!todo.unlocked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getCachedKey } = await import("@/lib/keycache");
+        const mk = await getCachedKey();
+        if (!mk) return;
+        const { journalAffinity } = await import("@/lib/readeraffinity");
+        const scored = await journalAffinity(
+          mk,
+          lanes.flatMap((l) => l.items),
+        );
+        if (!cancelled && scored) setAffinity(scored);
+      } catch {
+        // No affinity is the page as it was.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [todo.unlocked, lanes]);
+
   // "Studied" — a japan-lane headline into the E2EE study log, as today's
   // sitting: the same hook the palette's `ja` verb writes through, offered on
   // the same terms as the save beside it.
@@ -263,7 +299,7 @@ export function ReaderList({
       </div>
 
       {lanes.map((lane) => {
-        const { shown, muted } = rankLane(lane.items, prefs);
+        const { shown, muted } = rankLane(lane.items, prefs, affinity);
         const fresh =
           visit === null ? 0 : shown.filter((i) => isNew(i, visit)).length;
         const isOpen = open.has(lane.key);
@@ -335,6 +371,14 @@ export function ReaderList({
                           className="mr-1.5 text-[10px] text-amber/70"
                         >
                           ▲
+                        </span>
+                      )}
+                      {!isBoosted(item, prefs) && isLifted(item, affinity) && (
+                        <span
+                          title="overlaps your journal"
+                          className="mr-1.5 text-[10px] text-muted/70"
+                        >
+                          ~
                         </span>
                       )}
                       {item.title}

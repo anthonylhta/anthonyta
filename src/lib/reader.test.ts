@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { MAX_TEXT } from "./todo";
 import {
+  AFFINITY_MIN,
   captureText,
   decodeEntities,
   EMPTY_PREFS,
   FEEDS,
   interleave,
   isBoosted,
+  isLifted,
   isMuted,
   isNew,
   LANES,
@@ -223,6 +225,58 @@ describe("boost + mute words", () => {
         mute: ["crypto"],
       }),
     ).toEqual({ shown: [], muted: 1 });
+  });
+});
+
+describe("rankLane journal affinity", () => {
+  const item = (title: string): FeedItem => ({
+    source: "s",
+    title,
+    link: `https://x.com/${title}`,
+    ts: 1,
+  });
+  const lane = [item("one"), item("two"), item("three"), item("four")];
+  const aff = (pairs: [string, number][]) =>
+    new Map(pairs.map(([t, n]) => [item(t).link, n]));
+
+  it("leaves the order alone without an affinity map", () => {
+    expect(rankLane(lane, EMPTY_PREFS)).toEqual(
+      rankLane(lane, EMPTY_PREFS, undefined),
+    );
+    expect(rankLane(lane, EMPTY_PREFS).shown.map((i) => i.title)).toEqual([
+      "one",
+      "two",
+      "three",
+      "four",
+    ]);
+  });
+
+  it("lifts rows past the floor by score, below a boost, the rest in feed order", () => {
+    const a = aff([
+      ["two", AFFINITY_MIN],
+      ["three", 0.9],
+      ["four", AFFINITY_MIN - 0.01],
+    ]);
+    const { shown } = rankLane(lane, { boost: ["four"], mute: [] }, a);
+    expect(shown.map((i) => i.title)).toEqual(["four", "three", "two", "one"]);
+    expect(isLifted(item("three"), a)).toBe(true);
+    expect(isLifted(item("four"), a)).toBe(false);
+    expect(isLifted(item("one"), undefined)).toBe(false);
+  });
+
+  it("keeps feed order on ties and below the floor", () => {
+    const a = aff([
+      ["one", 0.1],
+      ["two", 0.5],
+      ["three", 0.2],
+      ["four", 0.5],
+    ]);
+    expect(rankLane(lane, EMPTY_PREFS, a).shown.map((i) => i.title)).toEqual([
+      "two",
+      "four",
+      "one",
+      "three",
+    ]);
   });
 });
 
