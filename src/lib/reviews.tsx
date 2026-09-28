@@ -20,6 +20,9 @@ export interface NovelReview {
   date: string;
   /** one plain-text line for the page description / link unfurl */
   summary: string;
+  /** set when the body carries inline <Spoiler> folds: the page shows the
+   * warning line and the show-all toggle */
+  spoilers?: boolean;
   sections: { id: string; title: string; body: ReactNode }[];
 }
 
