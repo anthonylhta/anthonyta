@@ -498,9 +498,16 @@ export const ROUTE_MANIFEST: RouteEntry[] = [
   {
     routeKey: "/novels",
     probe: "/novels",
-    shape: "owner-page",
+    shape: "public-serving",
     methods: ["GET"],
-    note: "Reading list, pulled from the public face 2026-08-23 (placeholder-grade until its rework; the lobby's reading door links the webnovelist profile instead). Guests 404, the /uses pattern.",
+    note: "Reading list + reviews, public again 2026-09-28 (the reviews rework).",
+  },
+  {
+    routeKey: "/novels/[slug]",
+    probe: "/novels/does-not-exist-slug",
+    shape: "public-serving",
+    methods: ["GET"],
+    note: "Public novel review page; an unknown slug is a plain 404, present ones 200 — content, not an owner surface.",
   },
   {
     routeKey: "/offline",

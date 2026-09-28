@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { auth } from "@/auth";
 import { SessionStatusBar } from "@/components/SessionStatusBar";
 import { getCurrentlyReading } from "@/lib/connectors/webnovel";
 import { matchNovel, novels, type Novel } from "@/lib/novels";
+import { reviewFor, type NovelReview } from "@/lib/reviews";
 
 export const metadata = { title: "novels" };
 
@@ -18,12 +17,6 @@ const RANK: Record<Novel["status"], number> = {
 };
 
 export default async function NovelsPage() {
-  // Pulled from the public face 2026-08-23 (owner call, the /uses pattern):
-  // the page is placeholder-grade until its planned rework — guests 404, the
-  // lobby's reading door now points at the webnovelist profile instead.
-  const session = await auth();
-  if (!session?.user) notFound();
-
   const reads = await getCurrentlyReading();
 
   // Enrich curated novels with a live progress % (the tracker never adds rows —
@@ -39,7 +32,16 @@ export default async function NovelsPage() {
     }
   }
 
-  const ordered = [...novels].sort((a, b) => RANK[a.status] - RANK[b.status]);
+  // Reviewed novels lead (newest review first), then the shelf by status.
+  const ordered = novels
+    .map((n) => ({ n, review: reviewFor(n.en) }))
+    .sort((a, b) => {
+      if (a.review && b.review)
+        return b.review.date.localeCompare(a.review.date);
+      if (a.review) return -1;
+      if (b.review) return 1;
+      return RANK[a.n.status] - RANK[b.n.status];
+    });
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-4 py-6 sm:px-6">
@@ -59,21 +61,36 @@ export default async function NovelsPage() {
         <div className="border-b border-hairline px-4 py-6">
           <p className="text-sm text-muted">
             <span className="text-amber">&gt;</span>{" "}
-            <span className="cursor text-fg">what I read</span>
+            <span className="cursor text-fg">what i read</span>
           </p>
           <p className="mt-3 text-sm text-fg/80">
-            I read a lot of long-running web serials — the kind with deep,
-            rule-driven worlds you can disappear into for months. Lately
-            that&apos;s mostly Chinese cultivation (xianxia). A few I&apos;d
-            actually recommend, and why.
+            long-running web serials, mostly chinese. one review per book,
+            written after a first read and revised after the next. the rest of
+            the list is what&apos;s on the shelf.
+          </p>
+          <p className="mt-2 text-xs text-muted">
+            the full shelf, every book and where i&apos;m up to, lives on{" "}
+            <a
+              href="https://novel.anthonyta.dev/user/mando"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber hover:underline"
+            >
+              webnovelist ↗
+            </a>
           </p>
         </div>
 
         {/* the list — the curated source of truth */}
         <div className="px-4 py-5">
           <div className="space-y-6">
-            {ordered.map((n) => (
-              <NovelRow key={n.en} n={n} pct={pctByTitle.get(n.en) ?? null} />
+            {ordered.map(({ n, review }) => (
+              <NovelRow
+                key={n.en}
+                n={n}
+                review={review}
+                pct={pctByTitle.get(n.en) ?? null}
+              />
             ))}
           </div>
         </div>
@@ -160,13 +177,29 @@ function GutterOrnament() {
   );
 }
 
-function NovelRow({ n, pct }: { n: Novel; pct: number | null }) {
+function NovelRow({
+  n,
+  review,
+  pct,
+}: {
+  n: Novel;
+  review?: NovelReview;
+  pct: number | null;
+}) {
   const status =
     n.status === "reading" && pct != null ? `reading · ${pct}%` : n.status;
   return (
     <article>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <h3 className="text-fg">{n.en}</h3>
+        <h3 className="text-fg">
+          {review ? (
+            <Link href={`/novels/${review.slug}`} className="hover:text-amber">
+              {n.en}
+            </Link>
+          ) : (
+            n.en
+          )}
+        </h3>
         {n.zh && (
           <span lang="zh" className={`${zh} text-sm text-muted`}>
             {n.zh}
@@ -188,6 +221,19 @@ function NovelRow({ n, pct }: { n: Novel; pct: number | null }) {
       </div>
       {n.author && <p className="mt-0.5 text-xs text-muted/70">{n.author}</p>}
       <p className="mt-1.5 text-sm text-fg/80">{n.take}</p>
+      {review && (
+        <p className="mt-1.5 text-xs">
+          <Link
+            href={`/novels/${review.slug}`}
+            className="text-amber hover:underline"
+          >
+            read the review →
+          </Link>{" "}
+          <span className="text-muted/70">
+            · {review.read} · {review.date}
+          </span>
+        </p>
+      )}
     </article>
   );
 }

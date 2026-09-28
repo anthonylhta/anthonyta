@@ -9,7 +9,8 @@
  * matter how many novels are marked "reading" in the tracker, the page shows only
  * what's curated below.
  *
- * `take` lines are drafts — edit freely; they should read as genuine interest.
+ * `take` is a one-line lowercase blurb; the long-form thoughts live in
+ * `reviews.tsx`, keyed by the `en` title.
  */
 
 export type NovelStatus = "reading" | "finished" | "paused";
@@ -32,7 +33,7 @@ export const novels: Novel[] = [
     zh: "蛊真人",
     author: "Gu Zhen Ren",
     status: "reading",
-    take: "A genuinely amoral villain protagonist — not the usual fake edginess — but I mostly recommend it for the power system. Cultivation runs on Gu: parasitic insects that each grant a single ability, refined and combined like a kit. And unlike most xianxia, the world advances forward — new methods get discovered every era, so ancient cultivators aren't automatically the strongest. Banned in China in 2019, left unfinished.",
+    take: "the power system is the reason to read it: gu, parasitic insects that each grant one ability, refined and combined like a kit. the world moves forward too, new methods every era, so the ancients aren't automatically the strongest. long, dense, and the closest thing i have to a favourite. banned in china in 2019, left unfinished.",
     link: "https://www.novelupdates.com/series/reverend-insanity/",
   },
   {
@@ -41,7 +42,7 @@ export const novels: Novel[] = [
     author: "Er Liang Bai Kai",
     status: "reading",
     aliases: ["Eighteen layers of hell: lying is forbidden"],
-    take: "A survival-deduction story set in a hell where lying triggers instant death — so the whole game is getting other people to lie instead. The idea I find clever: the world's rules are just past lies that were never disproven and hardened into law. The lead never lies outright; he sets up situations where others expose themselves.",
+    take: "a survival-deduction story in a hell where lying kills you on the spot, so the whole game is getting other people to lie instead. the world's rules are just old lies nobody disproved.",
   },
 ];
 
