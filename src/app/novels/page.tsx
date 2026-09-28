@@ -68,6 +68,17 @@ export default async function NovelsPage() {
             written after a first read and revised after the next. the rest of
             the list is what&apos;s on the shelf.
           </p>
+          <p className="mt-2 text-xs text-muted">
+            the full shelf, every book and where i&apos;m up to, lives on{" "}
+            <a
+              href="https://novel.anthonyta.dev/user/mando"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-amber hover:underline"
+            >
+              webnovelist ↗
+            </a>
+          </p>
         </div>
 
         {/* the list — the curated source of truth */}
