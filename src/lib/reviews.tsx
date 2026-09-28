@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Spoiler } from "@/components/SpoilerFold";
 
 /**
  * /novels/[slug] — the long-form reviews, versioned in code like the notes. One
@@ -20,6 +21,9 @@ export interface NovelReview {
   date: string;
   /** one plain-text line for the page description / link unfurl */
   summary: string;
+  /** set when the body carries inline <Spoiler> folds: the page shows the
+   * warning line and the show-all toggle */
+  spoilers?: boolean;
   sections: { id: string; title: string; body: ReactNode }[];
 }
 
@@ -254,6 +258,270 @@ export const reviews: NovelReview[] = [
             author&apos;s intended meaning. blast your brain with a thousand,
             then ten thousand, and when you go back and start from ten it reads
             easy. the brain has seen worse.
+          </p>
+        ),
+      },
+    ],
+  },
+  {
+    slug: "reverend-insanity",
+    novel: "Reverend Insanity",
+    read: "first read",
+    caughtUp: "finished at ch. 2334, the pre-ban end (aug 2024 → feb 2025)",
+    via: "human translation",
+    date: "2026-09-29",
+    spoilers: true,
+    summary:
+      "must read. the gate isn't the villain lead people warn you about. it's the length, and one long arc in the middle that asks you to keep walking.",
+    sections: [
+      {
+        id: "verdict",
+        title: "the verdict",
+        body: (
+          <p>
+            must read. i said that the night i finished it, with the last
+            chapter cutting out mid-fight and nothing resolved, and it&apos;s
+            still what i&apos;d say. five months on and off for one novel is a
+            lot of time, and it was worth every bit. the gate isn&apos;t the
+            villain lead people warn you about. it&apos;s the length, and one
+            long arc in the middle that asks you to keep walking. if you can do
+            that, you get cultivation done correctly, a diamond in all the slop.
+          </p>
+        ),
+      },
+      {
+        id: "pitch",
+        title: "the pitch",
+        body: (
+          <p>
+            a cultivator who has already lived five hundred years gets sent back
+            to the start with everything he learned. cultivation runs on gu,
+            insects that each grant one ability, refined and combined like a
+            kit, and the world keeps inventing new methods, so the ancients
+            aren&apos;t automatically the strongest. his goal is one line,
+            eternal life, and he&apos;s told early it&apos;s impossible. he goes
+            anyway. the whole novel is the distance between him and it.
+          </p>
+        ),
+      },
+      {
+        id: "about",
+        title: "what it's about",
+        body: (
+          <>
+            <p>
+              the journey, not the destination, and the book tells you that
+              early. other stories use that line at the end as the gotcha, to
+              justify a questionable ending with &quot;it was the journey all
+              along&quot;. this one says it up front: the goal is impossible,
+              the road will be tragic, painful and lonely, and he still does all
+              he can. a clearly defined goal with the middle stretched so far
+              you can&apos;t gauge what&apos;s left. i think that&apos;s what
+              good writing is.
+            </p>
+            <p>
+              running beside the main story is the legends of ren zu, the
+              world&apos;s own myth, told a piece at a time. each piece is a
+              lesson, and each one lands right when a character is living it.
+              it&apos;s how the book carries its themes without stopping to
+              preach them.
+            </p>
+          </>
+        ),
+      },
+      {
+        id: "works",
+        title: "what works",
+        body: (
+          <ul>
+            <li>
+              the mc. a transmigrator done correctly. he carries what he learned
+              on earth, adapts to this world, and acts like someone who has
+              already lived a long time. compare the slop counterparts where the
+              mc loses his mind, does something questionable and acts like a
+              literal fifteen year old. fang yuan stays true to what his
+              character is depicted to be, and that consistency is what makes
+              following him satisfying.
+            </li>
+            <li>
+              nothing is withheld. my pet peeve is authors hiding the plan and
+              the motive from the audience, not just from the other characters,
+              and making you wait until the final chapter to find out why any of
+              it happened. when the whole point of the arc is why, withholding
+              the answer from the reader is just plot twist slop. that&apos;s
+              attack on titan&apos;s entire back half. RI does hide things
+              sometimes,{" "}
+              <Spoiler k="rank9">
+                like fang yuan hiding his rank 9 from both the venerables and
+                the reader,
+              </Spoiler>{" "}
+              but that&apos;s one section done for mystery, and it makes sense
+              in context. the story isn&apos;t built on it. at every other point
+              you know what he wants and why, so the tension is in watching him
+              pull it off, not in decoding him.
+            </li>
+            <li>
+              the power system. the closest thing i can compare it to is nen in
+              hunter x hunter: one simple base, gu here, nen there, and
+              everything built on top of it. both are good. RI is better because
+              it&apos;s clearly defined. in hxh it&apos;s often ambiguous how
+              strong someone is and why. here you have ranks and dao marks, so
+              you always know where someone sits and what got them there. mortal
+              to immortal is a real qualitative change, not a bigger number, and
+              inside each stage the levels are defined, so nothing feels like a
+              surprise the author needed. power comes from accumulation, and the
+              book respects that:{" "}
+              <Spoiler k="accumulation">
+                central continent should feel like thanos, because they&apos;ve
+                accumulated for ages, and duke long should not be easily beaten,
+                because he has lived for god knows how long as a pseudo
+                venerable and designed a battle system with no apparent
+                weakness, which he did.
+              </Spoiler>{" "}
+              you can&apos;t brute force anyone. the mc is smart, everyone is
+              smart, and the fights are good to watch.
+            </li>
+            <li>
+              the peaks.{" "}
+              <Spoiler k="peaks">
+                refining fixed immortal travel. taking the sovereign body. the
+                perseverance arc. destroying fate gu. and the last one before
+                the translation ends, the rank 9 reveal, a whole arc&apos;s
+                accumulation landing in a single moment. the fate volume alone
+                could have been the ending of a lesser book.
+              </Spoiler>{" "}
+              to give a sense of scale without spoiling anything, the second
+              fate war is an infinity war level event: every faction on the
+              board at once, and a finale you can feel even if you don&apos;t
+              follow every piece. the peaks aren&apos;t really fights. most of
+              them are mid-battle moments where the whole arc&apos;s
+              accumulation lands at once. there are smaller peaks in between and
+              none of them come close. i&apos;d argue they&apos;re greater than
+              anything in animanga. i can&apos;t say novels in general, i
+              haven&apos;t read enough, but animanga for sure.
+            </li>
+            <li>
+              the world moves forward. it&apos;s standard world building in
+              shape, tutorial village, the next town, the next region, until he
+              can go anywhere, but it&apos;s done well, and new methods keep
+              being discovered every era, so the past isn&apos;t automatically
+              stronger than the present.
+            </li>
+          </ul>
+        ),
+      },
+      {
+        id: "doesnt",
+        title: "what doesn't",
+        body: (
+          <ul>
+            <li>
+              a caveat first. this was my first webnovel, and i came from anime,
+              manga and manhwa, which are fast. the mc leaves the tutorial area,
+              his clan, around chapter 200. the solo leveling webnovel is 270
+              chapters total. that&apos;s the speed difference i wasn&apos;t
+              used to.
+            </li>
+            <li>
+              the long arc in the middle.{" "}
+              <Spoiler k="zombie">
+                he becomes an immortal zombie and stays at the same rank for
+                something like 250 chapters, until the sovereign fetus fixes
+                him.
+              </Spoiler>{" "}
+              a lot of moving around, world building and accumulating. i still
+              don&apos;t know if that&apos;s a bad thing or a necessary thing.
+              the peaks need the slog to get there, and every slow part leads to
+              one, so i honestly can&apos;t call it a flaw.
+            </li>
+            <li>
+              webnovel repetition. key facts get restated so readers on the
+              latest chapter don&apos;t forget them. that&apos;s the format, not
+              the author, but it&apos;s there.
+            </li>
+            <li>
+              no ending. it hasn&apos;t finished, so this can&apos;t be a full
+              review. we still don&apos;t know how much is left, and the author
+              hints at a lot more.
+            </li>
+          </ul>
+        ),
+      },
+      {
+        id: "who",
+        title: "who it's for",
+        body: (
+          <>
+            <p>
+              anyone who wants cultivation done correctly. it has most of what
+              you want: good characters, a good world, good fights, good peaks,
+              good themes. it&apos;s why people call it one of the big three
+              webnovels while it&apos;s still unfinished. if you liked the mind
+              games in 18 levels or usogui, this is the same trait in a fighting
+              context, with a far bigger world around it. everyone is the
+              villain to fang yuan, or he&apos;s the villain to the whole world,
+              and most of the cast are good in their own right.
+            </p>
+            <p>
+              on the villain lead, since it&apos;s the thing everyone has heard.
+              he is one. but it isn&apos;t the gimmick, and it isn&apos;t the
+              point. the edgy parts are early, they show his nature and what
+              he&apos;s capable of, and then the book moves on and you mostly
+              forget about it. there really aren&apos;t that many of them.
+              i&apos;m not defending him. it&apos;s who he is and how the author
+              wants you to see his motivation for chasing the goal. if
+              that&apos;s your reason for skipping it, it&apos;s a worse reason
+              than you think.
+            </p>
+          </>
+        ),
+      },
+      {
+        id: "stuck",
+        title: "the bit that stuck",
+        body: (
+          <p>
+            the mc and the road he&apos;s on. watching someone ruthlessly chase
+            the thing he wants against the world, against fate, against
+            everything, with all the lessons of a previous life behind him. and
+            the ren zu legends running beside it, so that every lesson he&apos;s
+            living has already been told as a myth. the story hands you its
+            meaning in pieces while it happens, not in a reveal at the end.
+          </p>
+        ),
+      },
+      {
+        id: "practical",
+        title: "practical",
+        body: (
+          <p>
+            you can read it on various sites online, translation quality varies.
+            it took me five months on and off, august to february, 2334
+            chapters. the way i see the pacing is mountains.{" "}
+            <Spoiler k="mountains">
+              you start on a small one, his village, and it&apos;s slow, then
+              the peak where he kills his clan and resets his talent to grade A.
+              then a whole trek to the next peak, refining fixed immortal
+              travel. then another stretch fixing dang mountain and so on.
+            </Spoiler>{" "}
+            peaks and valleys. it&apos;s the journey, and expecting every
+            chapter to be dopamine is a flawed way to consume media of this
+            scale. perseverance is a big theme in the book, and if you can bring
+            some without it becoming a burden on your reading, you&apos;ll be
+            rewarded.
+          </p>
+        ),
+      },
+      {
+        id: "reread",
+        title: "reread",
+        body: (
+          <p>
+            must, and i&apos;d need to. i wrote at the fate volume that i
+            couldn&apos;t give full thoughts without skimming the whole thing
+            again, and that&apos;s still true. the unfinished ending
+            doesn&apos;t change it. knowing where the peaks are makes the second
+            read faster.
           </p>
         ),
       },
