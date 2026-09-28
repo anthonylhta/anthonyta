@@ -17,7 +17,13 @@ export async function generateMetadata({
 }) {
   const { slug } = await params;
   const review = getReview(slug);
-  return { title: review ? `${review.novel} · novels` : "novels" };
+  if (!review) return { title: "novels" };
+  const title = `${review.novel} · novels`;
+  return {
+    title,
+    description: review.summary,
+    openGraph: { title, description: review.summary },
+  };
 }
 
 const zh = "font-[family-name:var(--font-zh)]";

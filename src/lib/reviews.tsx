@@ -18,6 +18,8 @@ export interface NovelReview {
   via: string;
   /** ISO date the review was written */
   date: string;
+  /** one plain-text line for the page description / link unfurl */
+  summary: string;
   sections: { id: string; title: string; body: ReactNode }[];
 }
 
@@ -31,6 +33,8 @@ export const reviews: NovelReview[] = [
     caughtUp: "caught up at ch. 949 (the latest in english)",
     via: "ai translation",
     date: "2026-09-28",
+    summary:
+      "yes, but probably not for you. the novel is amazingly good. the problem is the reader, not the book.",
     sections: [
       {
         id: "verdict",
