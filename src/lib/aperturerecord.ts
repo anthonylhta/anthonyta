@@ -15,10 +15,17 @@ import { daoRows } from "./apertureview";
  */
 
 /**
- * How many archived seals the band fetches — and therefore decrypts — per load.
- * Weekly seals make this about a quarter of history on screen; everything older
- * is a count ("+n earlier"), not a request. The cap is the whole reason the
- * band's cost stays flat as years accrue.
+ * How many WEEKS of archived seals the band fetches — and therefore decrypts —
+ * per load: about a quarter of history on screen, everything older a count, not
+ * a request. The cap is the whole reason the band's cost stays flat as years
+ * accrue.
+ *
+ * The unit is the ISO week, not the seal. A ruling or a built emission is
+ * folded in on the day it lands (an out-of-cycle sync), and the counters it
+ * carries are the Wednesday's: September 2026 archived eleven days, and twelve
+ * SEALS reached back five weeks of flat-stepped strips. One seal per week — the
+ * LAST of the week, since each sync is a superset of the one before — keeps
+ * every column a week and twelve columns a quarter.
  */
 export const RECORD_FETCH_CAP = 12;
 
@@ -29,10 +36,26 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** What the band should fetch, and how much history it is NOT showing. */
 export interface RecordPlan {
-  /** Days to fetch, newest first, at most `RECORD_FETCH_CAP`. */
+  /** Days to fetch, newest first — the last seal of each of the newest
+   *  `RECORD_FETCH_CAP` weeks. */
   fetch: string[];
-  /** Well-formed days beyond the cap — rendered as a count, never fetched. */
+  /** Well-formed days the plan leaves unfetched — the weeks beyond the cap AND
+   *  the earlier seals of a fetched week — so the band's total still reads the
+   *  whole listing. */
   older: number;
+}
+
+/** `2026-09-05` → `2026-W36`: the ISO week a day falls in (Monday to Sunday,
+ *  numbered from the week holding the year's first Thursday), UTC-midnight math
+ *  so no zone can move a Sunday seal into Monday's week. */
+export function isoWeekOf(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  // Shift to the Thursday of this week: it decides both the ISO year and week.
+  t.setUTCDate(t.getUTCDate() + 3 - ((t.getUTCDay() + 6) % 7));
+  const jan1 = Date.UTC(t.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((t.getTime() - jan1) / 86_400_000 + 1) / 7);
+  return `${t.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
 /**
@@ -51,10 +74,17 @@ export function planRecordFetch(listing: unknown): RecordPlan {
     ),
   ];
   days.sort((a, b) => b.localeCompare(a));
-  return {
-    fetch: days.slice(0, RECORD_FETCH_CAP),
-    older: Math.max(0, days.length - RECORD_FETCH_CAP),
-  };
+  // Newest first, so the first day seen in a week is the week's last seal.
+  const weeks = new Set<string>();
+  const fetch: string[] = [];
+  for (const day of days) {
+    const week = isoWeekOf(day);
+    if (weeks.has(week)) continue;
+    if (weeks.size === RECORD_FETCH_CAP) break;
+    weeks.add(week);
+    fetch.push(day);
+  }
+  return { fetch, older: days.length - fetch.length };
 }
 
 /** One archived seal as the band draws it. */
