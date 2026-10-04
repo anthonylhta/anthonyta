@@ -103,9 +103,8 @@ describe("planRecordFetch", () => {
   });
 
   it("keeps the band's total honest: fetched + older is the whole listing", () => {
-    const days = Array.from(
-      { length: 40 },
-      (_, i) => new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10),
+    const days = Array.from({ length: 40 }, (_, i) =>
+      new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10),
     );
     const plan = planRecordFetch(days);
     expect(plan.fetch.length + plan.older).toBe(40);
