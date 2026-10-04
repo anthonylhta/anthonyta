@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { apertureHistDay, apertureHistPath } from "./aevcontext";
 import { type ApertureDoc, type AperturePath } from "./aperture";
 import {
+  isoWeekOf,
   marksTrends,
   planRecordFetch,
   platformTrends,
@@ -71,15 +72,43 @@ describe("planRecordFetch", () => {
       expect(planRecordFetch(bad)).toEqual({ fetch: [], older: 0 });
   });
 
-  it("counts everything past the cap as older, never fetching it", () => {
-    const days = Array.from(
-      { length: RECORD_FETCH_CAP + 5 },
-      (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}`,
-    );
+  it("counts every week past the cap as older, never fetching it", () => {
+    // One Wednesday seal a week, cap + 5 weeks of them.
+    const days = Array.from({ length: RECORD_FETCH_CAP + 5 }, (_, i) => {
+      const t = new Date(Date.UTC(2026, 0, 7 + 7 * i));
+      return t.toISOString().slice(0, 10);
+    });
     const plan = planRecordFetch(days);
     expect(plan.fetch).toHaveLength(RECORD_FETCH_CAP);
-    expect(plan.fetch[0]).toBe(`2026-01-${RECORD_FETCH_CAP + 5}`);
+    expect(plan.fetch[0]).toBe(days[days.length - 1]);
     expect(plan.older).toBe(5);
+  });
+
+  it("fetches one seal a week — the week's last — and counts the rest as older", () => {
+    // A ruling folded in on a Friday, a built emission on a Monday: the week's
+    // Wednesday seal is superseded by its Friday superset, and Monday's sync
+    // opens the next week on its own. Sunday still belongs to the week before.
+    const days = [
+      "2026-09-02", // Wed, W36
+      "2026-09-04", // Fri, W36 — the week's last
+      "2026-09-06", // Sun, W36 — still W36 (ISO weeks end on Sunday)...
+      "2026-09-07", // Mon, W37 — ...and Monday opens W37
+      "2026-09-09", // Wed, W37 — the week's last
+      "2026-09-16", // Wed, W38
+    ];
+    expect(planRecordFetch(days)).toEqual({
+      fetch: ["2026-09-16", "2026-09-09", "2026-09-06"],
+      older: 3,
+    });
+  });
+
+  it("keeps the band's total honest: fetched + older is the whole listing", () => {
+    const days = Array.from({ length: 40 }, (_, i) =>
+      new Date(Date.UTC(2026, 7, 1 + i)).toISOString().slice(0, 10),
+    );
+    const plan = planRecordFetch(days);
+    expect(plan.fetch.length + plan.older).toBe(40);
+    expect(plan.fetch.length).toBeLessThanOrEqual(RECORD_FETCH_CAP);
   });
 
   it("accepts exactly what the aevcontext family accepts", () => {
@@ -93,6 +122,16 @@ describe("planRecordFetch", () => {
       expect(planRecordFetch([day]).fetch).toEqual([]);
       expect(apertureHistDay(apertureHistPath(day))).toBeNull();
     }
+  });
+});
+
+describe("isoWeekOf", () => {
+  it("numbers weeks Monday to Sunday from the year's first Thursday", () => {
+    expect(isoWeekOf("2026-09-06")).toBe("2026-W36"); // Sunday closes W36
+    expect(isoWeekOf("2026-09-07")).toBe("2026-W37"); // Monday opens W37
+    expect(isoWeekOf("2026-01-01")).toBe("2026-W01"); // a Thursday
+    expect(isoWeekOf("2027-01-01")).toBe("2026-W53"); // a Friday — still 2026's year
+    expect(isoWeekOf("2024-12-30")).toBe("2025-W01"); // a Monday — already 2025's
   });
 });
 

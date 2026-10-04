@@ -222,7 +222,7 @@ interface RecordState {
   /** The platform's two point sources — bars met and bait held, seal by seal.
    *  Positive-only, so the strips only ever climb or stand still. */
   platform: RecordTrend[];
-  /** Well-formed archived days beyond the fetch cap — counted, never fetched. */
+  /** Well-formed archived days the plan left unfetched — counted, never fetched. */
   older: number;
   /** Fetched days that would not serve, decrypt or normalize. */
   unreadable: number;
@@ -1311,7 +1311,8 @@ export function ApertureInner({
           strips below it — the per-seal rows moved out when the rulings ledger
           started explaining each seal in its own words. Folded at rest: the
           history is a lookup, and the one line at rest says where the longest
-          streak started and where it stands. */}
+          streak started and where it stands. One column per ISO week — the
+          week's last seal — so a ruling folded in mid-week draws no step. */}
       {!hidden.has("record") && record && recordTotal > 0 && (
         <>
           <ZoneHeader
@@ -1330,7 +1331,7 @@ export function ApertureInner({
                 {recordOpen ? "▾" : "▸"}
               </span>
               <span className="min-w-0 flex-1 truncate text-muted">
-                streaks · strikes · marks · platform — seal by seal
+                streaks · strikes · marks · platform — week by week
               </span>
               {recordLead && (
                 <span className="shrink-0 text-[11px] tabular-nums text-muted/60">
@@ -1344,7 +1345,7 @@ export function ApertureInner({
                 {record.trends.length > 0 && (
                   <>
                     <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                      streaks · seal by seal
+                      streaks · week by week
                     </p>
                     {record.trends.map((t) => (
                       <TrendRow
@@ -1365,7 +1366,7 @@ export function ApertureInner({
                 {record.strikes.length > 0 && (
                   <>
                     <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                      strikes · week by seal
+                      strikes · week by week
                     </p>
                     {record.strikes.map((t) => (
                       <TrendRow
@@ -1385,7 +1386,7 @@ export function ApertureInner({
                 {record.marks.length > 0 && (
                   <>
                     <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                      marks · seal by seal
+                      marks · week by week
                     </p>
                     {record.marks.map((t) => (
                       <TrendRow
@@ -1405,7 +1406,7 @@ export function ApertureInner({
                 {record.platform.length > 0 && (
                   <>
                     <p className="mt-2 mb-1 text-[10px] uppercase tracking-[0.12em] text-muted/60">
-                      platform · seal by seal
+                      platform · week by week
                     </p>
                     {record.platform.map((t) => (
                       <TrendRow
