@@ -99,7 +99,7 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       {/* The section's one advertisement — the verbs, not a row to select. */}
       <li className="flex items-center justify-between px-3 py-2 text-sm text-muted">
         <span className="truncate">
-          w 67.4 · todo … · ja … · now … · cast … · pay 1234
+          w 67.4 · todo … · ja … · zh … · now … · cast … · pay 1234
         </span>
         <span className="text-xs text-muted">type to log</span>
       </li>
@@ -155,9 +155,10 @@ function CaptureRow({
   return <ActionRow {...row} />;
 }
 
-/** The study verb, over the Japanese study log — the same store and save the
- *  reader's japan lane writes through, dated to the day the row names (the
- *  weigh-in's rule), so a palette left open past midnight logs what it said. */
+/** The study verbs, over the one study log — the same store and save the
+ *  reader's japan lane writes through, the verb naming the language, dated to
+ *  the day the row names (the weigh-in's rule), so a palette left open past
+ *  midnight logs what it said. */
 function StudyRow({
   action,
   onDone,
@@ -177,6 +178,7 @@ function StudyRow({
         addStudy(base, {
           date: action.day,
           source: action.source,
+          lang: action.lang,
           ...(action.minutes !== undefined ? { minutes: action.minutes } : {}),
         }),
       ),

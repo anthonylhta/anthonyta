@@ -17,7 +17,7 @@ import { MAX_NAME as MAX_CAST_NAME } from "./gumarks";
 import { dayHeading } from "./meals";
 import { aud } from "./money";
 import { MAX_NOW_KEY, MAX_NOW_TEXT } from "./now";
-import { MAX_STUDY_MINUTES, MAX_STUDY_SOURCE } from "./study";
+import { MAX_STUDY_MINUTES, MAX_STUDY_SOURCE, type StudyLang } from "./study";
 import { MAX_TEXT } from "./todo";
 
 /** One parsed log line — the write the section will make on ↵. */
@@ -27,7 +27,13 @@ export type QuickLogAction =
   | { kind: "now"; key: string; text: string }
   /** `stones` in cents, the gu book's unit. */
   | { kind: "cast"; name: string; stones: number; day: string }
-  | { kind: "study"; source: string; minutes?: number; day: string }
+  | {
+      kind: "study";
+      lang: StudyLang;
+      source: string;
+      minutes?: number;
+      day: string;
+    }
   /** `amountCents` in cents, the fin ledger's unit. */
   | { kind: "pay"; amountCents: number; day: string };
 
@@ -58,9 +64,10 @@ const CAST = /^cast\s+(\S.*?)\s+(\d+(?:\.\d{1,2})?)$/i;
 /** The book's stones bound — a cast of ten million dollars is a typo. */
 const MAX_STONES = 1e9;
 
-/** `ja <what was studied>` with an optional trailing `20m` / `20 min`. */
-const JA = /^ja\s+(\S.*)$/i;
-const JA_MINUTES = /^(?:(.*?)\s+)?(\d+)\s*(?:m|min)$/i;
+/** `ja <what was studied>` / `zh <what was studied>` — the verb is the
+ *  language — with an optional trailing `20m` / `20 min`. */
+const STUDY = /^(ja|zh)\s+(\S.*)$/i;
+const STUDY_MINUTES = /^(?:(.*?)\s+)?(\d+)\s*(?:m|min)$/i;
 
 /** Read a palette query as a log line, or `null` for "this is not one". */
 export function parseQuickLog(
@@ -84,11 +91,12 @@ export function parseQuickLog(
     if (clean) return { kind: "todo", text: clean };
   }
 
-  const ja = JA.exec(text);
-  if (ja) {
-    let source = ja[1].trim();
+  const study = STUDY.exec(text);
+  if (study) {
+    const lang = study[1].toLowerCase() as StudyLang;
+    let source = study[2].trim();
     let minutes: number | undefined;
-    const timed = JA_MINUTES.exec(source);
+    const timed = STUDY_MINUTES.exec(source);
     if (timed) {
       minutes = Number(timed[2]);
       // A sitting of no minutes, or ten hours, is a typo — refused, not logged.
@@ -101,6 +109,7 @@ export function parseQuickLog(
     if (source)
       return {
         kind: "study",
+        lang,
         source,
         ...(minutes !== undefined ? { minutes } : {}),
         day: today,
@@ -157,7 +166,7 @@ export function quickLogLabel(action: QuickLogAction): string {
     case "cast":
       return `cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
     case "study":
-      return `study · ${studyText(action)}`;
+      return `study ${action.lang} · ${studyText(action)}`;
     case "pay":
       return `pay · ${aud(action.amountCents / 100)} · ${dayHeading(action.day)}`;
   }
@@ -182,7 +191,7 @@ export function quickLogSaved(action: QuickLogAction): string {
     case "cast":
       return `saved ✓ cast · ${clip(action.name)} · ${aud(action.stones / 100)} · ${dayHeading(action.day)}`;
     case "study":
-      return `saved ✓ study · ${studyText(action)}`;
+      return `saved ✓ study ${action.lang} · ${studyText(action)}`;
     case "pay":
       return `saved ✓ pay · ${aud(action.amountCents / 100)} · ${dayHeading(action.day)}`;
   }

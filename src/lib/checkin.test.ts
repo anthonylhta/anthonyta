@@ -232,6 +232,7 @@ const COUNTERS: CountersInput = {
   gymSessions: 2,
   mealDays: 6,
   studyDays: ["2026-09-10", "2026-09-13"],
+  chineseDays: ["2026-09-12"],
   marks: { since: [], casts: [] },
   wealth: WEALTH,
 };
@@ -242,6 +243,7 @@ describe("checkin — the counters", () => {
       [
         "Craft: +5 commit days (09-09..09-15, the github calendar)",
         "Japanese: +2 study days (09-10, 09-13)",
+        "Chinese: +1 study days (09-12)",
         "Training: +2 sessions · Meals: +6 days logged",
         "Net worth: $20,000 (invested $12,000 · cash $5,000 · HISA $3,000) · wk +$250",
         "gu marks unsealed: none · casts unsealed: none",
@@ -251,9 +253,13 @@ describe("checkin — the counters", () => {
   });
 
   it("counts a week with no sittings as +0, not ?", () => {
-    expect(countersBlock({ ...COUNTERS, studyDays: [] })).toContain(
-      "Japanese: +0 study days",
-    );
+    const block = countersBlock({
+      ...COUNTERS,
+      studyDays: [],
+      chineseDays: [],
+    });
+    expect(block).toContain("Japanese: +0 study days");
+    expect(block).toContain("Chinese: +0 study days");
   });
 
   it("names the pending marks and casts", () => {
@@ -278,6 +284,7 @@ describe("checkin — the counters", () => {
         gymSessions: null,
         mealDays: null,
         studyDays: null,
+        chineseDays: null,
         marks: null,
         wealth: null,
       }),
@@ -285,6 +292,7 @@ describe("checkin — the counters", () => {
       [
         "Craft: ? commit days",
         "Japanese: ? study days",
+        "Chinese: ? study days",
         "Training: ? sessions · Meals: ? days logged",
         "Net worth: ?",
         "gu marks unsealed: ? · casts unsealed: ?",

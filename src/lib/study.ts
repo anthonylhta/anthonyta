@@ -1,10 +1,16 @@
 import { isValidSeq } from "./seqrule";
 
 /**
- * study — the Japanese study log: one row per sitting, a day and a source, with
+ * study — the language study log: one row per sitting, a day and a source, with
  * the minutes when they were worth writing down. Written from the reader's
- * japan lane and the palette's `ja` verb, read by the check-in's counters, the
- * vocabulary gu's clock and the dao band's live week.
+ * japan lane and the palette's `ja` / `zh` verbs, read by the check-in's
+ * counters, the vocabulary gu's clock and the dao band's live week.
+ *
+ * ONE LOG, TWO LANGUAGES. A row carries `lang` — `ja` or `zh` — and every
+ * reading counts one language at a time, so the Japanese node never reads a
+ * Chinese sitting. A row with no `lang` is Japanese: the log was Japanese-only
+ * before Chinese arrived, and the rows written then keep their meaning without
+ * a migration.
  *
  * A DAY IS A DAY. Everything that reads this log counts distinct days, never
  * rows or minutes: two articles and an Anki run on a Thursday are one study
@@ -22,12 +28,43 @@ export const MAX_STUDY_SOURCE = 200;
 /** Ten hours in one row is a typo, not a sitting. */
 export const MAX_STUDY_MINUTES = 600;
 
+export const STUDY_LANGS = ["ja", "zh"] as const;
+export type StudyLang = (typeof STUDY_LANGS)[number];
+/** The language a row with no `lang` is in — the log's first and only one until
+ *  Chinese was added. */
+export const DEFAULT_STUDY_LANG: StudyLang = "ja";
+
 export interface StudyEntry {
   /** The Sydney day it was studied, `YYYY-MM-DD`. */
   date: string;
   /** What was studied — a headline, a deck, a book. */
   source: string;
   minutes?: number;
+  /** Absent means Japanese (`DEFAULT_STUDY_LANG`); only ever written for the
+   *  others, so the stored rows stay as small as they were. */
+  lang?: StudyLang;
+}
+
+function isLang(x: unknown): x is StudyLang {
+  return (
+    typeof x === "string" && (STUDY_LANGS as readonly string[]).includes(x)
+  );
+}
+
+/** A row's language, the absent default read as Japanese. */
+export function langOf(entry: StudyEntry): StudyLang {
+  return entry.lang ?? DEFAULT_STUDY_LANG;
+}
+
+/**
+ * The seal names a study log by activity — `study` is the Japanese node's, as
+ * it was before there were two, and `study:zh` the Chinese node's (a gu's `log`
+ * uses the same names). Null for an activity that is no study log at all.
+ */
+export function studyLangFor(key: string): StudyLang | null {
+  if (key === "study") return DEFAULT_STUDY_LANG;
+  const m = /^study:(\w+)$/.exec(key);
+  return m && isLang(m[1]) ? m[1] : null;
 }
 
 export interface StudyConfig {
@@ -55,7 +92,8 @@ function normEntry(x: unknown): StudyEntry | null {
   if (!isObj(x) || !isDay(x.date) || typeof x.source !== "string") return null;
   const source = x.source.trim();
   if (source.length === 0 || source.length > MAX_STUDY_SOURCE) return null;
-  const { minutes } = x;
+  const { minutes, lang } = x;
+  if (lang !== undefined && !isLang(lang)) return null;
   if (minutes !== undefined) {
     if (
       typeof minutes !== "number" ||
@@ -64,9 +102,14 @@ function normEntry(x: unknown): StudyEntry | null {
       minutes > MAX_STUDY_MINUTES
     )
       return null;
-    return { date: x.date, source, minutes };
   }
-  return { date: x.date, source };
+  return {
+    date: x.date,
+    source,
+    ...(minutes !== undefined ? { minutes } : {}),
+    // The default language is the absent one, so a `ja` typed in is not stored.
+    ...(lang !== undefined && lang !== DEFAULT_STUDY_LANG ? { lang } : {}),
+  };
 }
 
 /** The whole record → a config, or null when the FRAME is wrong. Strict: one
@@ -109,25 +152,40 @@ export function addStudy(cfg: StudyConfig, entry: StudyEntry): StudyConfig {
   return { ...cfg, entries };
 }
 
+// Every reading takes the language it counts, Japanese when unsaid, so the
+// callers written before Chinese read exactly what they always read.
+
+/** The rows of one language, in the log's own order. */
+function rowsIn(cfg: StudyConfig, lang: StudyLang): StudyEntry[] {
+  return cfg.entries.filter((e) => langOf(e) === lang);
+}
+
 /** The newest day studied — the vocabulary gu's clock — or null for none. */
-export function lastStudyDay(cfg: StudyConfig): string | null {
-  return cfg.entries.at(-1)?.date ?? null;
+export function lastStudyDay(
+  cfg: StudyConfig,
+  lang: StudyLang = DEFAULT_STUDY_LANG,
+): string | null {
+  return rowsIn(cfg, lang).at(-1)?.date ?? null;
 }
 
 /** Distinct days studied, ever. */
-export function studyDays(cfg: StudyConfig): number {
-  return new Set(cfg.entries.map((e) => e.date)).size;
+export function studyDays(
+  cfg: StudyConfig,
+  lang: StudyLang = DEFAULT_STUDY_LANG,
+): number {
+  return new Set(rowsIn(cfg, lang).map((e) => e.date)).size;
 }
 
 /** The distinct days studied inside a window, oldest first — the check-in's
- *  Japanese line. */
+ *  language lines. */
 export function studyDaysIn(
   cfg: StudyConfig,
   window: { from: string; to: string },
+  lang: StudyLang = DEFAULT_STUDY_LANG,
 ): string[] {
   return [
     ...new Set(
-      cfg.entries
+      rowsIn(cfg, lang)
         .map((e) => e.date)
         .filter((d) => d >= window.from && d <= window.to),
     ),
@@ -151,6 +209,7 @@ export function studyDaysTrailing(
   cfg: StudyConfig,
   today: string,
   days = 7,
+  lang: StudyLang = DEFAULT_STUDY_LANG,
 ): number[] {
   const window: string[] = [];
   let cursor = today;
@@ -160,7 +219,7 @@ export function studyDaysTrailing(
   }
   window.reverse();
   const counts = new Map<string, number>();
-  for (const e of cfg.entries)
+  for (const e of rowsIn(cfg, lang))
     counts.set(e.date, (counts.get(e.date) ?? 0) + 1);
   return window.map((d) => counts.get(d) ?? 0);
 }

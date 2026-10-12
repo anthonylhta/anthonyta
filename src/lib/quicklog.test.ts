@@ -277,12 +277,14 @@ describe("parseQuickLog — the study verb", () => {
   it("reads `ja <source> 20m` as today's sitting with its minutes", () => {
     expect(parseQuickLog("ja 東洋経済 article 20m", TODAY)).toEqual({
       kind: "study",
+      lang: "ja",
       source: "東洋経済 article",
       minutes: 20,
       day: TODAY,
     });
     expect(parseQuickLog("JA graded reader 45 min", TODAY)).toEqual({
       kind: "study",
+      lang: "ja",
       source: "graded reader",
       minutes: 45,
       day: TODAY,
@@ -292,12 +294,30 @@ describe("parseQuickLog — the study verb", () => {
   it("takes a source alone, numbers inside it included", () => {
     expect(parseQuickLog("ja anki", TODAY)).toEqual({
       kind: "study",
+      lang: "ja",
       source: "anki",
       day: TODAY,
     });
     expect(parseQuickLog("ja genki chapter 12", TODAY)).toEqual({
       kind: "study",
+      lang: "ja",
       source: "genki chapter 12",
+      day: TODAY,
+    });
+  });
+
+  it("reads `zh <source>` as a Chinese sitting, the same way", () => {
+    expect(parseQuickLog("zh 道德经 ch. 8 30m", TODAY)).toEqual({
+      kind: "study",
+      lang: "zh",
+      source: "道德经 ch. 8",
+      minutes: 30,
+      day: TODAY,
+    });
+    expect(parseQuickLog("ZH claude chat", TODAY)).toEqual({
+      kind: "study",
+      lang: "zh",
+      source: "claude chat",
       day: TODAY,
     });
   });
@@ -307,6 +327,9 @@ describe("parseQuickLog — the study verb", () => {
     expect(parseQuickLog("ja   ", TODAY)).toBeNull();
     expect(parseQuickLog("ja 20m", TODAY)).toBeNull();
     expect(parseQuickLog("japan", TODAY)).toBeNull();
+    expect(parseQuickLog("zh", TODAY)).toBeNull();
+    expect(parseQuickLog("zh 20m", TODAY)).toBeNull();
+    expect(parseQuickLog("zhang", TODAY)).toBeNull();
   });
 
   it("refuses a sitting of no minutes or past ten hours", () => {
@@ -318,23 +341,25 @@ describe("parseQuickLog — the study verb", () => {
     const action = parseQuickLog(`ja ${"x".repeat(250)}`, TODAY);
     expect(action).toEqual({
       kind: "study",
+      lang: "ja",
       source: "x".repeat(MAX_STUDY_SOURCE),
       day: TODAY,
     });
   });
 
-  it("labels the row with the minutes only when they were said", () => {
+  it("labels the row with its language, the minutes only when said", () => {
     expect(
       quickLogLabel({
         kind: "study",
+        lang: "ja",
         source: "東洋経済 article",
         minutes: 20,
         day: "2026-09-25",
       }),
-    ).toBe("study · 東洋経済 article · 20 min · fri 25 sep");
-    expect(quickLogLabel({ kind: "study", source: "anki", day: TODAY })).toBe(
-      "study · anki · tue 15 sep",
-    );
+    ).toBe("study ja · 東洋経済 article · 20 min · fri 25 sep");
+    expect(
+      quickLogLabel({ kind: "study", lang: "zh", source: "anki", day: TODAY }),
+    ).toBe("study zh · anki · tue 15 sep");
   });
 });
 
@@ -370,7 +395,13 @@ describe("quickLogSaved", () => {
 
   it("marks the sitting written", () => {
     expect(
-      quickLogSaved({ kind: "study", source: "anki", minutes: 15, day: TODAY }),
-    ).toBe("saved ✓ study · anki · 15 min · tue 15 sep");
+      quickLogSaved({
+        kind: "study",
+        lang: "ja",
+        source: "anki",
+        minutes: 15,
+        day: TODAY,
+      }),
+    ).toBe("saved ✓ study ja · anki · 15 min · tue 15 sep");
   });
 });
