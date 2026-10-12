@@ -3,12 +3,12 @@ import { isValidSeq } from "./seqrule";
 /**
  * study — the language study log: one row per sitting, a day and a source, with
  * the minutes when they were worth writing down. Written from the reader's
- * japan lane and the palette's `ja` / `zh` verbs, read by the check-in's
+ * japan lane and the palette's `ja` / `zh` / `ko` verbs, read by the check-in's
  * counters, the vocabulary gu's clock and the dao band's live week.
  *
- * ONE LOG, TWO LANGUAGES. A row carries `lang` — `ja` or `zh` — and every
- * reading counts one language at a time, so the Japanese node never reads a
- * Chinese sitting. A row with no `lang` is Japanese: the log was Japanese-only
+ * ONE LOG, THREE LANGUAGES. A row carries `lang` — `ja`, `zh` or `ko` — and
+ * every reading counts one language at a time, so the Japanese node never reads
+ * a Chinese or Korean sitting. A row with no `lang` is Japanese: the log was Japanese-only
  * before Chinese arrived, and the rows written then keep their meaning without
  * a migration.
  *
@@ -28,7 +28,7 @@ export const MAX_STUDY_SOURCE = 200;
 /** Ten hours in one row is a typo, not a sitting. */
 export const MAX_STUDY_MINUTES = 600;
 
-export const STUDY_LANGS = ["ja", "zh"] as const;
+export const STUDY_LANGS = ["ja", "zh", "ko"] as const;
 export type StudyLang = (typeof STUDY_LANGS)[number];
 /** The language a row with no `lang` is in — the log's first and only one until
  *  Chinese was added. */
@@ -58,8 +58,8 @@ export function langOf(entry: StudyEntry): StudyLang {
 
 /**
  * The seal names a study log by activity — `study` is the Japanese node's, as
- * it was before there were two, and `study:zh` the Chinese node's (a gu's `log`
- * uses the same names). Null for an activity that is no study log at all.
+ * it was before there were more, `study:zh` the Chinese node's and `study:ko`
+ * the Korean node's (a gu's `log` uses the same names). Null for an activity that is no study log at all.
  */
 export function studyLangFor(key: string): StudyLang | null {
   if (key === "study") return DEFAULT_STUDY_LANG;

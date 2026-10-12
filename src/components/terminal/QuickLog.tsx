@@ -99,7 +99,7 @@ export function QuickLog({ query, onDone, onStage }: QuickLogProps) {
       {/* The section's one advertisement — the verbs, not a row to select. */}
       <li className="flex items-center justify-between px-3 py-2 text-sm text-muted">
         <span className="truncate">
-          w 67.4 · todo … · ja … · zh … · now … · cast … · pay 1234
+          w 67.4 · todo … · ja … · zh … · ko … · now … · cast … · pay 1234
         </span>
         <span className="text-xs text-muted">type to log</span>
       </li>

@@ -322,6 +322,16 @@ describe("parseQuickLog — the study verb", () => {
     });
   });
 
+  it("reads `ko <source>` as a Korean sitting, the same way", () => {
+    expect(parseQuickLog("ko 한글 drill 15 min", TODAY)).toEqual({
+      kind: "study",
+      lang: "ko",
+      source: "한글 drill",
+      minutes: 15,
+      day: TODAY,
+    });
+  });
+
   it("is not an action until something studied is named", () => {
     expect(parseQuickLog("ja", TODAY)).toBeNull();
     expect(parseQuickLog("ja   ", TODAY)).toBeNull();
@@ -330,6 +340,8 @@ describe("parseQuickLog — the study verb", () => {
     expect(parseQuickLog("zh", TODAY)).toBeNull();
     expect(parseQuickLog("zh 20m", TODAY)).toBeNull();
     expect(parseQuickLog("zhang", TODAY)).toBeNull();
+    expect(parseQuickLog("ko", TODAY)).toBeNull();
+    expect(parseQuickLog("korea trip", TODAY)).toBeNull();
   });
 
   it("refuses a sitting of no minutes or past ten hours", () => {
