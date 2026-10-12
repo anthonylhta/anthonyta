@@ -21,6 +21,11 @@ const laozi = {
   source: "道德经 ch. 8",
   lang: "zh" as const,
 };
+const hangul = {
+  date: "2026-09-23",
+  source: "한글 drill",
+  lang: "ko" as const,
+};
 
 const log = (...entries: StudyConfig["entries"]): StudyConfig => ({
   v: 1,
@@ -152,6 +157,18 @@ describe("the readings", () => {
       0, 0, 0, 0, 1, 0, 0,
     ]);
   });
+
+  it("keeps a Korean row apart from both the others", () => {
+    const three = log(earlier, laozi, hangul, article, anki);
+    expect(lastStudyDay(three, "ko")).toBe("2026-09-23");
+    expect(lastStudyDay(cfg, "ko")).toBeNull();
+    expect(studyDays(three, "ko")).toBe(1);
+    expect(studyDays(three, "zh")).toBe(1);
+    expect(studyDays(three)).toBe(studyDays(cfg));
+    expect(studyDaysTrailing(three, "2026-09-24", 7, "ko")).toEqual([
+      0, 0, 0, 0, 0, 1, 0,
+    ]);
+  });
 });
 
 describe("studyLangFor", () => {
@@ -159,6 +176,7 @@ describe("studyLangFor", () => {
     expect(studyLangFor("study")).toBe("ja");
     expect(studyLangFor("study:ja")).toBe("ja");
     expect(studyLangFor("study:zh")).toBe("zh");
+    expect(studyLangFor("study:ko")).toBe("ko");
   });
 
   it("is null for anything that is not a study log", () => {

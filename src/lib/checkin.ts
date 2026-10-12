@@ -235,6 +235,7 @@ export interface CountersInput {
    *  one list per language; null until the log has answered. */
   studyDays: string[] | null;
   chineseDays: string[] | null;
+  koreanDays: string[] | null;
   /** The gu book's pending marks; null until the marks store has answered. */
   marks: { since: string[]; casts: { name: string; date: string }[] } | null;
   /** Net worth off the fin envelope, all in cents; null while it is locked. The
@@ -273,6 +274,7 @@ export function countersBlock(input: CountersInput): string {
     `Craft: ${craft}`,
     `Japanese: ${studied(input.studyDays)}`,
     `Chinese: ${studied(input.chineseDays)}`,
+    `Korean: ${studied(input.koreanDays)}`,
     `Training: ${training} · Meals: ${meals}`,
     `Net worth: ${wealthLine(input.wealth)}`,
     `gu marks unsealed: ${marksLine(input.marks)}`,

@@ -64,9 +64,9 @@ const CAST = /^cast\s+(\S.*?)\s+(\d+(?:\.\d{1,2})?)$/i;
 /** The book's stones bound — a cast of ten million dollars is a typo. */
 const MAX_STONES = 1e9;
 
-/** `ja <what was studied>` / `zh <what was studied>` — the verb is the
- *  language — with an optional trailing `20m` / `20 min`. */
-const STUDY = /^(ja|zh)\s+(\S.*)$/i;
+/** `ja <what was studied>` / `zh …` / `ko …` — the verb is the language —
+ *  with an optional trailing `20m` / `20 min`. */
+const STUDY = /^(ja|zh|ko)\s+(\S.*)$/i;
 const STUDY_MINUTES = /^(?:(.*?)\s+)?(\d+)\s*(?:m|min)$/i;
 
 /** Read a palette query as a log line, or `null` for "this is not one". */

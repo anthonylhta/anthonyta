@@ -955,6 +955,7 @@ export function ApertureInner({
     mealDays: checkinMeals,
     studyDays: studyCfg ? studyDaysIn(studyCfg, checkinWin) : null,
     chineseDays: studyCfg ? studyDaysIn(studyCfg, checkinWin, "zh") : null,
+    koreanDays: studyCfg ? studyDaysIn(studyCfg, checkinWin, "ko") : null,
     marks: checkin?.marks ?? null,
     wealth: checkinWealth,
   });
