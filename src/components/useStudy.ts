@@ -7,11 +7,13 @@ import { STUDY_CONTEXT } from "@/lib/aevcontext";
 import { sydneyToday } from "@/lib/fin";
 import { nextSeq } from "@/lib/seqrule";
 import {
+  DEFAULT_STUDY_LANG,
   EMPTY_STUDY,
   addStudy,
   MAX_STUDY_SOURCE,
   normalizeStudy,
   type StudyConfig,
+  type StudyLang,
 } from "@/lib/study";
 
 export interface Study {
@@ -180,12 +182,17 @@ export function useStudy(offline: boolean): Study {
     seqAlarm,
     busy,
     save,
-    log: (source: string, minutes?: number) =>
+    log: (
+      source: string,
+      minutes?: number,
+      lang: StudyLang = DEFAULT_STUDY_LANG,
+    ) =>
       save((base) =>
         addStudy(base, {
           date: sydneyToday(),
           // A headline longer than the log's cap is kept, cut to fit.
           source: source.trim().slice(0, MAX_STUDY_SOURCE),
+          lang,
           ...(minutes !== undefined ? { minutes } : {}),
         }),
       ),

@@ -9,12 +9,18 @@ import {
   studyDays,
   studyDaysIn,
   studyDaysTrailing,
+  studyLangFor,
   type StudyConfig,
 } from "./study";
 
 const article = { date: "2026-09-24", source: "東洋経済 article", minutes: 20 };
 const anki = { date: "2026-09-24", source: "anki" };
 const earlier = { date: "2026-09-20", source: "NHK news web" };
+const laozi = {
+  date: "2026-09-22",
+  source: "道德经 ch. 8",
+  lang: "zh" as const,
+};
 
 const log = (...entries: StudyConfig["entries"]): StudyConfig => ({
   v: 1,
@@ -57,9 +63,19 @@ describe("normalizeStudy", () => {
       { ...anki, minutes: 601 },
       { ...anki, minutes: 12.5 },
       { ...anki, minutes: "20" },
+      { ...anki, lang: "fr" },
+      { ...anki, lang: "" },
     ];
     for (const row of bad)
       expect(normalizeStudy({ v: 1, entries: [earlier, row] })).toBeNull();
+  });
+
+  it("keeps a Chinese row's language and drops the default one", () => {
+    expect(normalizeStudy({ v: 1, entries: [laozi] })).toEqual(log(laozi));
+    // `ja` is the absent default: typed in, it is not stored.
+    expect(
+      normalizeStudy({ v: 1, entries: [{ ...anki, lang: "ja" }] }),
+    ).toEqual(log(anki));
   });
 
   it("refuses a log past its cap", () => {
@@ -96,7 +112,9 @@ describe("addStudy", () => {
 });
 
 describe("the readings", () => {
-  const cfg = log(earlier, article, anki);
+  // A Chinese sitting sits between the Japanese ones: every Japanese reading
+  // below must read exactly as it did before the row was there.
+  const cfg = log(earlier, laozi, article, anki);
 
   it("names the newest day studied", () => {
     expect(lastStudyDay(cfg)).toBe("2026-09-24");
@@ -121,5 +139,32 @@ describe("the readings", () => {
   it("draws the trailing strip ending today, oldest first", () => {
     expect(studyDaysTrailing(cfg, "2026-09-24")).toEqual([0, 0, 1, 0, 0, 0, 2]);
     expect(studyDaysTrailing(cfg, "2026-09-25", 3)).toEqual([0, 2, 0]);
+  });
+
+  it("reads the Chinese rows alone when asked for zh", () => {
+    expect(lastStudyDay(cfg, "zh")).toBe("2026-09-22");
+    expect(lastStudyDay(log(earlier, anki), "zh")).toBeNull();
+    expect(studyDays(cfg, "zh")).toBe(1);
+    expect(
+      studyDaysIn(cfg, { from: "2026-09-18", to: "2026-09-24" }, "zh"),
+    ).toEqual(["2026-09-22"]);
+    expect(studyDaysTrailing(cfg, "2026-09-24", 7, "zh")).toEqual([
+      0, 0, 0, 0, 1, 0, 0,
+    ]);
+  });
+});
+
+describe("studyLangFor", () => {
+  it("maps the seal's activity names to a language", () => {
+    expect(studyLangFor("study")).toBe("ja");
+    expect(studyLangFor("study:ja")).toBe("ja");
+    expect(studyLangFor("study:zh")).toBe("zh");
+  });
+
+  it("is null for anything that is not a study log", () => {
+    expect(studyLangFor("gym")).toBeNull();
+    expect(studyLangFor("study:fr")).toBeNull();
+    expect(studyLangFor("study:")).toBeNull();
+    expect(studyLangFor("studying")).toBeNull();
   });
 });

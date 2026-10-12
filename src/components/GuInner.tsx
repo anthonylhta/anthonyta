@@ -188,9 +188,11 @@ export function GuInner({
     const gym = gymCfg ? lastSessionDate(gymCfg) : null;
     const meals = mealsCfg ? lastLoggedDay(mealsCfg) : null;
     const study = studyCfg ? lastStudyDay(studyCfg) : null;
+    const zh = studyCfg ? lastStudyDay(studyCfg, "zh") : null;
     const buy = fin ? lastInvestedDay(fin) : null;
     return {
       ...(study !== null ? { study } : {}),
+      ...(zh !== null ? { "study:zh": zh } : {}),
       ...logDays,
       ...(gym !== null ? { gym } : {}),
       ...(meals !== null ? { meals } : {}),

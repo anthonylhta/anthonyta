@@ -138,7 +138,12 @@ import {
   weightTrend,
   type MealsConfig,
 } from "@/lib/meals";
-import { studyDaysIn, studyDaysTrailing, type StudyConfig } from "@/lib/study";
+import {
+  studyDaysIn,
+  studyDaysTrailing,
+  studyLangFor,
+  type StudyConfig,
+} from "@/lib/study";
 import type { FormationRow, FormationStatus } from "@/lib/formations";
 import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
 import { arrow, aud, tone } from "@/lib/money";
@@ -649,9 +654,12 @@ export function ApertureInner({
               trailingProtein(mealsCfg, today, ACTIVITY_DAYS),
             )
           : null;
-      if (activity === "study")
+      const studyLang = studyLangFor(activity);
+      if (studyLang)
         return studyCfg
-          ? evidenceDaysThisWeek(studyDaysTrailing(studyCfg, today))
+          ? evidenceDaysThisWeek(
+              studyDaysTrailing(studyCfg, today, 7, studyLang),
+            )
           : null;
       const s = (series as Record<string, EvidenceSeries | undefined>)[
         activity
@@ -666,8 +674,11 @@ export function ApertureInner({
         return gymCfg ? sessionCounts(gymCfg, 7, today) : null;
       if (activity === "meals")
         return mealsCfg ? trailingProtein(mealsCfg, today, 7) : null;
-      if (activity === "study")
-        return studyCfg ? studyDaysTrailing(studyCfg, today) : null;
+      const studyLang = studyLangFor(activity);
+      if (studyLang)
+        return studyCfg
+          ? studyDaysTrailing(studyCfg, today, 7, studyLang)
+          : null;
       return (
         (series as Record<string, EvidenceSeries | undefined>)[activity]
           ?.levels ?? null
@@ -943,6 +954,7 @@ export function ApertureInner({
     gymSessions: checkinGym?.length ?? null,
     mealDays: checkinMeals,
     studyDays: studyCfg ? studyDaysIn(studyCfg, checkinWin) : null,
+    chineseDays: studyCfg ? studyDaysIn(studyCfg, checkinWin, "zh") : null,
     marks: checkin?.marks ?? null,
     wealth: checkinWealth,
   });
