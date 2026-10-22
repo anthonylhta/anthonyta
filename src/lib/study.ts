@@ -223,3 +223,77 @@ export function studyDaysTrailing(
     counts.set(e.date, (counts.get(e.date) ?? 0) + 1);
   return window.map((d) => counts.get(d) ?? 0);
 }
+
+/** One day of the log as the study band lists it: the day, its weekday, and
+ *  its sittings newest-logged first. */
+export interface StudyLogDay {
+  date: string;
+  /** `mon`…`sun`, off the calendar day itself (UTC math, like `prevDay`). */
+  weekday: string;
+  rows: StudyEntry[];
+}
+
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/**
+ * The study band's list (ADR 0215): the trailing `days` days ending at `today`,
+ * newest day first, one language or all. `older` says whether any row of that
+ * filter sits before the window — the band's `older →` door.
+ */
+export function studyLogView(
+  cfg: StudyConfig,
+  today: string,
+  days: number,
+  lang: StudyLang | "all" = "all",
+): { days: StudyLogDay[]; older: boolean } {
+  let from = today;
+  for (let i = 1; i < days; i++) from = prevDay(from);
+  const rows =
+    lang === "all"
+      ? cfg.entries
+      : cfg.entries.filter((e) => langOf(e) === lang);
+  const byDay = new Map<string, StudyEntry[]>();
+  for (const e of rows) {
+    if (e.date < from || e.date > today) continue;
+    byDay.set(e.date, [e, ...(byDay.get(e.date) ?? [])]);
+  }
+  return {
+    days: [...byDay.keys()]
+      .sort((a, b) => b.localeCompare(a))
+      .map((date) => ({
+        date,
+        weekday: WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()],
+        rows: byDay.get(date)!,
+      })),
+    older: rows.some((e) => e.date < from),
+  };
+}
+
+/** The band's folded line over the same window: distinct days per language,
+ *  the sittings, the minutes that were typed, and the newest day studied. */
+export function studyDigest(
+  cfg: StudyConfig,
+  today: string,
+  days: number,
+): {
+  days: Record<StudyLang, number>;
+  sittings: number;
+  minutes: number;
+  last: string | null;
+} {
+  let from = today;
+  for (let i = 1; i < days; i++) from = prevDay(from);
+  const inWindow = cfg.entries.filter((e) => e.date >= from && e.date <= today);
+  const perLang = Object.fromEntries(
+    STUDY_LANGS.map((l) => [
+      l,
+      new Set(inWindow.filter((e) => langOf(e) === l).map((e) => e.date)).size,
+    ]),
+  ) as Record<StudyLang, number>;
+  return {
+    days: perLang,
+    sittings: inWindow.length,
+    minutes: inWindow.reduce((sum, e) => sum + (e.minutes ?? 0), 0),
+    last: inWindow.at(-1)?.date ?? null,
+  };
+}

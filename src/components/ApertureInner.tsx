@@ -139,10 +139,15 @@ import {
   type MealsConfig,
 } from "@/lib/meals";
 import {
+  STUDY_LANGS,
   studyDaysIn,
   studyDaysTrailing,
+  studyDigest,
   studyLangFor,
+  studyLogView,
+  langOf,
   type StudyConfig,
+  type StudyLang,
 } from "@/lib/study";
 import type { FormationRow, FormationStatus } from "@/lib/formations";
 import { normalizeJobsConfig, sectSearch, type JobApp } from "@/lib/jobs";
@@ -1828,6 +1833,13 @@ export function ApertureInner({
           )
         ))}
 
+      {/* 学 — the study log itself (ADR 0215), above the draft that counts it:
+          the sittings the language lines are made of, so a missing one shows
+          the week it goes missing. Absent while locked and on an empty log. */}
+      {!hidden.has("study") && studyCfg && studyCfg.entries.length > 0 && (
+        <StudyBand cfg={studyCfg} today={today} />
+      )}
+
       {/* 表 — the check-in's own draft, last on the page: everything above it is
           the week as it stands, and this is the week as it will be written down.
           The six lines of `aperture/weekly-checkin.md` come out pre-filled from
@@ -1903,6 +1915,142 @@ export function ApertureInner({
           </div>
         </>
       )}
+    </>
+  );
+}
+
+/** The study band's window, and how far each `older →` reaches back. */
+const STUDY_WINDOW_DAYS = 30;
+
+/** Typed minutes as the band prints them — `25m`, `4h 05m`. */
+function studyMinutes(min: number): string {
+  if (min < 60) return `${min}m`;
+  return `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
+}
+
+/** A row's script — Japanese and Chinese sources carry their own CJK stack. */
+const STUDY_FONT: Record<StudyLang, string> = {
+  ja: "font-[family-name:var(--font-jp)]",
+  zh: "font-[family-name:var(--font-zh)]",
+  ko: "",
+};
+
+/**
+ * 学 — the study log, read back (ADR 0215). Folded to one digest line over the
+ * trailing 30 days; open, it lists every sitting newest day first under an
+ * `all · ja · zh · ko` filter, and `older →` reaches back 30 days a press.
+ * READ-ONLY: the rows are written by the palette verbs and the reader's 学,
+ * and the band adjudicates nothing — the check-in still takes his word.
+ */
+function StudyBand({ cfg, today }: { cfg: StudyConfig; today: string }) {
+  const [open, setOpen] = useState(false);
+  const [lang, setLang] = useState<StudyLang | "all">("all");
+  const [days, setDays] = useState(STUDY_WINDOW_DAYS);
+  const digest = studyDigest(cfg, today, STUDY_WINDOW_DAYS);
+  const view = studyLogView(cfg, today, days, lang);
+  return (
+    <>
+      <ZoneHeader label="the study" seal="学" right={`last ${days} days`} />
+      <div className="flex flex-col gap-1.5 border-b border-hairline px-4 py-2.5">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="flex w-full items-baseline gap-2 text-left text-xs leading-[22px]"
+        >
+          <span className="w-2.5 shrink-0 text-muted/40">
+            {open ? "▾" : "▸"}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-muted">
+            {STUDY_LANGS.map((l, i) => (
+              <span key={l}>
+                {i > 0 && " · "}
+                {l}{" "}
+                <span className="tabular-nums text-fg/80">
+                  {digest.days[l]}
+                </span>
+              </span>
+            ))}
+            {digest.minutes > 0 && (
+              <>
+                {" · "}
+                <span className="tabular-nums text-fg/80">
+                  {studyMinutes(digest.minutes)}
+                </span>
+              </>
+            )}
+            {" · last "}
+            <span className="tabular-nums text-fg/80">
+              {digest.last ? digest.last.slice(5) : "—"}
+            </span>
+          </span>
+          <span className="hidden shrink-0 text-[11px] tabular-nums text-muted/60 sm:inline">
+            {digest.sittings} sittings to {today.slice(5)}
+          </span>
+        </button>
+        {open && (
+          <>
+            <div className="mt-1.5 flex gap-3 text-[11px]">
+              {(["all", ...STUDY_LANGS] as const).map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => setLang(l)}
+                  aria-pressed={lang === l}
+                  className={
+                    lang === l
+                      ? "text-fg underline decoration-(--essence) underline-offset-[3px]"
+                      : "text-muted/70 hover:text-amber"
+                  }
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            {view.days.length === 0 && (
+              <p className="mt-2 text-[11px] text-muted/60">
+                nothing logged in these {days} days
+              </p>
+            )}
+            {view.days.map((d) => (
+              <div key={d.date} className="mt-2">
+                <p className="mb-0.5 text-[10px] tracking-[0.08em] tabular-nums text-muted/60">
+                  {d.date.slice(5)} {d.weekday}
+                </p>
+                {d.rows.map((e, i) => (
+                  <div
+                    key={i}
+                    className="flex items-baseline gap-2 text-[11px] leading-5"
+                  >
+                    <span className="w-[18px] shrink-0 text-muted">
+                      {langOf(e)}
+                    </span>
+                    <span
+                      className={`min-w-0 flex-1 truncate text-fg/85 ${STUDY_FONT[langOf(e)]}`}
+                    >
+                      {e.source}
+                    </span>
+                    {e.minutes !== undefined && (
+                      <span className="shrink-0 tabular-nums text-muted/70">
+                        {e.minutes} min
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+            {view.older && (
+              <button
+                type="button"
+                onClick={() => setDays(days + STUDY_WINDOW_DAYS)}
+                className="mt-2 self-start text-[11px] text-muted/70 hover:text-amber"
+              >
+                older →
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </>
   );
 }
