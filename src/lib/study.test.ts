@@ -9,7 +9,9 @@ import {
   studyDays,
   studyDaysIn,
   studyDaysTrailing,
+  studyDigest,
   studyLangFor,
+  studyLogView,
   type StudyConfig,
 } from "./study";
 
@@ -184,5 +186,58 @@ describe("studyLangFor", () => {
     expect(studyLangFor("study:fr")).toBeNull();
     expect(studyLangFor("study:")).toBeNull();
     expect(studyLangFor("studying")).toBeNull();
+  });
+});
+
+describe("the study band", () => {
+  const cfg = log(
+    { date: "2026-09-01", source: "old deck" },
+    earlier,
+    laozi,
+    hangul,
+    article,
+    anki,
+  );
+
+  it("lists the window newest day first, same-day rows newest-logged first", () => {
+    const view = studyLogView(cfg, "2026-09-24", 7);
+    expect(view.days.map((d) => d.date)).toEqual([
+      "2026-09-24",
+      "2026-09-23",
+      "2026-09-22",
+      "2026-09-20",
+    ]);
+    expect(view.days[0]).toEqual({
+      date: "2026-09-24",
+      weekday: "thu",
+      rows: [anki, article],
+    });
+    expect(view.older).toBe(true);
+  });
+
+  it("filters to one language, and says when nothing older is left", () => {
+    const zh = studyLogView(cfg, "2026-09-24", 7, "zh");
+    expect(zh.days.map((d) => d.date)).toEqual(["2026-09-22"]);
+    expect(zh.older).toBe(false);
+    expect(studyLogView(cfg, "2026-09-24", 30).older).toBe(false);
+    expect(studyLogView(EMPTY_STUDY, "2026-09-24", 30)).toEqual({
+      days: [],
+      older: false,
+    });
+  });
+
+  it("digests days per language, sittings, typed minutes and the last day", () => {
+    expect(studyDigest(cfg, "2026-09-24", 7)).toEqual({
+      days: { ja: 2, zh: 1, ko: 1 },
+      sittings: 5,
+      minutes: 20,
+      last: "2026-09-24",
+    });
+    expect(studyDigest(cfg, "2026-10-30", 7)).toEqual({
+      days: { ja: 0, zh: 0, ko: 0 },
+      sittings: 0,
+      minutes: 0,
+      last: null,
+    });
   });
 });

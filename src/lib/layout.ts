@@ -222,6 +222,7 @@ const APERTURE_BANDS: ModuleDef[] = [
   { key: "guCards", label: "paths · gu held", defaultHidden: true },
   { key: "dao", label: "the dao" },
   { key: "guHouse", label: "the gu house" },
+  { key: "study", label: "the study" },
   { key: "checkin", label: "the check-in" },
 ];
 
