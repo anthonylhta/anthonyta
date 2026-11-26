@@ -16,8 +16,9 @@ import {
   investedAt,
   latestEntry,
   removeDebit,
+  payThisWeek,
   removeIncome,
-  spentThisWeek,
+  setUsualPay,
   sydneyToday,
   upsertDebit,
   upsertEntry,
@@ -27,6 +28,7 @@ import {
   type FinEntry,
   type IncomeEntry,
   type NetWorthPoint,
+  type UsualPay,
 } from "@/lib/fin";
 import { arrow, aud, tone } from "@/lib/money";
 import { type Vault } from "@/app/files/useVault";
@@ -88,6 +90,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
 
   const [editing, setEditing] = useState(false);
   const [editingIncome, setEditingIncome] = useState(false);
+  const [editingUsual, setEditingUsual] = useState(false);
   // The debit form: a row being edited, a new one, or closed.
   const [editingDebit, setEditingDebit] = useState<DebitEntry | "new" | null>(
     null,
@@ -103,6 +106,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
     setPrevUnlocked(unlocked);
     setEditing(false);
     setEditingIncome(false);
+    setEditingUsual(false);
     setEditingDebit(null);
     setDebitErr(false);
   }
@@ -124,6 +128,13 @@ export function FinPanel({ offline }: { offline: boolean }) {
     const entry: IncomeEntry = { date: sydneyToday(), amountCents };
     const ok = await saveConfig((base) => upsertIncome(base, entry));
     if (ok) setEditingIncome(false);
+    return ok;
+  }
+
+  // Set (or clear, with null) the standing pay.
+  async function saveUsual(pay: UsualPay | null): Promise<boolean> {
+    const ok = await saveConfig((base) => setUsualPay(base, pay));
+    if (ok) setEditingUsual(false);
     return ok;
   }
 
@@ -228,9 +239,11 @@ export function FinPanel({ offline }: { offline: boolean }) {
   const hisa = latest?.hisa ?? 0;
   const rate = latest?.rate ?? null;
   const latestIncome = cfg.income?.at(-1) ?? null;
-  // Both derived from the pay, balance and invested figures already sealed here —
-  // nothing is typed for them (ADR 0185).
-  const spent = spentThisWeek(cfg, today);
+  const usual = cfg.usualPay ?? null;
+  const thisPay = payThisWeek(cfg, today);
+  // Derived from the pay, balance and cost-basis figures already sealed here —
+  // nothing is typed for it, and only the span's two ends are read (ADR 0185,
+  // 0216).
   const burn = burnWeekly(cfg, today);
   const debits = cfg.debits ?? [];
   // The WHOLE history, not a window: a 30-day slice of a savings staircase is
@@ -303,8 +316,15 @@ export function FinPanel({ offline }: { offline: boolean }) {
           <p className="text-[11px] uppercase tracking-[0.2em] text-muted">
             income
           </p>
-          {!editingIncome && (
+          {!editingIncome && !editingUsual && (
             <span className="flex items-center gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => setEditingUsual(true)}
+                className="text-muted transition-colors hover:text-amber"
+              >
+                usual
+              </button>
               <button
                 type="button"
                 onClick={() => setEditingIncome(true)}
@@ -320,37 +340,57 @@ export function FinPanel({ offline }: { offline: boolean }) {
             </span>
           )}
         </div>
-        {editingIncome ? (
+        {editingUsual ? (
+          <UsualPayEditor
+            initial={usual}
+            today={today}
+            onSave={saveUsual}
+            onCancel={() => setEditingUsual(false)}
+          />
+        ) : editingIncome ? (
           <IncomeEditor
             onSave={saveIncome}
             onCancel={() => setEditingIncome(false)}
           />
         ) : (
           <div className="space-y-1.5 text-sm">
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted">last pay</span>
-              <span className="tabular-nums text-fg/90">
-                {latestIncome
-                  ? `${aud(latestIncome.amountCents / 100)} · ${incomeDay(
-                      latestIncome.date,
-                    )}`
-                  : "no log yet"}
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-muted">usual pay</span>
+              <span className="text-right tabular-nums text-fg/90">
+                {usual
+                  ? `${aud(usual.amountCents / 100)} · every ${usual.everyDays} d`
+                  : "not set"}
               </span>
             </div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted">spent this week</span>
-              <span className="tabular-nums text-fg/90">
-                {spent !== null ? aud(spent / 100) : "—"}
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-muted">this week</span>
+              <span className="text-right tabular-nums text-fg/90">
+                {thisPay ? (
+                  <>
+                    {aud(thisPay.amountCents / 100)} · {incomeDay(thisPay.date)}
+                    {thisPay.assumed && (
+                      <span className="text-muted"> · usual</span>
+                    )}
+                  </>
+                ) : (
+                  "no pay logged"
+                )}
               </span>
             </div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-muted">burn</span>
-              <span className="tabular-nums text-fg/90">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-muted">
+                spent{burn ? ` · last ${burn.weeks} wk` : ""}
+              </span>
+              <span className="text-right tabular-nums text-fg/90">
                 {burn
-                  ? `${aud(burn.cents / 100)} /wk · ${burn.weeks}-wk avg`
+                  ? `${aud(burn.totalCents / 100)} · ${aud(burn.cents / 100)} /wk`
                   : "—"}
               </span>
             </div>
+            <p className="text-[11px] text-muted/60">
+              read between two cash re-reads, so a late edit evens out · a typed
+              pay replaces the usual for its week
+            </p>
           </div>
         )}
       </div>
@@ -744,6 +784,119 @@ function IncomeEditor({
         >
           {saving ? "sealing…" : "save"}
         </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className={btn}
+        >
+          cancel
+        </button>
+      </div>
+      {err && <p className="text-xs text-down">save failed — try again</p>}
+    </div>
+  );
+}
+
+/** The standing pay: an amount, its cadence, and the first payday it is assumed
+ *  on. `clear` drops it, and only logged pay-ins count again. */
+function UsualPayEditor({
+  initial,
+  today,
+  onSave,
+  onCancel,
+}: {
+  initial: UsualPay | null;
+  today: string;
+  onSave: (pay: UsualPay | null) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [amount, setAmount] = useState(
+    initial ? String(initial.amountCents / 100) : "",
+  );
+  const [every, setEvery] = useState(String(initial?.everyDays ?? 7));
+  const [since, setSince] = useState(initial?.since ?? today);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const amountNum = Number(amount);
+  const everyNum = Number(every);
+  const valid =
+    amount.trim() !== "" &&
+    Number.isFinite(amountNum) &&
+    amountNum > 0 &&
+    Number.isInteger(everyNum) &&
+    everyNum >= 1 &&
+    everyNum <= 31 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(since);
+
+  async function submit(pay: UsualPay | null) {
+    if (saving || (pay !== null && !valid)) return;
+    setSaving(true);
+    setErr(false);
+    if (await onSave(pay)) return;
+    setErr(true);
+    setSaving(false);
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="text-muted">usual pay</span>
+        <input
+          value={amount}
+          disabled={saving}
+          inputMode="decimal"
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0"
+          className={`${input} w-32 text-right`}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="text-muted">every (days)</span>
+        <input
+          value={every}
+          disabled={saving}
+          inputMode="numeric"
+          onChange={(e) => setEvery(e.target.value)}
+          className={`${input} w-32 text-right`}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="text-muted">a payday</span>
+        <input
+          type="date"
+          value={since}
+          disabled={saving}
+          onChange={(e) => setSince(e.target.value)}
+          className={`${input} w-36 text-right`}
+        />
+      </label>
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() =>
+            submit({
+              amountCents: Math.round(amountNum * 100),
+              everyDays: everyNum,
+              since,
+            })
+          }
+          disabled={saving || !valid}
+          className={btn}
+        >
+          {saving ? "sealing…" : "save"}
+        </button>
+        {initial && (
+          <button
+            type="button"
+            onClick={() => submit(null)}
+            disabled={saving}
+            className={btn}
+          >
+            clear
+          </button>
+        )}
         <button
           type="button"
           onClick={onCancel}

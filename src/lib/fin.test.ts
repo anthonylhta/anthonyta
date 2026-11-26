@@ -24,8 +24,10 @@ import {
   quarterStart,
   recoveredThisWeek,
   removeDebit,
+  payEvents,
+  payThisWeek,
+  setUsualPay,
   spentThisQuarter,
-  spentThisWeek,
   weeklyFlow,
   SNAP_INDEX_MAX_DAYS,
   sydneyDaysAgo,
@@ -506,85 +508,193 @@ describe("weeklyFlow", () => {
   });
 });
 
-describe("spentThisWeek / burnWeekly", () => {
-  // Wednesdays back from 2026-09-09: 09-09, 09-02, 08-26, 08-19, 08-12.
-  const TODAY = "2026-09-09";
+describe("payEvents / usual pay", () => {
+  const usual = { amountCents: 120000, everyDays: 7, since: "2026-11-05" };
+
+  it("assumes the usual pay on every payday from `since`", () => {
+    const cfg = cfg2({ usualPay: usual });
+    expect(payEvents(cfg, "2026-11-01", "2026-11-26")).toEqual([
+      { date: "2026-11-05", amountCents: 120000, assumed: true },
+      { date: "2026-11-12", amountCents: 120000, assumed: true },
+      { date: "2026-11-19", amountCents: 120000, assumed: true },
+      { date: "2026-11-26", amountCents: 120000, assumed: true },
+    ]);
+    // `(from, to]` — a payday on `from` belongs to the span before.
+    expect(payEvents(cfg, "2026-11-12", "2026-11-19")).toHaveLength(1);
+    expect(payEvents(cfg, "2026-10-01", "2026-11-04")).toEqual([]);
+  });
+
+  it("lets a logged row replace its cycle's assumption, a day early or late", () => {
+    const cfg = cfg2({
+      usualPay: usual,
+      income: [
+        { date: "2026-11-11", amountCents: 90000 }, // a day early
+        { date: "2026-11-20", amountCents: 130000 }, // a day late
+      ],
+    });
+    expect(payEvents(cfg, "2026-11-01", "2026-11-26")).toEqual([
+      { date: "2026-11-05", amountCents: 120000, assumed: true },
+      { date: "2026-11-11", amountCents: 90000, assumed: false },
+      { date: "2026-11-20", amountCents: 130000, assumed: false },
+      { date: "2026-11-26", amountCents: 120000, assumed: true },
+    ]);
+  });
+
+  it("counts only logged rows without a usual pay, as before", () => {
+    const cfg = cfg2({ income: [{ date: "2026-11-19", amountCents: 1 }] });
+    expect(payEvents(cfg, "2026-11-01", "2026-11-26")).toEqual([
+      { date: "2026-11-19", amountCents: 1, assumed: false },
+    ]);
+  });
+
+  it("feeds the trailing week's pay, so a forgotten log still reads", () => {
+    const cfg = cfg2({ usualPay: usual });
+    expect(recoveredThisWeek(cfg, "2026-11-26")).toBe(120000);
+    expect(payThisWeek(cfg, "2026-11-25")).toEqual({
+      date: "2026-11-19",
+      amountCents: 120000,
+      assumed: true,
+    });
+    expect(recoveredThisWeek(cfg, "2026-11-04")).toBeNull();
+  });
+
+  it("validates and sets/clears the usual pay on the envelope", () => {
+    expect(isFinConfig(cfg2({ usualPay: usual }))).toBe(true);
+    expect(
+      isFinConfig({ ...cfg2(), usualPay: { ...usual, amountCents: 0 } }),
+    ).toBe(false);
+    expect(
+      isFinConfig({ ...cfg2(), usualPay: { ...usual, everyDays: 32 } }),
+    ).toBe(false);
+    expect(
+      isFinConfig({ ...cfg2(), usualPay: { ...usual, since: "2026-02-30" } }),
+    ).toBe(false);
+    const set = setUsualPay(cfg2(), usual);
+    expect(set.usualPay).toEqual(usual);
+    expect("usualPay" in setUsualPay(set, null)).toBe(false);
+  });
+});
+
+describe("burnWeekly (endpoint spend)", () => {
   const entry = (date: string, cash: number, hisa: number) => ({
     date,
     cash,
     hisa,
     rate: null,
   });
-  // Paid 1,200 a week, puts 300 away, and the balance tells the rest.
-  const cfg = cfg2({
-    income: [
-      { date: "2026-08-19", amountCents: 120000 },
-      { date: "2026-08-26", amountCents: 120000 },
-      { date: "2026-09-02", amountCents: 120000 },
-      { date: "2026-09-09", amountCents: 120000 },
-    ],
-    invested: [
-      { date: "2026-08-12", investedCents: 2970000 },
-      { date: "2026-08-19", investedCents: 3000000 },
-      { date: "2026-08-26", investedCents: 3030000 },
-      { date: "2026-09-02", investedCents: 3060000 },
-      { date: "2026-09-09", investedCents: 3090000 },
-    ],
-    entries: [
-      entry("2026-08-12", 5000, 20000),
-      entry("2026-08-19", 5100, 20000), // +100 → spent 1200 − 300 − 100 = 800
-      entry("2026-08-26", 4700, 20000), // −400 → spent 1200 − 300 + 400 = 1300
-      entry("2026-09-02", 4700, 20200), // HISA +200 → 700
-      entry("2026-09-09", 4900, 20200), // +200 → 700
-    ],
+  // Paid 1,200 a week, buys 300 of shares a week, spends 800 a week. The market
+  // value wanders on its own — it must never show up as spending.
+  const TODAY = "2026-11-26";
+  const usualPay = { amountCents: 120000, everyDays: 7, since: "2026-10-29" };
+  const invested = [
+    { date: "2026-10-29", investedCents: 3000000, costCents: 2900000 },
+    { date: "2026-11-05", investedCents: 3080000, costCents: 2930000 },
+    { date: "2026-11-12", investedCents: 2990000, costCents: 2960000 },
+    { date: "2026-11-19", investedCents: 3100000, costCents: 2990000 },
+    { date: "2026-11-26", investedCents: 3050000, costCents: 3020000 },
+  ];
+  const entries = [
+    entry("2026-10-29", 1000, 20000),
+    entry("2026-11-05", 1100, 20000),
+    entry("2026-11-12", 1200, 20000),
+    entry("2026-11-19", 1300, 20000),
+    entry("2026-11-26", 1400, 20000),
+  ];
+  const cfg = cfg2({ usualPay, invested, entries });
+
+  it("reads four weeks between two re-reads, market moves left out", () => {
+    // 4 × 1,200 pay − 1,200 cost rise − 400 balance rise = 3,200 → 800 /wk.
+    expect(burnWeekly(cfg, TODAY)).toEqual({
+      cents: 80000,
+      weeks: 4,
+      totalCents: 320000,
+      from: "2026-10-29",
+      to: TODAY,
+    });
   });
 
-  it("derives the week's spend from pay, the balance move and what was put away", () => {
-    expect(spentThisWeek(cfg, "2026-08-19")).toBe(80000);
-    expect(spentThisWeek(cfg, "2026-08-26")).toBe(130000);
-    expect(spentThisWeek(cfg, "2026-09-02")).toBe(70000);
-    expect(spentThisWeek(cfg, TODAY)).toBe(70000);
+  it("cancels a balance typed before the buy filled", () => {
+    // 11-19's HISA was typed with the week's 300 still in it (the buy then
+    // filled and the import counted it too) — one week double-counts, the span
+    // doesn't, because only its ends are read.
+    const stale = cfg2({
+      ...cfg,
+      entries: entries.map((e) =>
+        e.date === "2026-11-19" ? { ...e, hisa: 20300 } : e,
+      ),
+    });
+    expect(burnWeekly(stale, TODAY)?.totalCents).toBe(320000);
   });
 
-  it("is null without a pay, a re-read balance, or a balance before the week", () => {
-    // 08-12 has a balance but no pay logged, and no balance before it.
-    expect(spentThisWeek(cfg, "2026-08-12")).toBeNull();
-    const noReread = cfg2({
+  it("counts a one-off spend once, spread over the span", () => {
+    const gift = cfg2({
       ...cfg,
-      entries: cfg.entries.filter((e) => e.date !== "2026-09-09"),
+      entries: entries.map((e) => (e.date === TODAY ? { ...e, cash: 400 } : e)),
     });
-    expect(spentThisWeek(noReread, TODAY)).toBeNull();
-    const noPay = cfg2({
-      ...cfg,
-      income: cfg.income!.filter((e) => e.date !== "2026-09-09"),
+    expect(burnWeekly(gift, TODAY)).toMatchObject({
+      totalCents: 420000,
+      cents: 105000,
     });
-    expect(spentThisWeek(noPay, TODAY)).toBeNull();
   });
 
-  it("counts a week with no import as nothing put away, and a refund as negative", () => {
-    const quiet = cfg2({
-      ...cfg,
-      invested: cfg.invested.filter((e) => e.date !== "2026-09-09"),
+  it("falls back to a shorter span while the history is young", () => {
+    const young = cfg2({ ...cfg, entries: entries.slice(-2) });
+    expect(burnWeekly(young, TODAY)).toMatchObject({
+      weeks: 1,
+      totalCents: 80000,
+      from: "2026-11-19",
     });
-    expect(spentThisWeek(quiet, TODAY)).toBe(100000);
-    const refund = cfg2({
-      ...cfg,
-      entries: [...cfg.entries.slice(0, -1), entry("2026-09-09", 6000, 20200)],
-    });
-    // The balance rose by 1,300 on 1,200 of pay with 300 put away.
-    expect(spentThisWeek(refund, TODAY)).toBe(-40000);
-  });
-
-  it("averages the knowable trailing weeks and says how many went in", () => {
-    // (800 + 1300 + 700 + 700) / 4
-    expect(burnWeekly(cfg, TODAY)).toEqual({ cents: 87500, weeks: 4 });
-    // Only the two newest weeks knowable → a two-week figure, labelled so.
-    const short = cfg2({
-      ...cfg,
-      entries: cfg.entries.filter((e) => e.date >= "2026-08-26"),
-    });
-    expect(burnWeekly(short, TODAY)).toEqual({ cents: 70000, weeks: 2 });
+    expect(
+      burnWeekly(cfg2({ ...cfg, entries: entries.slice(-1) }), TODAY),
+    ).toBeNull();
     expect(burnWeekly(cfg2(), TODAY)).toBeNull();
+  });
+
+  it("starts after the last row without a cost basis", () => {
+    const legacy = cfg2({
+      ...cfg,
+      invested: invested.map((e) =>
+        e.date <= "2026-11-12"
+          ? { date: e.date, investedCents: e.investedCents }
+          : e,
+      ),
+    });
+    expect(burnWeekly(legacy, TODAY)).toMatchObject({
+      from: "2026-11-19",
+      weeks: 1,
+    });
+  });
+
+  it("counts only logged pay without a usual pay", () => {
+    const logged = cfg2({
+      invested,
+      entries,
+      income: [{ date: "2026-11-26", amountCents: 120000 }],
+    });
+    // One logged pay over four weeks — the other three read as spent from savings.
+    expect(burnWeekly(logged, TODAY)?.totalCents).toBe(120000 - 120000 - 40000);
+  });
+});
+
+describe("absorbedThisWeek (cost basis)", () => {
+  it("reads the cost step, not the market step, when both carry one", () => {
+    const cfg = cfg2({
+      invested: [
+        { date: "2026-11-19", investedCents: 3100000, costCents: 2990000 },
+        { date: "2026-11-26", investedCents: 3050000, costCents: 3020000 },
+      ],
+    });
+    expect(absorbedThisWeek(cfg, "2026-11-26")).toBe(30000);
+  });
+
+  it("falls back to the market step for rows without one", () => {
+    const cfg = cfg2({
+      invested: [
+        { date: "2026-11-19", investedCents: 3100000 },
+        { date: "2026-11-26", investedCents: 3050000, costCents: 3020000 },
+      ],
+    });
+    expect(absorbedThisWeek(cfg, "2026-11-26")).toBe(-50000);
   });
 });
 
@@ -605,42 +715,41 @@ describe("quarterStart / spentThisQuarter", () => {
     expect(quarterStart("2026-12-31")).toBe("2026-10-01");
   });
 
-  // Anchors back from 2026-10-22: 10-22 (week 10-16…), 10-15 (10-09…),
-  // 10-08 (10-02…); 10-01's week starts 09-25, over the quarter line.
   const TODAY = "2026-10-22";
   const cfg = cfg2({
-    income: [
-      { date: "2026-10-01", amountCents: 120000 },
-      { date: "2026-10-08", amountCents: 120000 },
-      { date: "2026-10-15", amountCents: 120000 },
-      { date: "2026-10-22", amountCents: 120000 },
-    ],
+    usualPay: { amountCents: 120000, everyDays: 7, since: "2026-09-24" },
     invested: [],
     entries: [
       entry("2026-09-24", 5000, 20000),
-      entry("2026-10-01", 5000, 20000), // flat → spent 1200 (straddles, never counted)
-      entry("2026-10-08", 5200, 20000), // +200 → 1000
-      entry("2026-10-15", 5100, 20000), // −100 → 1300
-      entry("2026-10-22", 5400, 20000), // +300 → 900
+      entry("2026-10-01", 5000, 20000),
+      entry("2026-10-08", 5200, 20000),
+      entry("2026-10-15", 5100, 20000),
+      entry("2026-10-22", 5400, 20000),
     ],
   });
 
-  it("sums the knowable weeks inside the quarter and says how many", () => {
+  it("reads from the re-read in force at the quarter line to the newest", () => {
+    // 10-01 → 10-22: three paydays (10-08, 10-15, 10-22) − a 400 rise.
     expect(spentThisQuarter(cfg, TODAY)).toEqual({ cents: 320000, weeks: 3 });
   });
 
-  it("skips an unknowable week rather than counting it as zero", () => {
-    const gap = cfg2({
+  it("starts inside the quarter when the line's re-read is unknowable", () => {
+    const legacy = cfg2({
       ...cfg,
-      income: cfg.income!.filter((e) => e.date !== "2026-10-15"),
+      invested: [
+        { date: "2026-09-24", investedCents: 1 },
+        { date: "2026-10-08", investedCents: 1, costCents: 1 },
+      ],
     });
-    // 1000 + 900; the 10-15 week has no pay logged.
-    expect(spentThisQuarter(gap, TODAY)).toEqual({ cents: 190000, weeks: 2 });
+    // 10-08 → 10-22: two paydays − a 200 rise.
+    expect(spentThisQuarter(legacy, TODAY)).toEqual({
+      cents: 220000,
+      weeks: 2,
+    });
   });
 
-  it("is null before a single week of the quarter is knowable", () => {
-    // 10-05's week starts 09-29 — the quarter holds no whole week yet.
-    expect(spentThisQuarter(cfg, "2026-10-05")).toBeNull();
+  it("is null before the quarter holds a re-read", () => {
+    expect(spentThisQuarter(cfg, "2026-09-30")).toBeNull();
     expect(spentThisQuarter(cfg2(), TODAY)).toBeNull();
   });
 });
@@ -708,7 +817,7 @@ describe("importPortfolioCsv", () => {
     expect(out?.portfolio?.asOf).toBe("12 Jul, 14:30");
     expect(out?.portfolio?.holdings[0].code).toBe("NDQ");
     expect(out?.invested).toEqual([
-      { date: "2026-07-12", investedCents: 200400 },
+      { date: "2026-07-12", investedCents: 200400, costCents: 180000 },
     ]);
     expect(isFinConfig(out)).toBe(true);
   });
@@ -719,9 +828,29 @@ describe("importPortfolioCsv", () => {
     });
     const out = importPortfolioCsv(base, CSV, OPTS);
     expect(out?.invested).toEqual([
-      { date: "2026-07-12", investedCents: 200400 },
+      { date: "2026-07-12", investedCents: 200400, costCents: 180000 },
     ]);
     expect(out?.entries).toEqual(base.entries);
+  });
+  it("backfills the previous row's cost basis from the snapshot it wrote", () => {
+    const base = cfg2({
+      invested: [{ date: "2026-07-05", investedCents: 200400 }],
+      portfolio: SNAPSHOT, // value 2004, cost 1800 — the 07-05 import's
+    });
+    expect(importPortfolioCsv(base, CSV, OPTS)?.invested[0]).toEqual({
+      date: "2026-07-05",
+      investedCents: 200400,
+      costCents: 180000,
+    });
+    // A snapshot that doesn't match the row's value is not that row's.
+    const other = cfg2({
+      ...base,
+      invested: [{ date: "2026-07-05", investedCents: 1 }],
+    });
+    expect(importPortfolioCsv(other, CSV, OPTS)?.invested[0]).toEqual({
+      date: "2026-07-05",
+      investedCents: 1,
+    });
   });
   it("is null on an unrecognizable CSV — nothing to seal", () => {
     expect(importPortfolioCsv(cfg2(), "not,a,csv", OPTS)).toBeNull();

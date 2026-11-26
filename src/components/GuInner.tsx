@@ -438,9 +438,10 @@ export function GuInner({
             <span className="text-fg/80">{aud(casts.month.stones / 100)}</span>{" "}
             this month · regenerates with the week
           </p>
-          {/* The quarter against the DERIVED spend (lib/fin) — summed over the
-              quarter's knowable weeks, so the budget is the same share of what
-              actually went out. A plain read: no over/under word, no colour. */}
+          {/* The quarter against the DERIVED spend (lib/fin) — read between the
+              re-read at the quarter line and the newest, so the budget is the
+              same share of what actually went out. A plain read: no over/under
+              word, no colour. */}
           <p className="text-[11px] tabular-nums text-muted">
             this quarter · cast{" "}
             <span className="text-fg/80">
