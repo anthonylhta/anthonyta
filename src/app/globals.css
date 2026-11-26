@@ -13,6 +13,9 @@
   --color-amber: #f5a524; /* primary accent — cursor, active, highlight */
   --color-up: #7fd17f; /* live + positive finance (use sparingly) */
   --color-down: #e5604d; /* negative finance only */
+  /* the /portfolio chart's split layers — finance only, like up/down */
+  --color-invested: #c9b98f;
+  --color-savings: #6f8a6b;
 
   /* essence canon (aperture) — used ONLY in the band's swatch + rank text (ADR 0002: amber stays THE accent) */
   --color-jade-green: #6fbf8f;
