@@ -18,13 +18,20 @@ const cfg = (partial: Partial<FinConfig> = {}): FinConfig => ({
   ...partial,
 });
 
-const pt = (date: string, invested: number, savings: number): SplitPoint => ({
+const pt = (
+  date: string,
+  invested: number,
+  savings: number,
+  debt = 0,
+): SplitPoint => ({
   date,
   investedCents: invested,
   hisaCents: savings,
   cashCents: 0,
   savingsCents: savings,
   totalCents: invested + savings,
+  debtCents: debt,
+  netCents: invested + savings - debt,
 });
 
 describe("buildSplitSeries", () => {
@@ -52,9 +59,29 @@ describe("buildSplitSeries", () => {
       cashCents: 10000,
       savingsCents: 100000,
       totalCents: 100000,
+      debtCents: 0,
+      netCents: 100000,
     });
     expect(s[3].investedCents).toBe(60000);
     expect(s[3].totalCents).toBe(160000);
+  });
+
+  it("takes debts off the assets to give the net", () => {
+    const s = buildSplitSeries(
+      cfg({
+        entries: [{ date: "2026-11-01", cash: 0, hisa: 1000, rate: null }],
+        debts: [
+          {
+            name: "loan a",
+            balances: [{ date: "2026-11-02", balanceCents: 40000 }],
+          },
+        ],
+      }),
+      "2026-11-03",
+    );
+    expect(s.map((p) => p.netCents)).toEqual([100000, 60000, 60000]);
+    expect(s[2].debtCents).toBe(40000);
+    expect(s[2].totalCents).toBe(100000);
   });
 
   it("is empty with no data, or data only after today", () => {
@@ -101,6 +128,8 @@ describe("niceStep / compactAud / chartDay", () => {
     expect(compactAud(4250000)).toBe("$42.5k");
     expect(compactAud(50000)).toBe("$500");
     expect(compactAud(0)).toBe("$0");
+    expect(compactAud(-1000000)).toBe("−$10k");
+    expect(compactAud(-50000)).toBe("−$500");
   });
 
   it("writes a day as '26 nov'", () => {
@@ -134,6 +163,22 @@ describe("chartGeometry", () => {
     expect(split.ticks[0]).toEqual({ y: split.floor, label: "$0" });
     expect(split.invested.endsWith("Z")).toBe(true);
     expect(split.savings.endsWith("Z")).toBe(true);
+  });
+
+  it("draws the net, and lets the split axis dip below $0 for a debt", () => {
+    const owing = [
+      pt("2026-11-01", 1000000, 0, 2500000),
+      pt("2026-11-02", 2000000, 0, 2500000),
+    ];
+    const line = chartGeometry(owing, "line", 340, 200, 40);
+    // the net rises −15k → −5k: the line climbs
+    expect(line.points[1].y).toBeLessThan(line.points[0].y);
+    const split = chartGeometry(owing, "split", 340, 200, 40);
+    expect(split.ticks[0].label.startsWith("−")).toBe(true);
+    // the net (−5k) sits below the $0 gridline
+    const zero = split.ticks.find((t) => t.label === "$0")!;
+    expect(split.points[1].y).toBeGreaterThan(zero.y);
+    expect(split.assets.startsWith("M0,")).toBe(true);
   });
 
   it("gives evenly spaced gridlines inside the plot", () => {

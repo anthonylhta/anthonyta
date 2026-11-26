@@ -77,6 +77,9 @@ export interface FinConfig {
   /** The standing pay assumed on every payday a row doesn't speak for. Optional:
    *  without it, only logged pay-ins count, as before. */
   usualPay?: UsualPay;
+  /** What is owed — sorted by name, unique
+   *  case-insensitively. Optional: envelopes before the debts section have none. */
+  debts?: DebtEntry[];
   /** Expected recurring debits (the premium, the subscriptions) — sorted by name,
    *  unique case-insensitively. Optional for the same reason `income` is. */
   debits?: DebitEntry[];
@@ -238,6 +241,7 @@ export function isFinConfig(x: unknown): x is FinConfig {
     (x.income === undefined || isIncome(x.income)) &&
     (x.debits === undefined || isDebits(x.debits)) &&
     (x.usualPay === undefined || isUsualPay(x.usualPay)) &&
+    (x.debts === undefined || isDebts(x.debts)) &&
     (x.burnWeeklyCents === undefined || isPosInt(x.burnWeeklyCents)) &&
     (x.portfolio === null || isPortfolioSnapshot(x.portfolio))
   );
@@ -888,4 +892,144 @@ export function committedWeeklyCents(cfg: FinConfig): number {
   for (const d of cfg.debits ?? [])
     sum += Math.round((d.amountCents * 7) / d.everyDays);
   return sum;
+}
+
+/** One dated balance of a debt, in cents. */
+export interface DebtBalance {
+  date: string;
+  balanceCents: number;
+}
+
+/** A repayment plan: `amountCents` comes off every `everyDays` days from `next`
+ *  (the first payment day), until the balance reaches zero. */
+export interface DebtPlan {
+  amountCents: number;
+  everyDays: number;
+  next: string;
+}
+
+/** One debt — its typed balances (ascending, one per day) and an optional plan
+ *  that steps the balance down between them. */
+export interface DebtEntry {
+  name: string;
+  balances: DebtBalance[];
+  plan?: DebtPlan;
+}
+
+/** How many debts an envelope may carry, and balances per debt. */
+const DEBTS_MAX = 20;
+const DEBT_BALANCES_MAX = 400;
+/** Longest plan cadence — a monthly plan, with room. */
+const DEBT_EVERY_MAX = 31;
+
+function isDebtPlan(x: unknown): x is DebtPlan {
+  return (
+    isObj(x) &&
+    isPosInt(x.amountCents) &&
+    isPosInt(x.everyDays) &&
+    x.everyDays <= DEBT_EVERY_MAX &&
+    isCalendarDay(x.next)
+  );
+}
+
+/** A debts list: trimmed 1–60 char names, strictly ascending by lower-cased name
+ *  (sort + case-insensitive uniqueness), each with 1–400 ascending real-day
+ *  balances in whole cents and an optional valid plan. */
+function isDebts(x: unknown): x is DebtEntry[] {
+  if (!Array.isArray(x) || x.length > DEBTS_MAX) return false;
+  let prev = "";
+  for (const e of x) {
+    if (!isObj(e) || typeof e.name !== "string") return false;
+    if (e.name.trim() !== e.name || e.name.length === 0) return false;
+    if (e.name.length > DEBIT_NAME_MAX) return false;
+    const key = e.name.toLowerCase();
+    if (!(key > prev)) return false;
+    prev = key;
+    if (!Array.isArray(e.balances) || e.balances.length === 0) return false;
+    if (e.balances.length > DEBT_BALANCES_MAX) return false;
+    let day = "";
+    for (const b of e.balances) {
+      if (!isObj(b) || !isCalendarDay(b.date) || !isNonNegInt(b.balanceCents))
+        return false;
+      if (!(b.date > day)) return false;
+      day = b.date;
+    }
+    if (e.plan !== undefined && !isDebtPlan(e.plan)) return false;
+  }
+  return true;
+}
+
+/**
+ * What a debt stands at on `date`, in cents: the newest typed balance on or
+ * before it, less every plan payment due after that balance's day and on or
+ * before `date` — never below zero. 0 before its first balance (it didn't exist).
+ */
+export function debtBalanceAt(debt: DebtEntry, date: string): number {
+  let found: DebtBalance | null = null;
+  for (const b of debt.balances) {
+    if (b.date <= date) found = b;
+    else break; // ascending
+  }
+  if (!found) return 0;
+  const plan = debt.plan;
+  if (!plan) return found.balanceCents;
+  // Payment days are plan.next + k·everyDays (k ≥ 0); count those in (found, date].
+  const upTo = daysBetween(plan.next, date);
+  if (upTo < 0) return found.balanceCents;
+  const after = daysBetween(plan.next, found.date);
+  const paidBy = (gap: number) =>
+    gap < 0 ? 0 : Math.floor(gap / plan.everyDays) + 1;
+  const payments = paidBy(upTo) - paidBy(after);
+  return Math.max(0, found.balanceCents - payments * plan.amountCents);
+}
+
+/** Everything owed on `date`, in cents. */
+export function debtsAt(cfg: FinConfig, date: string): number {
+  let sum = 0;
+  for (const d of cfg.debts ?? []) sum += debtBalanceAt(d, date);
+  return sum;
+}
+
+/**
+ * A new config with the debt named `name` at `balanceCents` on `date` — a new
+ * debt is inserted in name order, an existing one (case-insensitively) gets the
+ * dated balance merged in (same-day replace). `plan` replaces the plan when given;
+ * null clears it; undefined keeps it. Never mutates the input.
+ */
+export function upsertDebt(
+  cfg: FinConfig,
+  name: string,
+  date: string,
+  balanceCents: number,
+  plan?: DebtPlan | null,
+): FinConfig {
+  const trimmed = name.trim();
+  const key = trimmed.toLowerCase();
+  const list = cfg.debts ?? [];
+  const old = list.find((d) => d.name.toLowerCase() === key);
+  const kept = (old?.balances ?? []).filter((b) => b.date !== date);
+  const at = insertAt(kept, date);
+  const row: DebtEntry = {
+    name: old?.name ?? trimmed,
+    balances: [
+      ...kept.slice(0, at),
+      { date, balanceCents },
+      ...kept.slice(at),
+    ].slice(-DEBT_BALANCES_MAX),
+  };
+  const nextPlan = plan === undefined ? old?.plan : (plan ?? undefined);
+  if (nextPlan) row.plan = nextPlan;
+  const rest = list.filter((d) => d.name.toLowerCase() !== key);
+  const i = rest.findIndex((d) => d.name.toLowerCase() > key);
+  const pos = i < 0 ? rest.length : i;
+  return { ...cfg, debts: [...rest.slice(0, pos), row, ...rest.slice(pos)] };
+}
+
+/** A new config without the debt named `name` (case-insensitively). */
+export function removeDebt(cfg: FinConfig, name: string): FinConfig {
+  const key = name.trim().toLowerCase();
+  return {
+    ...cfg,
+    debts: (cfg.debts ?? []).filter((d) => d.name.toLowerCase() !== key),
+  };
 }

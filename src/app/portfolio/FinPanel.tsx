@@ -9,18 +9,23 @@ import {
   committedWeeklyCents,
   debitDueDay,
   debitNextDay,
+  debtBalanceAt,
   importPortfolioCsv,
   investedAt,
   latestEntry,
   removeDebit,
+  removeDebt,
   payThisWeek,
   removeIncome,
   setUsualPay,
   sydneyToday,
   upsertDebit,
+  upsertDebt,
   upsertEntry,
   upsertIncome,
   type DebitEntry,
+  type DebtEntry,
+  type DebtPlan,
   type FinConfig,
   type FinEntry,
   type IncomeEntry,
@@ -95,6 +100,10 @@ export function FinPanel({ offline }: { offline: boolean }) {
   );
   const [debitBusy, setDebitBusy] = useState(false);
   const [debitErr, setDebitErr] = useState(false);
+  // The debt form: a debt being edited, a new one, or closed.
+  const [editingDebt, setEditingDebt] = useState<DebtEntry | "new" | null>(
+    null,
+  );
 
   // Render-phase adjustment (not an effect): reset the per-unlock state on the
   // lock/unlock edge, per the lint-blessed reset pattern. The ledger itself
@@ -107,6 +116,7 @@ export function FinPanel({ offline }: { offline: boolean }) {
     setEditingUsual(false);
     setEditingDebit(null);
     setDebitErr(false);
+    setEditingDebt(null);
   }
 
   // Upsert today's cash row.
@@ -152,6 +162,36 @@ export function FinPanel({ offline }: { offline: boolean }) {
     );
     if (ok) setEditingDebit(null);
     return ok;
+  }
+
+  // Seal a debt's balance as of a day (and its plan). A rename drops the old row
+  // first — its history goes with it, since the balances belong to the debt.
+  async function saveDebt(
+    fields: {
+      name: string;
+      date: string;
+      balanceCents: number;
+      plan: DebtPlan | null;
+    },
+    from: string | null,
+  ): Promise<boolean> {
+    const ok = await saveConfig((base) => {
+      const renamed =
+        from !== null && from.toLowerCase() !== fields.name.toLowerCase();
+      return upsertDebt(
+        renamed ? removeDebt(base, from) : base,
+        fields.name,
+        fields.date,
+        fields.balanceCents,
+        fields.plan,
+      );
+    });
+    if (ok) setEditingDebt(null);
+    return ok;
+  }
+
+  async function deleteDebt(name: string): Promise<boolean> {
+    return saveConfig((base) => removeDebt(base, name));
   }
 
   async function deleteDebit(name: string) {
@@ -244,13 +284,19 @@ export function FinPanel({ offline }: { offline: boolean }) {
   // 0216).
   const burn = burnWeekly(cfg, today);
   const debits = cfg.debits ?? [];
+  const debts = cfg.debts ?? [];
+  const debtLabel = debts.length === 1 ? debts[0].name : "debts";
   // The WHOLE history; the chart slices its own ranges from it.
   const series = buildSplitSeries(cfg, today);
 
   return (
     <>
       {series.length >= 2 ? (
-        <NetWorthChart series={series} portfolio={cfg.portfolio} />
+        <NetWorthChart
+          series={series}
+          portfolio={cfg.portfolio}
+          debtLabel={debtLabel}
+        />
       ) : (
         <NetWorthHeader
           figure={aud(invested + cash + hisa)}
@@ -388,6 +434,78 @@ export function FinPanel({ offline }: { offline: boolean }) {
               read between two cash re-reads, so a late edit evens out · a typed
               pay replaces the usual for its week
             </p>
+          </div>
+        )}
+      </div>
+
+      {/* What is owed. Each balance is typed as of a day, from the lender's
+          statement; a plan steps it down on its own payment days. Net worth
+          up top is assets less these. */}
+      <div className="border-t border-hairline px-4 py-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-muted">
+            debts
+          </p>
+          {editingDebt === null && (
+            <button
+              type="button"
+              onClick={() => setEditingDebt("new")}
+              className="text-xs text-muted transition-colors hover:text-amber"
+            >
+              add
+            </button>
+          )}
+        </div>
+        {editingDebt !== null ? (
+          <DebtEditor
+            initial={editingDebt === "new" ? null : editingDebt}
+            taken={debts
+              .filter((d) => editingDebt === "new" || d !== editingDebt)
+              .map((d) => d.name.toLowerCase())}
+            today={today}
+            onSave={(fields) =>
+              saveDebt(fields, editingDebt === "new" ? null : editingDebt.name)
+            }
+            onCancel={() => setEditingDebt(null)}
+          />
+        ) : debts.length === 0 ? (
+          <p className="text-xs text-muted">nothing owed</p>
+        ) : (
+          <div className="space-y-2.5 text-sm">
+            {debts.map((d) => {
+              const typed = d.balances[d.balances.length - 1];
+              return (
+                <div key={d.name}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0 break-words text-fg/90">
+                      {d.name}
+                    </span>
+                    <span className="flex shrink-0 items-baseline gap-3">
+                      <span className="tabular-nums text-fg/90">
+                        −{aud(debtBalanceAt(d, today) / 100)}
+                      </span>
+                      <span className="flex gap-3 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setEditingDebt(d)}
+                          className="text-muted transition-colors hover:text-amber"
+                        >
+                          edit
+                        </button>
+                        <DeleteIncomeButton
+                          onConfirm={() => void deleteDebt(d.name)}
+                        />
+                      </span>
+                    </span>
+                  </div>
+                  <p className="text-[11px] tabular-nums text-muted">
+                    {`as of ${incomeDay(typed.date)}`}
+                    {d.plan &&
+                      ` · ${aud(d.plan.amountCents / 100)} every ${d.plan.everyDays} d from ${incomeDay(d.plan.next)}`}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -857,6 +975,189 @@ function DeleteIncomeButton({ onConfirm }: { onConfirm: () => void }) {
  * charge is seen). A name another row already holds is refused rather than
  * silently replacing it.
  */
+/** A debt: its name, the balance as of a day (from the lender's statement),
+ *  and an optional plan that takes a fixed amount off every N days. */
+function DebtEditor({
+  initial,
+  taken,
+  today,
+  onSave,
+  onCancel,
+}: {
+  initial: DebtEntry | null;
+  taken: string[];
+  today: string;
+  onSave: (fields: {
+    name: string;
+    date: string;
+    balanceCents: number;
+    plan: DebtPlan | null;
+  }) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [nameInput, setNameInput] = useState(initial?.name ?? "");
+  const [balanceInput, setBalanceInput] = useState(
+    initial ? String(debtBalanceAt(initial, today) / 100) : "",
+  );
+  const [dateInput, setDateInput] = useState(today);
+  const [planAmount, setPlanAmount] = useState(
+    initial?.plan ? String(initial.plan.amountCents / 100) : "",
+  );
+  const [planEvery, setPlanEvery] = useState(
+    initial?.plan ? String(initial.plan.everyDays) : "14",
+  );
+  const [planNext, setPlanNext] = useState(initial?.plan?.next ?? today);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const name = nameInput.trim();
+  const balanceNum = Number(balanceInput);
+  const amountNum = Number(planAmount);
+  const everyNum = Number(planEvery);
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const hasPlan = planAmount.trim() !== "";
+  const planValid =
+    !hasPlan ||
+    (Number.isFinite(amountNum) &&
+      amountNum > 0 &&
+      Number.isInteger(everyNum) &&
+      everyNum >= 1 &&
+      everyNum <= 31 &&
+      day.test(planNext));
+  const clash = taken.includes(name.toLowerCase());
+  const valid =
+    name.length > 0 &&
+    name.length <= 60 &&
+    !clash &&
+    balanceInput.trim() !== "" &&
+    Number.isFinite(balanceNum) &&
+    balanceNum >= 0 &&
+    day.test(dateInput) &&
+    dateInput <= today &&
+    planValid;
+
+  async function submit() {
+    if (!valid || saving) return;
+    setSaving(true);
+    setErr(false);
+    const ok = await onSave({
+      name,
+      date: dateInput,
+      balanceCents: Math.round(balanceNum * 100),
+      plan: hasPlan
+        ? {
+            amountCents: Math.round(amountNum * 100),
+            everyDays: everyNum,
+            next: planNext,
+          }
+        : null,
+    });
+    if (ok) return;
+    setErr(true);
+    setSaving(false);
+  }
+
+  const row = (label: string, el: ReactNode) => (
+    <label className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted">{label}</span>
+      {el}
+    </label>
+  );
+
+  return (
+    <div className="flex flex-col gap-2">
+      {row(
+        "name",
+        <input
+          value={nameInput}
+          disabled={saving}
+          onChange={(e) => setNameInput(e.target.value)}
+          placeholder="name"
+          className={`${input} w-36 text-right`}
+        />,
+      )}
+      {row(
+        "owed",
+        <input
+          value={balanceInput}
+          disabled={saving}
+          inputMode="decimal"
+          onChange={(e) => setBalanceInput(e.target.value)}
+          placeholder="0"
+          className={`${input} w-36 text-right`}
+        />,
+      )}
+      {row(
+        "as of",
+        <input
+          type="date"
+          value={dateInput}
+          max={today}
+          disabled={saving}
+          onChange={(e) => setDateInput(e.target.value)}
+          className={`${input} w-36 text-right`}
+        />,
+      )}
+      <p className="pt-1 text-[11px] text-muted">
+        plan — optional; leave the amount blank if there is none
+      </p>
+      {row(
+        "repayment",
+        <input
+          value={planAmount}
+          disabled={saving}
+          inputMode="decimal"
+          onChange={(e) => setPlanAmount(e.target.value)}
+          placeholder="none"
+          className={`${input} w-36 text-right`}
+        />,
+      )}
+      {hasPlan &&
+        row(
+          "every (days)",
+          <input
+            value={planEvery}
+            disabled={saving}
+            inputMode="numeric"
+            onChange={(e) => setPlanEvery(e.target.value)}
+            className={`${input} w-36 text-right`}
+          />,
+        )}
+      {hasPlan &&
+        row(
+          "next payment",
+          <input
+            type="date"
+            value={planNext}
+            disabled={saving}
+            onChange={(e) => setPlanNext(e.target.value)}
+            className={`${input} w-36 text-right`}
+          />,
+        )}
+      {clash && <p className="text-xs text-down">that name is taken</p>}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={submit}
+          disabled={saving || !valid}
+          className={btn}
+        >
+          {saving ? "sealing…" : "save"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className={btn}
+        >
+          cancel
+        </button>
+      </div>
+      {err && <p className="text-xs text-down">save failed — try again</p>}
+    </div>
+  );
+}
+
 function DebitEditor({
   initial,
   taken,
