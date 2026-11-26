@@ -32,15 +32,28 @@ export interface FinEntry {
   hisa: number;
   rate: number | null;
 }
-/** One dated invested total, appended at CSV import time. */
+/** One dated invested total, appended at CSV import time. `investedCents` is
+ *  the MARKET value (what net worth adds); `costCents` is the cost basis — what
+ *  was actually put in, the only figure the derived spend may subtract, since a
+ *  market move is neither money in nor money out. Absent on rows imported before
+ *  the cost basis was kept. */
 export interface InvestedEntry {
   date: string;
   investedCents: number;
+  costCents?: number;
 }
 /** One dated pay-in, logged from the panel on payday. */
 export interface IncomeEntry {
   date: string;
   amountCents: number;
+}
+/** The standing pay: `amountCents` assumed to land every `everyDays` days from
+ *  `since` (a Sydney calendar day, the first assumed payday). A logged income row
+ *  in the same pay cycle replaces the assumed figure for that cycle. */
+export interface UsualPay {
+  amountCents: number;
+  everyDays: number;
+  since: string;
 }
 /** The day of the newest invested total — the last weekly buy, since a total is
  *  appended at each CSV import — or null for a ledger with none. The series is
@@ -61,6 +74,9 @@ export interface FinConfig {
   /** Dated pay-ins — a third step function beside cash and invested. Optional:
    *  every envelope written before the income log existed simply has none. */
   income?: IncomeEntry[];
+  /** The standing pay assumed on every payday a row doesn't speak for. Optional:
+   *  without it, only logged pay-ins count, as before. */
+  usualPay?: UsualPay;
   /** Expected recurring debits (the premium, the subscriptions) — sorted by name,
    *  unique case-insensitively. Optional for the same reason `income` is. */
   debits?: DebitEntry[];
@@ -150,6 +166,7 @@ function isInvested(x: unknown): x is InvestedEntry[] {
   for (const e of x) {
     if (!isObj(e)) return false;
     if (!isYmd(e.date) || !isNonNegInt(e.investedCents)) return false;
+    if (e.costCents !== undefined && !isNonNegInt(e.costCents)) return false;
     if (!(e.date > prev)) return false;
     prev = e.date;
   }
@@ -220,6 +237,7 @@ export function isFinConfig(x: unknown): x is FinConfig {
     // rejects, exactly as `seq` does.
     (x.income === undefined || isIncome(x.income)) &&
     (x.debits === undefined || isDebits(x.debits)) &&
+    (x.usualPay === undefined || isUsualPay(x.usualPay)) &&
     (x.burnWeeklyCents === undefined || isPosInt(x.burnWeeklyCents)) &&
     (x.portfolio === null || isPortfolioSnapshot(x.portfolio))
   );
@@ -305,9 +323,75 @@ function weekStart(todayISO: string): string {
   return addDays(todayISO, -(WEEK_DAYS - 1));
 }
 
+/** Longest usual-pay cadence — monthly-ish. */
+const USUAL_PAY_EVERY_MAX = 31;
+
+/** A usual pay: whole cents above zero, a 1–31 day cadence, a real first day. */
+function isUsualPay(x: unknown): x is UsualPay {
+  return (
+    isObj(x) &&
+    isPosInt(x.amountCents) &&
+    isPosInt(x.everyDays) &&
+    x.everyDays <= USUAL_PAY_EVERY_MAX &&
+    isCalendarDay(x.since)
+  );
+}
+
+/** A new config with the usual pay set, or cleared with null. */
+export function setUsualPay(cfg: FinConfig, pay: UsualPay | null): FinConfig {
+  const next = { ...cfg };
+  if (pay === null) delete next.usualPay;
+  else next.usualPay = pay;
+  return next;
+}
+
+/** One pay-in as the readings count it — logged, or the usual pay assumed. */
+export interface PayEvent {
+  date: string;
+  amountCents: number;
+  assumed: boolean;
+}
+
 /**
- * What came IN over the trailing week: the newest income entry dated within it,
- * in cents. Null when the week holds none — the panel renders a dash rather than
+ * Every pay-in dated in `(from, to]`, ascending: each logged income row, plus the
+ * usual pay on each of its paydays that no logged row speaks for. A payday's
+ * cycle is centred on it (a weekly payday owns the three days either side), so a
+ * pay logged a day early or late still replaces that week's assumption rather
+ * than adding to it — and a logged row is the WHOLE cycle's income, so a week
+ * with a refund logs pay + refund, never the refund alone.
+ */
+export function payEvents(
+  cfg: FinConfig,
+  from: string,
+  to: string,
+): PayEvent[] {
+  const income = cfg.income ?? [];
+  const out: PayEvent[] = income
+    .filter((e) => e.date > from && e.date <= to)
+    .map((e) => ({ date: e.date, amountCents: e.amountCents, assumed: false }));
+  const usual = cfg.usualPay;
+  if (usual) {
+    const every = usual.everyDays;
+    const before = Math.floor(every / 2);
+    // The first payday after `from` — never before `since`.
+    const gap = daysBetween(usual.since, from);
+    let k = gap < 0 ? 0 : Math.floor(gap / every) + 1;
+    for (; ; k++) {
+      const day = addDays(usual.since, k * every);
+      if (day > to) break;
+      if (day <= from) continue;
+      const lo = addDays(day, -before);
+      const hi = addDays(day, every - before); // exclusive
+      if (income.some((e) => e.date >= lo && e.date < hi)) continue;
+      out.push({ date: day, amountCents: usual.amountCents, assumed: true });
+    }
+  }
+  return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/**
+ * The trailing week's pay, in cents: the newest pay-in (logged or assumed) dated
+ * within it. Null when the week holds none — the panel renders a dash rather than
  * a zero, because "nothing logged" and "nothing earned" are different facts and
  * only one of them is knowable here. Entries dated ahead of `todayISO` are
  * ignored: a future row is not this week's pay.
@@ -316,23 +400,33 @@ export function recoveredThisWeek(
   cfg: FinConfig,
   todayISO: string,
 ): number | null {
-  const cutoff = weekStart(todayISO);
-  let found: IncomeEntry | null = null;
-  for (const e of cfg.income ?? []) {
-    if (e.date < cutoff || e.date > todayISO) continue;
-    if (!found || e.date > found.date) found = e;
+  return payThisWeek(cfg, todayISO)?.amountCents ?? null;
+}
+
+/** The pay-in `recoveredThisWeek` reads, with its day and whether it was assumed. */
+export function payThisWeek(cfg: FinConfig, todayISO: string): PayEvent | null {
+  return payEvents(cfg, addDays(todayISO, -WEEK_DAYS), todayISO).at(-1) ?? null;
+}
+
+/** The cost basis in force on `date`, in cents: 0 before anything was bought,
+ *  null when the row in force predates the cost basis being kept. */
+function costAt(cfg: FinConfig, date: string): number | null {
+  let found: InvestedEntry | null = null;
+  for (const e of cfg.invested) {
+    if (e.date <= date) found = e;
+    else break; // ascending
   }
-  return found === null ? null : found.amountCents;
+  if (found === null) return 0;
+  return found.costCents ?? null;
 }
 
 /**
  * What was PUT AWAY over the trailing week: the newest invested step inside it,
  * less the step before it (less zero when it is the first step ever — the whole
  * figure was absorbed). Null when no import landed this week, which is the honest
- * answer during a week with no buy rather than a manufactured 0.
- *
- * The figure is a step DELTA, not a market movement: both ends come from the same
- * step function, so a week with no import reads as no step, never as a loss.
+ * answer during a week with no buy rather than a manufactured 0. Read off the
+ * cost basis when both steps carry one, so a market move is never "put away";
+ * older rows without it fall back to the market value they were stored with.
  */
 export function absorbedThisWeek(
   cfg: FinConfig,
@@ -345,59 +439,84 @@ export function absorbedThisWeek(
     if (e.date >= cutoff && e.date <= todayISO) at = i; // ascending — last wins
   }
   if (at < 0) return null;
-  const prev = at > 0 ? cfg.invested[at - 1].investedCents : 0;
-  return cfg.invested[at].investedCents - prev;
+  const now = cfg.invested[at];
+  const prev = at > 0 ? cfg.invested[at - 1] : null;
+  if (now.costCents !== undefined && (!prev || prev.costCents !== undefined))
+    return now.costCents - (prev?.costCents ?? 0);
+  return now.investedCents - (prev?.investedCents ?? 0);
 }
 
 /**
- * What went OUT over the trailing week, derived from the three figures the panel
- * already seals rather than typed: the week's pay, less what was put away, less
- * whatever the cash + HISA balance rose by (a fall counts as spent). Every card
- * charge, subscription and cash withdrawal lands in the balance without being
- * itemised. Null unless the week is fully knowable — a pay logged in it, a balance
- * re-read in it, and a balance in force before it — because a week whose balance
- * was never re-read would read as spend exactly equal to the pay. A week with no
- * import put nothing away, which IS zero here (the ledger's null is "no buy").
- * Negative is possible and honest: a refund or interest landed, and it says so.
+ * What went out between two balance re-reads `a` < `b`, in cents: the pay that
+ * came in over `(a, b]`, less what the cost basis rose by, less whatever the cash
+ * + HISA balance rose by (a fall counts as spent). Only the two ENDS are read, so
+ * a slip in between — a balance typed before a buy filled, a pay typed late —
+ * cancels out instead of landing on one week. Null when either end's cost basis
+ * is unknown. Negative is possible and honest: a refund or interest landed.
  */
-export function spentThisWeek(cfg: FinConfig, todayISO: string): number | null {
-  const pay = recoveredThisWeek(cfg, todayISO);
-  if (pay === null) return null;
-  const start = weekStart(todayISO);
-  const reread = cfg.entries.some((e) => e.date >= start && e.date <= todayISO);
-  const before = cashAt(cfg, addDays(start, -1));
-  const now = cashAt(cfg, todayISO);
-  if (!reread || !before || !now) return null;
-  const away = absorbedThisWeek(cfg, todayISO) ?? 0;
+function spentBetween(cfg: FinConfig, a: string, b: string): number | null {
+  const costA = costAt(cfg, a);
+  const costB = costAt(cfg, b);
+  const balA = cashAt(cfg, a);
+  const balB = cashAt(cfg, b);
+  if (costA === null || costB === null || !balA || !balB) return null;
+  const pay = payEvents(cfg, a, b).reduce((s, e) => s + e.amountCents, 0);
   const rise = Math.round(
-    (now.cash + now.hisa - before.cash - before.hisa) * 100,
+    (balB.cash + balB.hisa - balA.cash - balA.hisa) * 100,
   );
-  return pay - away - rise;
+  return pay - (costB - costA) - rise;
 }
 
-/** How many trailing weeks the burn averages over — enough to swallow the monthly
- *  charges that land in one week and not the next. */
-const BURN_WEEKS = 4;
+/** A spend read over a span of re-reads. `cents` is per week; `totalCents` is
+ *  the whole span, `from` → `to` its two re-read days. */
+export interface SpendRead {
+  cents: number;
+  weeks: number;
+  totalCents: number;
+  from: string;
+  to: string;
+}
+
+/** The span the burn reads over — long enough to swallow the monthly charges
+ *  that land in one week and not the next, and to thin out a slipped end. */
+const BURN_DAYS = 28;
+
+/** The re-read days on or before `todayISO` whose cost basis is known. */
+function knownRereads(cfg: FinConfig, todayISO: string): string[] {
+  return cfg.entries
+    .filter((e) => e.date <= todayISO && costAt(cfg, e.date) !== null)
+    .map((e) => e.date);
+}
+
+/** The read over `a` → `b`, or null when either end is unknowable. */
+function spendRead(cfg: FinConfig, a: string, b: string): SpendRead | null {
+  const total = spentBetween(cfg, a, b);
+  if (total === null) return null;
+  const days = daysBetween(a, b);
+  return {
+    cents: Math.round((total * WEEK_DAYS) / days),
+    weeks: Math.max(1, Math.round(days / WEEK_DAYS)),
+    totalCents: total,
+    from: a,
+    to: b,
+  };
+}
 
 /**
- * The weekly burn as the site divides by it: the mean of `spentThisWeek` over the
- * trailing BURN_WEEKS anchors, over however many of them are knowable. `weeks`
- * says how many went in so a reader can tell a one-week figure from a settled
- * average. Null until a single week is knowable — never a figure the site made up.
+ * The weekly burn as the site divides by it: the spend between the newest
+ * balance re-read and the re-read about four weeks before it, per week. Falls back
+ * to the longest shorter span (a week at least) while the history is young;
+ * `weeks` says how long the span is so a reader can tell a one-week figure from a
+ * settled one. Null until two re-reads a week apart are knowable.
  */
-export function burnWeekly(
-  cfg: FinConfig,
-  todayISO: string,
-  weeks: number = BURN_WEEKS,
-): { cents: number; weeks: number } | null {
-  const spent: number[] = [];
-  for (let k = 0; k < weeks; k++) {
-    const s = spentThisWeek(cfg, addDays(todayISO, -WEEK_DAYS * k));
-    if (s !== null) spent.push(s);
-  }
-  if (spent.length === 0) return null;
-  const sum = spent.reduce((a, b) => a + b, 0);
-  return { cents: Math.round(sum / spent.length), weeks: spent.length };
+export function burnWeekly(cfg: FinConfig, todayISO: string): SpendRead | null {
+  const days = knownRereads(cfg, todayISO);
+  const b = days.at(-1);
+  if (b === undefined) return null;
+  const starts = days.filter((d) => daysBetween(d, b) >= WEEK_DAYS);
+  if (starts.length === 0) return null;
+  const settled = starts.filter((d) => daysBetween(d, b) >= BURN_DAYS).at(-1);
+  return spendRead(cfg, settled ?? starts[0], b);
 }
 
 /** The first day of `todayISO`'s calendar quarter — Jan, Apr, Jul or Oct 1st. */
@@ -408,30 +527,25 @@ export function quarterStart(todayISO: string): string {
 }
 
 /**
- * What went out so far this quarter: the SUM of the knowable `spentThisWeek`
- * readings at today, today − 7, … for every anchor whose trailing week starts on or
- * after the quarter's first day — so no week straddling the quarter line counts.
- * `weeks` says how many went in; an unknowable week adds nothing rather than a
- * zero the site made up. Null until one week of the quarter is knowable.
+ * What went out so far this quarter: the spend from the re-read in force at the
+ * quarter's first day (or, when that one's cost basis is unknown, the first
+ * knowable re-read inside the quarter) to the newest re-read. `weeks` says how
+ * long the span is. Null until the quarter holds a knowable span.
  */
 export function spentThisQuarter(
   cfg: FinConfig,
   todayISO: string,
 ): { cents: number; weeks: number } | null {
   const start = quarterStart(todayISO);
-  let cents = 0;
-  let weeks = 0;
-  for (
-    let anchor = todayISO;
-    weekStart(anchor) >= start;
-    anchor = addDays(anchor, -WEEK_DAYS)
-  ) {
-    const s = spentThisWeek(cfg, anchor);
-    if (s === null) continue;
-    cents += s;
-    weeks++;
-  }
-  return weeks === 0 ? null : { cents, weeks };
+  const days = knownRereads(cfg, todayISO);
+  const b = days.at(-1);
+  if (b === undefined || b <= start) return null;
+  const a =
+    days.filter((d) => d <= start).at(-1) ??
+    days.find((d) => d < b && d > start);
+  if (a === undefined) return null;
+  const read = spendRead(cfg, a, b);
+  return read && { cents: read.totalCents, weeks: read.weeks };
 }
 
 /** How many weeks of flow the /aperture strips read back over. */
@@ -472,6 +586,23 @@ export function weeklyFlow(
 }
 
 /**
+ * The newest invested row with its cost basis filled from the stored snapshot,
+ * when it predates the cost basis being kept. Safe only because the snapshot and
+ * the newest row are written by the same import — and checked: the snapshot's
+ * market value must match the row's, or the row is left alone.
+ */
+function withCostBackfill(cfg: FinConfig): FinConfig {
+  const last = cfg.invested.at(-1);
+  const snap = cfg.portfolio;
+  if (!last || last.costCents !== undefined || !snap) return cfg;
+  if (Math.round(snap.totals.value * 100) !== last.investedCents) return cfg;
+  return upsertInvested(cfg, {
+    ...last,
+    costCents: Math.round(snap.totals.cost * 100),
+  });
+}
+
+/**
  * One CSV import, as a pure config transform: parse the CMC export, stamp it
  * `asOf`, store it as the current snapshot, and upsert `today`'s invested total
  * (dollars → cents, rounded, so float drift can't leak into the series). Null when
@@ -487,9 +618,10 @@ export function importPortfolioCsv(
   if (!parsed) return null;
   const snapshot: Portfolio = { ...parsed, asOf: opts.asOf };
   return {
-    ...upsertInvested(cfg, {
+    ...upsertInvested(withCostBackfill(cfg), {
       date: opts.today,
       investedCents: Math.round(parsed.totals.value * 100),
+      costCents: Math.round(parsed.totals.cost * 100),
     }),
     portfolio: snapshot,
   };
