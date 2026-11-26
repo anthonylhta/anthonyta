@@ -106,7 +106,7 @@ export function AgendaRow({
           shown.map((e) => (
             <div key={e.id} className="flex items-baseline gap-2.5 py-0.5">
               <span
-                className={`w-9 shrink-0 text-[11px] ${
+                className={`w-11 shrink-0 text-[11px] ${
                   e.date === today ? "text-amber" : "text-muted/60"
                 }`}
               >
