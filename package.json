@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' next dev",
-    "build": "NODE_OPTIONS='--dns-result-order=ipv4first --no-network-family-autoselection' next build",
+    "build": "NODE_OPTIONS='--dns-result-order=ipv4first' next build",
     "start": "next start",
     "lint": "eslint",
     "check": "tsc --noEmit",
