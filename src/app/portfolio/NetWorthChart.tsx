@@ -83,9 +83,12 @@ const toneOf = (n: number) =>
 export function NetWorthChart({
   series,
   portfolio,
+  debtLabel,
 }: {
   series: SplitPoint[];
   portfolio: Portfolio | null;
+  /** What to call the debts line: the one debt's name, or "debts" for several. */
+  debtLabel: string;
 }) {
   const stored = useStoredMode();
   const [picked, setPicked] = useState<ChartMode | null>(null);
@@ -99,8 +102,13 @@ export function NetWorthChart({
   const last = pts[pts.length - 1];
   const cur = at !== null && pts[at] ? pts[at] : last;
   const scrubbing = cur !== last;
-  const delta = cur.totalCents - first.totalCents;
-  const pct = first.totalCents > 0 ? (delta / first.totalCents) * 100 : 0;
+  // The headline is the NET — assets less debts. A % of a net start is only
+  // meaningful with no debt in the range: a debt can leave the start near or
+  // below zero, where any move reads as hundreds of percent.
+  const owes = pts.some((p) => p.debtCents > 0);
+  const delta = cur.netCents - first.netCents;
+  const pct =
+    !owes && first.netCents > 0 ? (delta / first.netCents) * 100 : null;
   const word = RANGES.find((r) => r.key === range)?.word ?? "";
 
   // The y labels sit in a gutter on the right, so they never ride the line.
@@ -214,13 +222,13 @@ export function NetWorthChart({
               net worth
             </p>
             <p className="text-3xl tabular-nums text-fg sm:text-4xl">
-              {aud(cur.totalCents / 100)}
+              {aud(cur.netCents / 100)}
             </p>
             <p className="mt-1 text-[13px] tabular-nums">
               <span className={toneOf(delta)}>
                 {delta > 0 ? "▲" : delta < 0 ? "▼" : "·"} {sign(delta)}
-                {aud(Math.abs(delta) / 100)} ({sign(pct)}
-                {Math.abs(pct).toFixed(1)}%)
+                {aud(Math.abs(delta) / 100)}
+                {pct !== null && ` (${sign(pct)}${Math.abs(pct).toFixed(1)}%)`}
               </span>{" "}
               {scrubbing ? (
                 <button
@@ -235,6 +243,15 @@ export function NetWorthChart({
                 <span className="text-muted">{word}</span>
               )}
             </p>
+            {owes && (
+              <p className="mt-0.5 text-xs tabular-nums">
+                <span className="text-muted">assets</span>{" "}
+                {aud(cur.totalCents / 100)}{" "}
+                <span className="whitespace-nowrap text-muted">
+                  · {debtLabel} −{aud(cur.debtCents / 100)}
+                </span>
+              </p>
+            )}
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             {modes}
@@ -247,7 +264,7 @@ export function NetWorthChart({
         <div
           ref={box}
           className={`relative mt-3 h-[200px] cursor-crosshair touch-pan-y select-none sm:h-[260px] ${toneOf(
-            pts.at(-1)!.totalCents - first.totalCents,
+            pts.at(-1)!.netCents - first.netCents,
           )}`}
           onPointerDown={(e) => {
             e.currentTarget.setPointerCapture(e.pointerId);
@@ -342,11 +359,21 @@ export function NetWorthChart({
                     strokeWidth={1.25}
                   />
                   <path
-                    d={g.line}
+                    d={g.assets}
                     fill="none"
                     className="stroke-fg"
                     strokeWidth={1.75}
                   />
+                  {/* after debts: the net, dashed under the assets' line */}
+                  {owes && (
+                    <path
+                      d={g.line}
+                      fill="none"
+                      className="stroke-fg/80"
+                      strokeWidth={1.25}
+                      strokeDasharray="4 3"
+                    />
+                  )}
                 </>
               )}
               {scrubbing && (
@@ -372,7 +399,11 @@ export function NetWorthChart({
         <div className="mt-2.5 sm:hidden">{tabs}</div>
       </div>
 
-      <div className="grid border-b border-hairline sm:grid-cols-2 sm:divide-x sm:divide-hairline">
+      <div
+        className={`grid border-b border-hairline sm:divide-x sm:divide-hairline ${
+          owes ? "sm:grid-cols-3" : "sm:grid-cols-2"
+        }`}
+      >
         {layer(
           "investments",
           "bg-invested",
@@ -386,6 +417,8 @@ export function NetWorthChart({
           first.savingsCents,
           `HISA ${aud(cur.hisaCents / 100)} · cash ${aud(cur.cashCents / 100)}`,
         )}
+        {/* negated, so a debt going down reads as a green move */}
+        {owes && layer(debtLabel, "bg-muted", -cur.debtCents, -first.debtCents)}
       </div>
 
       {t && (

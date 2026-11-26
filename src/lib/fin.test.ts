@@ -7,6 +7,8 @@ import {
   cashAt,
   committedWeeklyCents,
   debitDays,
+  debtBalanceAt,
+  debtsAt,
   debitDueDay,
   debitLogKey,
   debitNextDay,
@@ -24,6 +26,8 @@ import {
   quarterStart,
   recoveredThisWeek,
   removeDebit,
+  removeDebt,
+  upsertDebt,
   payEvents,
   payThisWeek,
   setUsualPay,
@@ -39,6 +43,7 @@ import {
   upsertInvested,
   upsertIndexDay,
   type DebitEntry,
+  type DebtEntry,
   type FinConfig,
   type NetWorthPoint,
   type SnapIndex,
@@ -1231,5 +1236,91 @@ describe("recurring debits", () => {
     expect(committedWeeklyCents(cfg2())).toBe(0);
     // 6420 × 7 / 14 = 3210; 3000 × 7 / 30 = 700
     expect(committedWeeklyCents(cfg2({ debits: [phone, premium] }))).toBe(3910);
+  });
+});
+
+describe("debts", () => {
+  const held: DebtEntry = {
+    name: "loan a",
+    balances: [{ date: "2026-08-20", balanceCents: 2000000 }],
+  };
+  const planned: DebtEntry = {
+    name: "loan b",
+    balances: [{ date: "2026-12-01", balanceCents: 120000 }],
+    plan: { amountCents: 30000, everyDays: 14, next: "2026-12-15" },
+  };
+
+  it("reads 0 before the first balance, then the typed balance", () => {
+    expect(debtBalanceAt(held, "2026-08-19")).toBe(0);
+    expect(debtBalanceAt(held, "2026-08-20")).toBe(2000000);
+    expect(debtBalanceAt(held, "2027-01-01")).toBe(2000000);
+  });
+
+  it("steps a planned debt down on each payment day, never below zero", () => {
+    expect(debtBalanceAt(planned, "2026-12-14")).toBe(120000);
+    expect(debtBalanceAt(planned, "2026-12-15")).toBe(90000);
+    expect(debtBalanceAt(planned, "2026-12-28")).toBe(90000);
+    expect(debtBalanceAt(planned, "2026-12-29")).toBe(60000);
+    expect(debtBalanceAt(planned, "2027-02-23")).toBe(0); // 5 payments > 4 owed
+  });
+
+  it("counts only payments after a re-typed balance", () => {
+    const retyped: DebtEntry = {
+      ...planned,
+      balances: [
+        ...planned.balances,
+        { date: "2026-12-20", balanceCents: 95000 },
+      ],
+    };
+    // 12-15 is before the 12-20 re-type, so only 12-29 comes off it
+    expect(debtBalanceAt(retyped, "2026-12-29")).toBe(65000);
+  });
+
+  it("sums every debt on a day", () => {
+    expect(debtsAt(cfg2({ debts: [held, planned] }), "2026-12-15")).toBe(
+      2090000,
+    );
+    expect(debtsAt(cfg2(), "2026-12-15")).toBe(0);
+  });
+
+  it("upserts by name: new in name order, existing gets a dated balance", () => {
+    let c = upsertDebt(cfg2(), "loan b", "2026-12-01", 120000, planned.plan);
+    c = upsertDebt(c, "loan a", "2026-08-20", 2000000);
+    expect(c.debts?.map((d) => d.name)).toEqual(["loan a", "loan b"]);
+    c = upsertDebt(c, "Loan B", "2026-12-20", 95000);
+    const p = c.debts?.find((d) => d.name === "loan b");
+    expect(p?.balances).toHaveLength(2);
+    expect(p?.plan).toEqual(planned.plan); // undefined keeps the plan
+    c = upsertDebt(c, "loan b", "2026-12-20", 95000, null);
+    expect(c.debts?.find((d) => d.name === "loan b")?.plan).toBeUndefined();
+    expect(isFinConfig(c)).toBe(true);
+    expect(removeDebt(c, "LOAN B").debts?.map((d) => d.name)).toEqual([
+      "loan a",
+    ]);
+  });
+
+  it("validates the envelope field", () => {
+    expect(isFinConfig(cfg2({ debts: [held, planned] }))).toBe(true);
+    // out of name order, an empty history, a zero plan, a fake day
+    expect(isFinConfig(cfg2({ debts: [planned, held] }))).toBe(false);
+    expect(isFinConfig(cfg2({ debts: [{ ...held, balances: [] }] }))).toBe(
+      false,
+    );
+    expect(
+      isFinConfig(
+        cfg2({
+          debts: [{ ...planned, plan: { ...planned.plan!, amountCents: 0 } }],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isFinConfig(
+        cfg2({
+          debts: [
+            { ...held, balances: [{ date: "2026-02-30", balanceCents: 1 }] },
+          ],
+        }),
+      ),
+    ).toBe(false);
   });
 });

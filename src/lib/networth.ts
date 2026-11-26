@@ -1,4 +1,4 @@
-import { cashAt, investedAt, type FinConfig } from "./fin";
+import { cashAt, debtsAt, investedAt, type FinConfig } from "./fin";
 
 /**
  * The /portfolio net-worth chart, as pure functions: the per-day series split
@@ -7,14 +7,19 @@ import { cashAt, investedAt, type FinConfig } from "./fin";
  */
 
 /** One day of net worth, split: investments (market value) and savings (cash +
- *  HISA, kept apart only for the stats line under the chart). Cents throughout. */
+ *  HISA, kept apart only for the stats line under the chart) make the assets;
+ *  debts come off them to give the net. Cents throughout. */
 export interface SplitPoint {
   date: string;
   investedCents: number;
   hisaCents: number;
   cashCents: number;
   savingsCents: number;
+  /** Assets: investments + savings. */
   totalCents: number;
+  debtCents: number;
+  /** What is really yours: assets − debts. */
+  netCents: number;
 }
 
 function addDays(ymd: string, delta: number): string {
@@ -38,13 +43,17 @@ export function buildSplitSeries(cfg: FinConfig, today: string): SplitPoint[] {
     const cashCents = Math.round((c?.cash ?? 0) * 100);
     const hisaCents = Math.round((c?.hisa ?? 0) * 100);
     const investedCents = investedAt(cfg, d);
+    const debtCents = debtsAt(cfg, d);
+    const totalCents = investedCents + cashCents + hisaCents;
     out.push({
       date: d,
       investedCents,
       hisaCents,
       cashCents,
       savingsCents: cashCents + hisaCents,
-      totalCents: investedCents + cashCents + hisaCents,
+      totalCents,
+      debtCents,
+      netCents: totalCents - debtCents,
     });
   }
   return out;
@@ -79,26 +88,29 @@ export function niceStep(raw: number): number {
   return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
 }
 
-/** An axis label in whole thousands: 4000000 cents → "$40k". Under $1k it reads
- *  in dollars. */
+/** An axis label in whole thousands: 4000000 cents → "$40k", −1000000 → "−$10k".
+ *  Under $1k it reads in dollars. */
 export function compactAud(cents: number): string {
-  const dollars = cents / 100;
-  if (Math.abs(dollars) < 1000) return `$${Math.round(dollars)}`;
+  const dollars = Math.abs(cents) / 100;
+  const sign = cents < 0 ? "−" : "";
+  if (dollars < 1000) return `${sign}$${Math.round(dollars)}`;
   const k = dollars / 1000;
-  return `$${Number.isInteger(k) ? k : k.toFixed(1)}k`;
+  return `${sign}$${Number.isInteger(k) ? k : k.toFixed(1)}k`;
 }
 
 export type ChartMode = "line" | "split";
 
 export interface ChartGeometry {
-  /** The total's polyline as an SVG path. */
+  /** The net's polyline as an SVG path. */
   line: string;
   /** The area under the line (line mode) — closed to the plot's floor. */
   area: string;
   /** Split mode: the investments band and the savings band stacked on it. */
   invested: string;
   savings: string;
-  /** The y of the range's first total — the dashed "where you started" line. */
+  /** The assets' polyline — the top of the split stack. */
+  assets: string;
+  /** The y of the range's first net — the dashed "where you started" line. */
   baseY: number;
   /** Gridlines, bottom to top. */
   ticks: { y: number; label: string }[];
@@ -127,12 +139,17 @@ export function chartGeometry(
   const top = 10;
   const floor = height - bottom;
   const plotW = Math.max(1, width - gutter);
-  const totals = pts.map((p) => p.totalCents);
-  let lo = Math.min(...totals);
-  let hi = Math.max(...totals);
+  const nets = pts.map((p) => p.netCents);
+  let lo = Math.min(...nets);
+  let hi = Math.max(...nets);
+  if (mode === "split") {
+    // the stack runs from $0 up to the assets; the net may sit below zero
+    lo = Math.min(0, lo);
+    hi = Math.max(hi, ...pts.map((p) => p.totalCents));
+  }
   const span = hi - lo || Math.max(1, Math.abs(hi) * 0.1);
   if (mode === "split") {
-    lo = 0;
+    lo = lo < 0 ? lo - span * 0.04 : 0;
     hi = hi + span * 0.06;
   } else {
     lo = lo - span * 0.12;
@@ -151,12 +168,12 @@ export function chartGeometry(
       })
       .join("");
 
-  const step = niceStep((hi - lo) / 3);
+  const step = niceStep((hi - lo) / 4);
   const ticks: { y: number; label: string }[] = [];
   for (let g = Math.ceil(lo / step) * step; g <= hi; g += step)
     ticks.push({ y: r(y(g)), label: compactAud(g) });
 
-  const line = n ? trace((p) => p.totalCents) : "";
+  const line = n ? trace((p) => p.netCents) : "";
   return {
     line,
     area: n ? `${line}L${r(x(n - 1))},${floor}L${r(x(0))},${floor}Z` : "",
@@ -164,9 +181,10 @@ export function chartGeometry(
     savings: n
       ? `${trace((p) => p.totalCents)}${back((p) => p.investedCents)}Z`
       : "",
-    baseY: n ? r(y(pts[0].totalCents)) : floor,
+    assets: n ? trace((p) => p.totalCents) : "",
+    baseY: n ? r(y(pts[0].netCents)) : floor,
     ticks,
-    points: pts.map((p, i) => ({ x: r(x(i)), y: r(y(p.totalCents)) })),
+    points: pts.map((p, i) => ({ x: r(x(i)), y: r(y(p.netCents)) })),
     floor,
   };
 }
