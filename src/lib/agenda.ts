@@ -256,12 +256,15 @@ export function nextDates(from: string, n: number): string[] {
   return Array.from({ length: n }, (_, i) => addDays(from, i));
 }
 
-/** The day chip: "today", "tmr", or the weekday ("wed"). Derived from the date
- *  string by UTC math — no clock is consulted, so the label can't disagree with
- *  the day the event says it is. */
+/** The day chip: "today", "tmr", the weekday ("wed") inside the coming week,
+ *  and the weekday plus day of the month ("wed 9") from a week out — past that a
+ *  bare weekday could mean this one or the next. Derived from the date string by
+ *  UTC math — no clock is consulted, so the label can't disagree with the day the
+ *  event says it is. */
 export function dayLabel(date: string, today: string): string {
   if (date === today) return "today";
   if (date === addDays(today, 1)) return "tmr";
+  if (date >= addDays(today, 7)) return shortDayLabel(date);
   return WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 }
 

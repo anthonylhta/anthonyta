@@ -515,6 +515,12 @@ describe("dayLabel", () => {
     expect(dayLabel("2026-07-26", "2026-07-20")).toBe("sun");
   });
 
+  it("adds the day of the month from a week out", () => {
+    expect(dayLabel("2026-07-26", "2026-07-20")).toBe("sun");
+    expect(dayLabel("2026-07-27", "2026-07-20")).toBe("mon 27");
+    expect(dayLabel("2026-08-03", "2026-07-20")).toBe("mon 3");
+  });
+
   it("reads tomorrow across a month boundary", () => {
     expect(dayLabel("2026-08-01", "2026-07-31")).toBe("tmr");
     expect(dayLabel("2026-08-02", "2026-07-31")).toBe("sun");
