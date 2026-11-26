@@ -22,14 +22,6 @@ export function PortfolioCard({ p }: { p: Portfolio }) {
         <span className={`tabular-nums ${tone(t.dayGain)}`}>
           {arrow(t.dayGain)} {aud(Math.abs(t.dayGain))} today
         </span>
-        <span className="text-xs text-muted">
-          cost {aud(t.cost)} · P&amp;L{" "}
-          <span className={tone(t.pnl)}>
-            {t.pnl >= 0 ? "+" : "−"}
-            {aud(Math.abs(t.pnl))} ({t.pnlPct >= 0 ? "+" : ""}
-            {t.pnlPct.toFixed(1)}%)
-          </span>
-        </span>
       </div>
 
       {/* holdings */}
